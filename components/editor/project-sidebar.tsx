@@ -1,20 +1,31 @@
 "use client"
 
-import { FolderOpen, Plus, Users, X } from "lucide-react"
+import { FolderOpen, Pencil, Plus, Trash2, Users, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import type { ProjectSummary } from "@/types/project"
 
 interface ProjectSidebarProps {
   isOpen: boolean
   onClose: () => void
+  ownedProjects: ProjectSummary[]
+  sharedProjects: ProjectSummary[]
+  onCreateProject: () => void
+  onRenameProject: (project: ProjectSummary) => void
+  onDeleteProject: (project: ProjectSummary) => void
   className?: string
 }
 
 export function ProjectSidebar({
   isOpen,
   onClose,
+  ownedProjects,
+  sharedProjects,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
   className,
 }: ProjectSidebarProps) {
   return (
@@ -46,24 +57,88 @@ export function ProjectSidebar({
           <TabsTrigger value="shared">Shared</TabsTrigger>
         </TabsList>
         <TabsContent value="mine">
-          <EmptyState
-            icon={<FolderOpen className="h-8 w-8 text-copy-faint" />}
-            message="No projects yet"
-          />
+          {ownedProjects.length === 0 ? (
+            <EmptyState
+              icon={<FolderOpen className="h-8 w-8 text-copy-faint" />}
+              message="No projects yet"
+            />
+          ) : (
+            <ProjectList
+              label="My projects"
+              projects={ownedProjects}
+              onRename={onRenameProject}
+              onDelete={onDeleteProject}
+            />
+          )}
         </TabsContent>
         <TabsContent value="shared">
-          <EmptyState
-            icon={<Users className="h-8 w-8 text-copy-faint" />}
-            message="Nothing shared with you"
-          />
+          {sharedProjects.length === 0 ? (
+            <EmptyState
+              icon={<Users className="h-8 w-8 text-copy-faint" />}
+              message="Nothing shared with you"
+            />
+          ) : (
+            // No rename/delete: collaborators do not own these projects.
+            <ProjectList label="Shared with me" projects={sharedProjects} />
+          )}
         </TabsContent>
       </Tabs>
 
-      <Button className="w-full">
+      <Button className="w-full" onClick={onCreateProject}>
         <Plus className="h-4 w-4" />
         New Project
       </Button>
     </aside>
+  )
+}
+
+function ProjectList({
+  label,
+  projects,
+  onRename,
+  onDelete,
+}: {
+  label: string
+  projects: ProjectSummary[]
+  onRename?: (project: ProjectSummary) => void
+  onDelete?: (project: ProjectSummary) => void
+}) {
+  return (
+    <ul aria-label={label} className="flex h-full flex-col gap-0.5 overflow-y-auto">
+      {projects.map((project) => (
+        <li
+          key={project.id}
+          className="flex items-center gap-1 rounded-xl px-2 py-1.5 transition-colors hover:bg-subtle"
+        >
+          {/* Opening a project arrives with the workspace route in 08. */}
+          <span className="min-w-0 flex-1 truncate text-sm text-copy-secondary">
+            {project.name}
+          </span>
+
+          {onRename ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => onRename(project)}
+              aria-label={`Rename ${project.name}`}
+            >
+              <Pencil className="h-3 w-3 text-copy-muted" />
+            </Button>
+          ) : null}
+
+          {onDelete ? (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => onDelete(project)}
+              aria-label={`Delete ${project.name}`}
+            >
+              <Trash2 className="h-3 w-3 text-copy-muted" />
+            </Button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   )
 }
 

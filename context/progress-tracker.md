@@ -8,9 +8,17 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- `03-auth` complete against its spec, and the `/editor` home shell is live so the authenticated redirect lands on a real route. Data layer is the next gap — see Next Up.
+- `04-project-dialogs` complete against its spec: the editor home has its create prompt, all three project dialogs exist, and the sidebar renders project lists with owner-only actions — all on mock data. Everything is wired to one hook, so `05-prisma` → `06-project-apis` → `07-wire-editor-home` only have to replace the data source and the no-op mutations.
 
 ## Completed
+
+- `04-project-dialogs` — project dialogs and editor home, mock data only, no API calls or persistence.
+  - `types/project.ts` — `ProjectSummary` (`id`, `name`), the subset of the future Prisma `Project` the chrome renders.
+  - `lib/mock-projects.ts` — `MOCK_OWNED_PROJECTS` (3) and `MOCK_SHARED_PROJECTS` (1). Imported by `app/editor/page.tsx` and passed down as props, so `07` swaps the import for real queries and nothing below changes.
+  - `hooks/use-project-actions.ts` — `useProjectActions()` owns dialog state (`{kind: "create"} | {kind: "rename" | "delete", project}`), the name input, the derived `slug`, and an `isPending` flag. Also exports `slugify()` and the `ProjectActions` type. `submit()` currently just closes the dialog.
+  - `components/editor/project-dialogs.tsx` — all three dialogs, each built on the existing `EditorDialog`. Create: name input + live `/editor/{slug}` preview, submit disabled while the slug is empty. Rename: prefilled auto-focused input, current name in the description. Delete: description only, no input, `variant="destructive"` confirm.
+  - `components/editor/project-sidebar.tsx` — new `ownedProjects` / `sharedProjects` / `onCreateProject` / `onRenameProject` / `onDeleteProject` props. Renders a `ProjectList` (`<ul>`, `overflow-y-auto`) when a tab has projects and the existing `EmptyState` when it does not. Rename/delete icon buttons render only when the handlers are passed, so the Shared tab has no actions.
+  - `components/editor/editor-shell.tsx` — takes both project lists, calls `useProjectActions()`, renders the centered home content (`h1` + description + `New Project` button, no card) and `ProjectDialogs`. Adds a `md:hidden` scrim button behind the open sidebar for tap-to-close on small screens.
 
 - `editor-home-shell` (partial slice of `07`/`08` — chrome only, no data) — `app/editor/page.tsx` renders `components/editor/editor-shell.tsx`. The page is a Server Component; the shell is a client component owning `isSidebarOpen` and wiring `EditorNavbar` + `ProjectSidebar` together for the first time. Work area is `relative` so the sidebar overlays the canvas rather than reflowing it. Canvas region is a placeholder with a centered prompt. Verified in-browser by the project owner: sidebar toggle, slide-over behaviour, close button, both tabs, and `UserButton` all work signed-in.
 
@@ -30,7 +38,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- `04-project-dialogs` → `05-prisma` → `06-project-apis` → `07-wire-editor-home`. The editor home shell now exists but has no data layer: `New Project` is inert and both sidebar tabs render empty states. `07` replaces those with real owned/shared project lists fetched server-side in `app/editor/page.tsx`, which is why that page was kept a Server Component.
+- `05-prisma` → `06-project-apis` → `07-wire-editor-home`. The UI is complete but inert: every project in the sidebar is mock data and `submit()` in `useProjectActions` only closes the dialog. `07` replaces `lib/mock-projects.ts` with server-side queries in `app/editor/page.tsx` (which is why that page is still a Server Component), adds the unique room-ID suffix on top of `slugify()`, and turns `submit()` into the POST/PATCH/DELETE branch. `isPending` is already threaded into the dialog buttons for that step.
 - `08-editor-workspace-shell` — `/editor/[roomId]`, `AccessDenied`, and `lib/project-access.ts` are all still outstanding. They need Prisma before they can do the owner/collaborator checks the spec requires.
 - `EditorNavbar` now imports `UserButton`, so it can no longer render outside a `ClerkProvider`. Any future harness or story for the navbar must be mounted under the root layout.
 
@@ -59,17 +67,36 @@ Update this file whenever the current phase, active feature, or implementation s
 - Supporting text on the auth panel uses `--text-muted`, never `--text-faint`. Measured against `--bg-surface`, muted lands at 4.85:1 (passes AA) while faint is roughly 3.2:1 and fails. `--text-faint` is for non-text decoration only.
 - Auth entrance motion is gated behind Tailwind's `motion-safe:` variant rather than a hand-written `prefers-reduced-motion` block, and reuses the already-installed `tw-animate-css` utilities instead of new keyframes.
 
+- One hook (`useProjectActions`) owns create/rename/delete dialog state for the whole editor, and both entry points (editor home button, sidebar `New Project`) call the same `openCreate`. The dialogs are rendered once in `EditorShell`, not per sidebar item, so the item actions only have to report which project was targeted.
+- The dialog's target project lives in the `dialog` state union rather than in a separate `selectedProject` state, which makes "create has no target, rename/delete always do" a type-level fact instead of a runtime assumption.
+- Dialog forms submit natively: the `<form>` sits in the dialog body with an `id`, and the footer's confirm button is a `type="submit"` with a matching `form` attribute. That gives Enter-to-submit in the rename dialog with no key handler, and it avoids adding form support to `EditorDialog`.
+- Sidebar item actions are two always-visible ghost icon buttons, not a dropdown menu. No menu primitive is installed, and hover-revealed actions are unreachable on touch — which matters because the sidebar is the primary mobile navigation.
+- Owner-only actions are enforced by prop absence: `ProjectList` renders the rename/delete buttons only when `onRename`/`onDelete` are passed, and the Shared tab passes neither. Once real collaborator data exists, the server-side ownership check is still the authority — this is presentation only.
+- The mobile scrim is a `md:hidden` `<button>` rather than a div, so tap-to-close is also keyboard- and screen-reader-reachable. It is `z-30`, below the sidebar's `z-40`.
 - Editor chrome components are presentational and stateless. `EditorNavbar` and `ProjectSidebar` take `isOpen` / `onToggle` / `onClose` from a parent; sidebar open state is owned by the workspace shell (`08-editor-workspace-shell`), not by the chrome itself.
 - The sidebar is an `absolute inset-y-0 left-0` overlay inside the editor's relative container, animated with `translate-x`. It stays mounted so the slide transition runs, and carries `inert` while closed so hidden content is out of the tab order.
 - `EditorDialog` wraps the shadcn `Dialog` primitive rather than editing `components/ui/dialog.tsx`. The primitive stays as generated; project styling (`rounded-3xl`, `bg-elevated`, `border-surface-border`) is applied through `className` at the wrapper.
 - Dark-only theme implemented without a light palette. The `ui-context.md` colors live in `:root` as the single source of truth, and shadcn's semantic tokens (`--background`, `--card`, `--primary`, …) are mapped onto them rather than given independent values. Changing a palette entry updates both layers at once.
 - `<html>` carries a static `dark` class. The generated `components/ui/*` files ship `dark:` variants, and the class makes them resolve without editing protected foundation components.
 - `viewport.colorScheme = "dark"` set in `app/layout.tsx` so native UI (scrollbars, form controls) does not render light.
-- Project tokens are exposed as Tailwind utilities via `@theme inline`: `bg-base`, `bg-surface`, `bg-elevated`, `bg-subtle`, `border-surface-border`, `border-surface-border-subtle`, `text-copy-primary` / `-secondary` / `-muted` / `-faint`, `text-brand`, `bg-accent-dim`, `text-ai`, `text-ai-text`, `text-state-error` / `-success` / `-warning`.
+- The page-background utility is `bg-page`, aliased from `--bg-base`. It was `bg-base` until a `04-project-dialogs` bug report: `@theme inline`'s `--color-base` registered `base` as a color, so Tailwind's built-in `text-base` emitted `color: #080809` alongside its font size. `components/ui/input.tsx`, `textarea.tsx`, `card.tsx` and `dialog.tsx` all use `text-base`, so every input in the app rendered near-black text on a dark surface. Renaming the alias fixes it for all of them at once and cannot be reintroduced by a future `shadcn add`. Never name a color token after a font-size step (`xs`, `sm`, `base`, `lg`, `xl`, …).
+- Dialog inputs carry an explicit `text-copy-primary`. Without it they inherit `EditorDialog`'s `text-copy-secondary`, and a value the user typed is primary content rather than supporting text.
+- Project tokens are exposed as Tailwind utilities via `@theme inline`: `bg-page`, `bg-surface`, `bg-elevated`, `bg-subtle`, `border-surface-border`, `border-surface-border-subtle`, `text-copy-primary` / `-secondary` / `-muted` / `-faint`, `text-brand`, `bg-accent-dim`, `text-ai`, `text-ai-text`, `text-state-error` / `-success` / `-warning`.
 - `--font-sans` and `--font-mono` map to the existing `--font-geist-sans` / `--font-geist-mono` variables, replacing shadcn's self-referential default.
 
 ## Session Notes
 
+- React Doctor v0.9.1 installed as a dev dependency and initialized with its
+  project installer. Setup added the `doctor` npm script, project-local agent
+  skill files, `.github/workflows/react-doctor.yml`, and a local pre-commit
+  hook. The first full verbose scan scored 82/100 with no errors and 8
+  warnings: 2 auth-panel transition warnings, 2 generated shadcn
+  non-component-export warnings, 3 intentionally unused foundation
+  primitives, and the placeholder `isPending` state in
+  `useProjectActions()`.
+- `04-project-dialogs` verification: `npm run build`, `tsc --noEmit` and `npm run lint` all clean. `slugify()` checked with assertions against the shipped function (`node --experimental-strip-types`): `"Checkout Service"` → `checkout-service`, `"  Payments  API  "` → `payments-api`, `"Café Service"` → `cafe-service`, `"V2 -- Auth!!"` → `v2-auth`, `"!!!"` and `""` → `""`. In-browser interaction check is still outstanding — `/editor` is behind Clerk and this session had no signed-in browser session (`/editor` correctly 307s to `/sign-in`).
+- The black-input-text bug was isolated in-browser without a signed-in session: `/sign-in` is public and serves the same compiled stylesheet, so appending a throwaway `<input>` with the primitive's class list and reading `getComputedStyle(...).color` reproduced it (`rgb(8, 8, 9)`), then testing one class at a time named `text-base` as the culprit. Use that technique for any "wrong color" report — it beats reading class strings.
+- `slugify` relies on NFKD plus the non-alphanumeric collapse to fold accents; there is no separate combining-mark strip, because the mark is already dropped by `[^a-z0-9]+`.
 - Auth panel redesign verified at 1440×900, 1024, 768 and 375: no overflow at any width, zero console errors, aside `display: none` at 375, `npm run build` and `tsc --noEmit` clean. Contrast measured in-browser against `--bg-surface`: feature text 10.46:1, list indices 4.85:1, footnote 4.85:1 — all above the 4.5:1 AA threshold.
 - Design guidance came from the `ui-ux-pro-max` skill (github.com/nextlevelbuilder/ui-ux-pro-max-skill, MIT). Its "Exaggerated Minimalism" style entry and pre-delivery checklist were applied; its colour palette and Inter typography recommendations were deliberately ignored, since the project palette and Geist pairing are fixed by `ui-context.md`. The skill is **not installed in this repo** — `uipro init --ai claude` was blocked by the permission classifier. Install with `/plugin marketplace add nextlevelbuilder/ui-ux-pro-max-skill` then `/plugin install ui-ux-pro-max@ui-ux-pro-max-skill`.
 - `03-auth` verification. Unauthenticated routing matrix: `/` → 307 `/sign-in`, `/editor` → 307, `/anything-else` → 307, `/api/whatever` → 307, `/sign-in` → 200, `/sign-up` → 200. `npm run build` and `tsc --noEmit` both clean. No hardcoded hex or raw Tailwind palette classes in any auth surface. No horizontal overflow at 375 / 768 / 1024 / 1440 on either auth page; no console errors. Two-panel layout confirmed at 1280×800 and form-only at 375×812.

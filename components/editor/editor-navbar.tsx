@@ -22,7 +22,7 @@ export function EditorNavbar({
   return (
     <header
       className={cn(
-        "flex h-14 shrink-0 items-center gap-2 border-b border-surface-border bg-base px-3",
+        "flex h-14 shrink-0 items-center gap-2 border-b border-surface-border bg-page px-3",
         className
       )}
     >

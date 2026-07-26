@@ -8,10 +8,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- `01-design-system` complete. Ready to start `02-editor-chrome`.
+- `02-editor-chrome` complete. Ready to start `03-auth`.
 
 ## Completed
 
+- `02-editor-chrome` — `components/editor/` created with three client components: `editor-navbar.tsx` (fixed `h-14` bar, three sections, sidebar toggle with `PanelLeftOpen`/`PanelLeftClose`, right section empty), `project-sidebar.tsx` (absolute overlay, `translate-x` slide, `isOpen`/`onClose` props, Projects header + close button, `Tabs` for My Projects / Shared with empty states, full-width `New Project` button with `Plus`), and `editor-dialog.tsx` (reusable title/description/footer shell — no concrete dialogs built yet).
 - `01-design-system` — shadcn/ui initialized (`components.json`, `base-nova` style, `neutral` base, CSS variables). UI primitives added unmodified in `components/ui/`: Button, Card, Dialog, Input, Tabs, Textarea, ScrollArea. `lucide-react` installed. `lib/utils.ts` exports `cn()` (clsx + tailwind-merge). Dark theme tokens from `ui-context.md` defined in `app/globals.css`.
 
 ## In Progress
@@ -20,15 +21,20 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- `02-editor-chrome`
+- `03-auth`
 
 ## Open Questions
+
+- axe-core (WCAG 2.1 AA) flags one serious color-contrast violation on `/editor`: the **inactive** `TabsTrigger` renders `--text-muted` `#808090` on `--bg-subtle` `#1e1e23` — roughly 4.2:1, under the 4.5:1 threshold. This comes from the generated `components/ui/tabs.tsx` (`dark:text-muted-foreground`) combined with the `ui-context.md` palette, so it will recur on every tab strip in the app. Either lift `--text-muted` or override the inactive tab color at the call site — needs a palette decision, not a local patch.
 
 - `ui-context.md` documents the border radius scale as `rounded-xl` / `rounded-2xl` / `rounded-3xl`. shadcn redefines those steps from `--radius` (0.625rem), so they resolve to 0.875 / 1.125 / 1.375rem rather than Tailwind's defaults. The scale still increases with depth, so it was left as generated — confirm the exact values are acceptable.
 - `app/layout.tsx` still carries the template metadata (`title: "Create Next App"`). No spec defines the real title/description yet.
 
 ## Architecture Decisions
 
+- Editor chrome components are presentational and stateless. `EditorNavbar` and `ProjectSidebar` take `isOpen` / `onToggle` / `onClose` from a parent; sidebar open state is owned by the workspace shell (`08-editor-workspace-shell`), not by the chrome itself.
+- The sidebar is an `absolute inset-y-0 left-0` overlay inside the editor's relative container, animated with `translate-x`. It stays mounted so the slide transition runs, and carries `inert` while closed so hidden content is out of the tab order.
+- `EditorDialog` wraps the shadcn `Dialog` primitive rather than editing `components/ui/dialog.tsx`. The primitive stays as generated; project styling (`rounded-3xl`, `bg-elevated`, `border-surface-border`) is applied through `className` at the wrapper.
 - Dark-only theme implemented without a light palette. The `ui-context.md` colors live in `:root` as the single source of truth, and shadcn's semantic tokens (`--background`, `--card`, `--primary`, …) are mapped onto them rather than given independent values. Changing a palette entry updates both layers at once.
 - `<html>` carries a static `dark` class. The generated `components/ui/*` files ship `dark:` variants, and the class makes them resolve without editing protected foundation components.
 - `viewport.colorScheme = "dark"` set in `app/layout.tsx` so native UI (scrollbars, form controls) does not render light.
@@ -37,6 +43,8 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Session Notes
 
+- Verified the chrome through a temporary `app/editor/page.tsx` harness (deleted afterward — the real route arrives in `07-wire-editor-home` / `08-editor-workspace-shell`). At 1280×800 and 375×812: zero console errors, sidebar overlays without shifting the canvas, tabs switch, no horizontal overflow at 375. The closed-state accessibility snapshot listed only the navbar toggle — `inert` keeps all four sidebar controls out of the tree — and the open-state snapshot exposed heading, close button, both tabs, panel, and New Project.
+- Browser tooling: use the `agent-browser` CLI (`/opt/homebrew/bin/agent-browser`, load its guide with `agent-browser skills get core --full`). gstack `browse` is SIGKILLed (exit 137) on every command here, sandboxed or not, and the Playwright MCP needs a Chrome bridge extension that is not installed.
 - Verified with a temporary `app/smoke/page.tsx` that imported all 7 primitives plus `cn()` and `lucide-react`; production build compiled and prerendered clean. `cn("p-2","p-4",false && "hidden","text-copy-primary")` resolved to `p-4 text-copy-primary`, confirming conflict resolution. Built CSS showed `body` → `#080809` / `#f0f0f4`, `html` → Geist Sans, and zero occurrences of the light `oklch(1 0 0)` palette. The smoke route was deleted afterward — it is not part of the spec.
 - Next.js private-folder rule: a route directory prefixed with `_` (e.g. `app/_smoke`) is excluded from routing and will silently not compile. Use a non-underscore name for throwaway verification routes.
 - Project runs Next.js 16.2.12 with Tailwind v4 and React 19.2.4. `AGENTS.md` requires checking `node_modules/next/dist/docs/` before using Next APIs.

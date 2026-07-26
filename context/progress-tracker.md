@@ -8,9 +8,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- `03-auth` complete against its spec. Every "Check When Done" item verified. The authenticated `/` → `/editor` redirect cannot be exercised until the editor route exists — see Next Up.
+- `03-auth` complete against its spec, and the `/editor` home shell is live so the authenticated redirect lands on a real route. Data layer is the next gap — see Next Up.
 
 ## Completed
+
+- `editor-home-shell` (partial slice of `07`/`08` — chrome only, no data) — `app/editor/page.tsx` renders `components/editor/editor-shell.tsx`. The page is a Server Component; the shell is a client component owning `isSidebarOpen` and wiring `EditorNavbar` + `ProjectSidebar` together for the first time. Work area is `relative` so the sidebar overlays the canvas rather than reflowing it. Canvas region is a placeholder with a centered prompt. Verified in-browser by the project owner: sidebar toggle, slide-over behaviour, close button, both tabs, and `UserButton` all work signed-in.
 
 - `03-auth` — Clerk wired end to end. CLI 2.3.0, app `app_3H38PhPDskCpR6kThGNHvQoo3Ku`, dev instance `ins_3H38PjqhfIpOD6AXCGSjWBfMUQR`. `@clerk/nextjs` 7.6.1 + `@clerk/ui` 1.26.0. Keys in `.env.local` (gitignored via `.env*`).
   - `proxy.ts` — `clerkMiddleware()` protecting everything by default; public paths derived from `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `NEXT_PUBLIC_CLERK_SIGN_UP_URL`. Throws at boot if either is unset.
@@ -28,7 +30,8 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- **`/editor` does not exist yet.** `03-auth` specifies that authenticated users at `/` redirect to `/editor`, and that redirect is implemented — but the route only arrives in `07-wire-editor-home` / `08-editor-workspace-shell`. Until then a signed-in user hitting `/` lands on a 404. The unauthenticated path is unaffected. Creating the route was deliberately left out of `03-auth` as out-of-scope; it needs no auth rework when it lands, only the route itself.
+- `04-project-dialogs` → `05-prisma` → `06-project-apis` → `07-wire-editor-home`. The editor home shell now exists but has no data layer: `New Project` is inert and both sidebar tabs render empty states. `07` replaces those with real owned/shared project lists fetched server-side in `app/editor/page.tsx`, which is why that page was kept a Server Component.
+- `08-editor-workspace-shell` — `/editor/[roomId]`, `AccessDenied`, and `lib/project-access.ts` are all still outstanding. They need Prisma before they can do the owner/collaborator checks the spec requires.
 - `EditorNavbar` now imports `UserButton`, so it can no longer render outside a `ClerkProvider`. Any future harness or story for the navbar must be mounted under the root layout.
 
 ## Open Questions

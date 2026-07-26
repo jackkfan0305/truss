@@ -1,3 +1,5 @@
+import { ClerkProvider } from "@clerk/nextjs";
+import { dark } from "@clerk/ui/themes";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -22,6 +24,32 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
+// Clerk's `dark` theme as the base, with every colour pointed at the palette in
+// `ui-context.md` so Clerk tracks the app's tokens instead of its own hex values.
+// `colorMutedForeground` uses --text-secondary, not --text-muted: the latter
+// fails WCAG AA on our surfaces (see progress-tracker.md).
+const clerkAppearance = {
+  theme: dark,
+  variables: {
+    colorBackground: "var(--bg-elevated)",
+    colorForeground: "var(--text-primary)",
+    colorMuted: "var(--bg-subtle)",
+    colorMutedForeground: "var(--text-secondary)",
+    colorNeutral: "var(--text-primary)",
+    colorPrimary: "var(--accent-primary)",
+    colorPrimaryForeground: "var(--bg-base)",
+    colorInput: "var(--bg-subtle)",
+    colorInputForeground: "var(--text-primary)",
+    colorBorder: "var(--border-default)",
+    colorRing: "var(--accent-primary)",
+    colorDanger: "var(--state-error)",
+    colorSuccess: "var(--state-success)",
+    colorWarning: "var(--state-warning)",
+    fontFamily: "var(--font-geist-sans)",
+    fontFamilyMono: "var(--font-geist-mono)",
+  },
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -32,7 +60,11 @@ export default function RootLayout({
       lang="en"
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ClerkProvider appearance={clerkAppearance}>
+          {children}
+        </ClerkProvider>
+      </body>
     </html>
   );
 }

@@ -141,6 +141,21 @@
     --sidebar-ring: var(--accent-primary);
 }
 
+/*
+ * Dot grid echoing the React Flow canvas background, so the auth screen reads as
+ * the same surface as the product. Texture only — it carries no meaning, sits
+ * well below any text-contrast threshold, and is marked aria-hidden at the call
+ * site. Uses the palette's subtle border colour rather than a new value.
+ */
+.surface-dot-grid {
+    background-image: radial-gradient(
+        circle at center,
+        var(--border-subtle) 1px,
+        transparent 1px
+    );
+    background-size: 22px 22px;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

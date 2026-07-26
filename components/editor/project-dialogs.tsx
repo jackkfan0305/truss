@@ -17,7 +17,8 @@ interface ProjectDialogsProps {
 }
 
 export function ProjectDialogs({ actions }: ProjectDialogsProps) {
-  const { dialog, name, setName, slug, isPending, closeDialog, submit } = actions
+  const { dialog, name, setName, roomId, isPending, error, closeDialog, submit } =
+    actions
 
   // Only "create" has no target; the other two always carry a project.
   const targetName = dialog && dialog.kind !== "create" ? dialog.project.name : ""
@@ -28,7 +29,7 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    submit()
+    void submit()
   }
 
   return (
@@ -46,9 +47,9 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
             <Button
               type="submit"
               form={CREATE_FORM_ID}
-              disabled={isPending || slug.length === 0}
+              disabled={isPending || roomId.length === 0}
             >
-              Create project
+              {isPending ? "Creating…" : "Create project"}
             </Button>
           </>
         }
@@ -70,9 +71,11 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
             placeholder="Checkout Service"
             autoComplete="off"
           />
+          {/* The room ID is the project ID — this is the real URL, not a guess. */}
           <p className="truncate font-mono text-xs text-copy-muted">
-            /editor/{slug || "your-project"}
+            /editor/{roomId || "your-project"}
           </p>
+          <DialogError message={error} />
         </form>
       </EditorDialog>
 
@@ -91,7 +94,7 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
               form={RENAME_FORM_ID}
               disabled={isPending || name.trim().length === 0}
             >
-              Save name
+              {isPending ? "Saving…" : "Save name"}
             </Button>
           </>
         }
@@ -111,6 +114,7 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
             onChange={(event) => setName(event.target.value)}
             autoComplete="off"
           />
+          <DialogError message={error} />
         </form>
       </EditorDialog>
 
@@ -124,12 +128,29 @@ export function ProjectDialogs({ actions }: ProjectDialogsProps) {
             <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={submit} disabled={isPending}>
-              Delete project
+            <Button
+              variant="destructive"
+              onClick={() => void submit()}
+              disabled={isPending}
+            >
+              {isPending ? "Deleting…" : "Delete project"}
             </Button>
           </>
         }
-      />
+      >
+        <DialogError message={error} />
+      </EditorDialog>
     </>
+  )
+}
+
+/** Renders nothing until a mutation fails, so the dialog keeps its layout. */
+function DialogError({ message }: { message: string | null }) {
+  if (!message) return null
+
+  return (
+    <p role="alert" className="text-xs text-state-error">
+      {message}
+    </p>
   )
 }

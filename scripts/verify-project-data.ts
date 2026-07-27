@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import { Prisma } from "../generated/prisma/client";
 import { prisma } from "../lib/prisma";
+import { getAccessibleProject } from "../lib/project-access";
 import { getOwnedProjects, getSharedProjects } from "../lib/projects";
 import { buildRoomId } from "../lib/room-id";
 
@@ -12,6 +13,9 @@ import { buildRoomId } from "../lib/room-id";
  * relation filter and case-insensitive email match in getSharedProjects, plus
  * the room-ID-as-primary-key create that POST /api/projects performs. Neither
  * can be checked by types alone.
+ *
+ * Also covers getAccessibleProject, which is what stands between a signed-in
+ * stranger and someone else's workspace.
  */
 
 const OWNER_ID = "verify_owner";
@@ -92,6 +96,59 @@ async function checkRoomIdCreate() {
   await prisma.project.delete({ where: { id: roomId } });
 }
 
+/**
+ * The `/editor/[roomId]` gate. Everything that is not owner-or-collaborator must
+ * come back `null`, including a project that does not exist.
+ */
+async function checkProjectAccess() {
+  const owner = { userId: OWNER_ID, email: "owner@example.com" };
+  const collaborator = {
+    userId: "verify_collaborator",
+    // Clerk reports the address as typed; the row was stored uppercased.
+    email: COLLABORATOR_EMAIL.toLowerCase(),
+  };
+  const stranger = { userId: "verify_stranger", email: "stranger@example.com" };
+
+  const asOwner = await getAccessibleProject("verify-owned-one", owner);
+  assert.deepEqual(
+    asOwner,
+    { id: "verify-owned-one", name: "Owned One" },
+    "the owner should reach their own project, id and name only",
+  );
+
+  assert.ok(
+    await getAccessibleProject("verify-shared", collaborator),
+    "a collaborator should reach a shared project despite the email casing",
+  );
+
+  assert.equal(
+    await getAccessibleProject("verify-shared", stranger),
+    null,
+    "a signed-in stranger must not reach someone else's project",
+  );
+
+  assert.equal(
+    await getAccessibleProject("verify-shared", {
+      userId: collaborator.userId,
+      email: null,
+    }),
+    null,
+    "no primary email means no collaborator access",
+  );
+
+  assert.equal(
+    await getAccessibleProject("verify-does-not-exist", owner),
+    null,
+    "an unknown project ID is indistinguishable from a forbidden one",
+  );
+
+  assert.equal(
+    await getAccessibleProject("verify-unrelated", collaborator),
+    null,
+    "being a collaborator elsewhere grants nothing here",
+  );
+}
+
 async function main() {
   await seed();
 
@@ -121,6 +178,7 @@ async function main() {
   // The sidebar only ever needs these two fields.
   assert.deepEqual(Object.keys(shared[0]).sort(), ["id", "name"]);
 
+  await checkProjectAccess();
   await checkRoomIdCreate();
 
   // Cascade: deleting a project takes its collaborator rows with it.

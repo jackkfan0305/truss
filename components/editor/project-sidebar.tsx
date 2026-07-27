@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { FolderOpen, Pencil, Plus, Trash2, Users, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -15,6 +16,8 @@ interface ProjectSidebarProps {
   onCreateProject: () => void
   onRenameProject: (project: ProjectSummary) => void
   onDeleteProject: (project: ProjectSummary) => void
+  /** Project the workspace is currently showing, highlighted in the list. */
+  activeProjectId?: string
   className?: string
 }
 
@@ -26,6 +29,7 @@ export function ProjectSidebar({
   onCreateProject,
   onRenameProject,
   onDeleteProject,
+  activeProjectId,
   className,
 }: ProjectSidebarProps) {
   return (
@@ -66,6 +70,7 @@ export function ProjectSidebar({
             <ProjectList
               label="My projects"
               projects={ownedProjects}
+              activeProjectId={activeProjectId}
               onRename={onRenameProject}
               onDelete={onDeleteProject}
             />
@@ -79,7 +84,11 @@ export function ProjectSidebar({
             />
           ) : (
             // No rename/delete: collaborators do not own these projects.
-            <ProjectList label="Shared with me" projects={sharedProjects} />
+            <ProjectList
+              label="Shared with me"
+              projects={sharedProjects}
+              activeProjectId={activeProjectId}
+            />
           )}
         </TabsContent>
       </Tabs>
@@ -95,25 +104,43 @@ export function ProjectSidebar({
 function ProjectList({
   label,
   projects,
+  activeProjectId,
   onRename,
   onDelete,
 }: {
   label: string
   projects: ProjectSummary[]
+  activeProjectId?: string
   onRename?: (project: ProjectSummary) => void
   onDelete?: (project: ProjectSummary) => void
 }) {
   return (
     <ul aria-label={label} className="flex h-full flex-col gap-0.5 overflow-y-auto">
-      {projects.map((project) => (
+      {projects.map((project) => {
+        const isActive = project.id === activeProjectId
+
+        return (
         <li
           key={project.id}
-          className="flex items-center gap-1 rounded-xl px-2 py-1.5 transition-colors hover:bg-subtle"
+          className={cn(
+            "flex items-center gap-1 rounded-xl px-2 py-1.5 transition-colors",
+            isActive ? "bg-subtle" : "hover:bg-subtle"
+          )}
         >
-          {/* Opening a project arrives with the workspace route in 08. */}
-          <span className="min-w-0 flex-1 truncate text-sm text-copy-secondary">
+          {/* The project ID is the workspace route segment — see the
+              one-identifier decision in context/progress-tracker.md. */}
+          <Link
+            href={`/editor/${project.id}`}
+            aria-current={isActive ? "page" : undefined}
+            className={cn(
+              "min-w-0 flex-1 truncate rounded-xl text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+              isActive
+                ? "text-copy-primary"
+                : "text-copy-secondary hover:text-copy-primary"
+            )}
+          >
             {project.name}
-          </span>
+          </Link>
 
           {onRename ? (
             <Button
@@ -137,7 +164,8 @@ function ProjectList({
             </Button>
           ) : null}
         </li>
-      ))}
+        )
+      })}
     </ul>
   )
 }

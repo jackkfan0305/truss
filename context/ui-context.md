@@ -26,7 +26,9 @@ All colors are defined as CSS custom properties in `globals.css` and mapped to T
 | Success          | `--state-success`      | `#34d399`                 |
 | Warning          | `--state-warning`      | `#fbbf24`                 |
 
-Tailwind utility names map to these variables. Use `bg-base`, `bg-surface`, `text-copy-primary`, `text-copy-muted`, `border-surface-border`, `text-brand`, `bg-accent-dim`, etc.
+Tailwind utility names map to these variables. Use `bg-page`, `bg-surface`, `text-copy-primary`, `text-copy-muted`, `border-surface-border`, `text-brand`, `bg-accent-dim`, etc.
+
+The page background is exposed as `bg-page`, not `bg-base`. Registering a color named `base` would make Tailwind's built-in `text-base` set `color` as well as `font-size`, and four generated `components/ui` files use `text-base`. Do not name a color token after a font-size step (`xs`, `sm`, `base`, `lg`, `xl`, …).
 
 ## Typography
 

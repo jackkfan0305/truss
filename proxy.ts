@@ -24,8 +24,19 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
+// `auth.protect()` answers a redirect, not a 401, so it cannot gate an API
+// route: a fetch would receive the HTML sign-in page. Route handlers under
+// /api call `auth()` themselves and return a JSON 401 — which is also what
+// Clerk 7 recommends now that createRouteMatcher is deprecated. Every new
+// handler under /api must do its own check; the middleware will not.
+function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
 export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicPath(req.nextUrl.pathname)) {
+  const { pathname } = req.nextUrl;
+
+  if (!isPublicPath(pathname) && !isApiPath(pathname)) {
     await auth.protect();
   }
 });

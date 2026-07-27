@@ -1,4 +1,5 @@
-import type { Edge, Node } from "@xyflow/react";
+import { MarkerType, type Edge, type EdgeMarker, type Node } from "@xyflow/react";
+import type { CSSProperties } from "react";
 
 /**
  * Shared canvas schema (11-base-canvas).
@@ -65,6 +66,37 @@ export const NODE_DEFAULT_SIZES: Record<NodeShape, NodeSize> = {
 };
 
 /**
+ * The floor a node can be resized to (14-node-editing). One value for every
+ * shape: below roughly this, a centred label has nowhere left to sit.
+ */
+export const NODE_MIN_SIZE: NodeSize = { width: 72, height: 48 };
+
+/**
+ * How far from a handle a dropped connection still snaps to it, in flow units
+ * (16-edge-behavior). React Flow's `connectionRadius` default is 20, which is
+ * roughly "release on the dot" — a connection dropped on the *body* of a target
+ * node found nothing and was discarded.
+ *
+ * The bar this has to clear is the distance from a node's centre to its nearest
+ * side handle, so that releasing anywhere inside any node connects to it. The
+ * worst case among the default sizes is the diamond and the circle at 65
+ * (`height / 2`); the headroom above that covers a node resized taller and the
+ * near-miss release just outside a node's border.
+ *
+ * `scripts/verify-canvas.ts` asserts this against every default size, since the
+ * number is only correct relative to `NODE_DEFAULT_SIZES`.
+ */
+export const CONNECTION_SNAP_RADIUS = 90;
+
+/**
+ * How long a programmatic viewport move takes, in ms (17-canvas-ergonomics).
+ * Shared by the control bar and the keyboard shortcuts so a zoom lands the same
+ * way whichever one triggered it — long enough to read as movement, short
+ * enough to survive a held key.
+ */
+export const VIEWPORT_TRANSITION_MS = 200;
+
+/**
  * Declared as a `type`, not an `interface`: React Flow constrains node data to
  * `Record<string, unknown>`, and only type aliases get the implicit index
  * signature that satisfies it.
@@ -75,8 +107,36 @@ export type CanvasNodeData = {
   shape: NodeShape;
 };
 
+/** Same reason as `CanvasNodeData`: a `type` gets the index signature React
+ * Flow's `Edge<…>` constraint needs; an `interface` does not. */
+export type CanvasEdgeData = {
+  label: string;
+};
+
 export const CANVAS_NODE_TYPE = "canvasNode";
 export const CANVAS_EDGE_TYPE = "canvasEdge";
 
 export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE>;
-export type CanvasEdge = Edge<Record<string, unknown>, typeof CANVAS_EDGE_TYPE>;
+export type CanvasEdge = Edge<CanvasEdgeData, typeof CANVAS_EDGE_TYPE>;
+
+/**
+ * The edge look from `context/ui-context.md` (16-edge-behavior): a thin, light
+ * stroke with rounded ends. Applied twice on purpose — as `defaultEdgeOptions`
+ * so a new connection carries it into Storage, and as the renderer's fallback so
+ * an AI- or template-authored edge that arrives without a `style` still matches.
+ *
+ * The colour is a `var()` rather than the hex, so it travels into Storage as a
+ * reference and a palette edit reaches edges that already exist.
+ */
+export const CANVAS_EDGE_STYLE: CSSProperties = {
+  stroke: "var(--canvas-edge)",
+  strokeWidth: 1.5,
+  strokeLinecap: "round",
+};
+
+export const CANVAS_EDGE_MARKER: EdgeMarker = {
+  type: MarkerType.ArrowClosed,
+  width: 16,
+  height: 16,
+  color: "var(--canvas-edge)",
+};

@@ -1,22 +1,30 @@
 "use client";
 
-import { useCallback, useRef, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, type DragEvent } from "react";
 import { useLiveblocksFlow } from "@liveblocks/react-flow";
 import {
   Background,
   BackgroundVariant,
+  ConnectionLineType,
   ConnectionMode,
   MiniMap,
   Panel,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  type DefaultEdgeOptions,
+  type EdgeTypes,
+  type IsValidConnection,
   type NodeTypes,
   type XYPosition,
 } from "@xyflow/react";
 
+import { CanvasControls } from "@/components/canvas/canvas-controls";
+import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
 import { ShapePanel } from "@/components/canvas/shape-panel";
+import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
+import type { CanvasTemplate } from "@/components/editor/starter-templates";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -24,9 +32,14 @@ import {
   type ShapeDragPayload,
 } from "@/lib/canvas-drag";
 import {
+  CANVAS_EDGE_MARKER,
+  CANVAS_EDGE_STYLE,
+  CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  CONNECTION_SNAP_RADIUS,
   DEFAULT_NODE_COLOR,
   NODE_DEFAULT_SIZES,
+  VIEWPORT_TRANSITION_MS,
   type CanvasEdge,
   type CanvasNode,
   type NodeShape,
@@ -40,6 +53,41 @@ const NODE_TYPES: NodeTypes = {
   [CANVAS_NODE_TYPE]: CanvasNodeRenderer,
 };
 
+const EDGE_TYPES: EdgeTypes = {
+  [CANVAS_EDGE_TYPE]: CanvasEdgeRenderer,
+};
+
+/**
+ * React Flow merges these into the connection *before* handing it to
+ * `onConnect`, so `useLiveblocksFlow` writes the type, arrowhead and stroke
+ * straight into Storage — every client renders a new edge the same way with no
+ * post-processing step (16-edge-behavior).
+ *
+ * `data.label` is seeded empty rather than left absent so the key exists on the
+ * edge's `LiveObject` from creation, the same as a node's `data`.
+ */
+const DEFAULT_EDGE_OPTIONS: DefaultEdgeOptions = {
+  type: CANVAS_EDGE_TYPE,
+  data: { label: "" },
+  style: CANVAS_EDGE_STYLE,
+  markerEnd: CANVAS_EDGE_MARKER,
+};
+
+/**
+ * `ConnectionMode.Loose` treats any two distinct handles as connectable, and
+ * two handles on the *same* node qualify — so the generous snap radius would
+ * otherwise turn a mis-drop near the node you just dragged out of into a
+ * self-loop. `getSmoothStepPath` has no loop routing, so one renders as a
+ * degenerate line hidden under its own node.
+ *
+ * Module scope so the identity is stable: React Flow stores this and a fresh
+ * closure per render would rewrite the store on every render.
+ */
+const isConnectionBetweenNodes: IsValidConnection<CanvasEdge> = ({
+  source,
+  target,
+}) => source !== target;
+
 /**
  * The collaborative canvas surface (11-base-canvas, 12-shape-panel).
  *
@@ -47,23 +95,37 @@ const NODE_TYPES: NodeTypes = {
  * component that renders the drop target — the wrapper sits outside `ReactFlow`,
  * so it is not covered by the context `ReactFlow` provides to its children.
  */
-export function Canvas() {
+export function Canvas(props: CanvasProps) {
   return (
     <ReactFlowProvider>
-      <CanvasFlow />
+      <CanvasFlow {...props} />
     </ReactFlowProvider>
   );
 }
 
-function CanvasFlow() {
+interface CanvasProps {
+  /**
+   * The starter template picker is opened from the editor navbar, which sits
+   * outside the room — but importing one is a Storage write, so the dialog is
+   * rendered here where the flow state is (18-starter-templates).
+   */
+  isTemplatesOpen: boolean;
+  onTemplatesOpenChange: (open: boolean) => void;
+}
+
+function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
       suspense: true,
       nodes: { initial: [] },
       edges: { initial: [] },
     });
-  const { screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
+  const { fitView, screenToFlowPosition } = useReactFlow<
+    CanvasNode,
+    CanvasEdge
+  >();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const isAwaitingImportedNodes = useRef(false);
 
   /**
    * `add` changes go through `onNodesChange` rather than a local `setNodes`, so
@@ -90,6 +152,53 @@ function CanvasFlow() {
     },
     [onNodesChange]
   );
+
+  /**
+   * A template *replaces* the canvas, so everything on it is deleted before the
+   * template is added.
+   *
+   * The clear goes through `onDelete` rather than `remove` changes on purpose:
+   * `@liveblocks/react-flow`'s change appliers no-op on `"remove"` — deletion is
+   * `onDelete`'s job — so removal changes would leave the old diagram in place
+   * and the template would land on top of it.
+   *
+   * Nodes and edges are copied on the way in so the template constants are never
+   * aliased into Storage and cannot be edited by reference on the canvas.
+   */
+  const handleImportTemplate = useCallback(
+    (template: CanvasTemplate) => {
+      onDelete({ nodes, edges });
+      onNodesChange(
+        template.nodes.map((node) => ({
+          type: "add",
+          item: { ...node, data: { ...node.data } },
+        }))
+      );
+      onEdgesChange(
+        template.edges.map((edge) => ({
+          type: "add",
+          item: { ...edge, data: { ...edge.data, label: edge.data?.label ?? "" } },
+        }))
+      );
+
+      isAwaitingImportedNodes.current = true;
+    },
+    [edges, nodes, onDelete, onEdgesChange, onNodesChange]
+  );
+
+  /**
+   * Fitting the view has to wait for the imported nodes to come back *through*
+   * Storage — `fitView` called straight after the write measures the canvas as
+   * it was, which on a previously empty one is a no-op.
+   */
+  useEffect(() => {
+    if (!isAwaitingImportedNodes.current || nodes.length === 0) {
+      return;
+    }
+
+    isAwaitingImportedNodes.current = false;
+    void fitView({ duration: VIEWPORT_TRANSITION_MS });
+  }, [fitView, nodes]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {
@@ -154,6 +263,8 @@ function CanvasFlow() {
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -161,6 +272,19 @@ function CanvasFlow() {
         // Handles are drawn on all four sides, so a connection must be allowed to
         // land on any of them rather than only on a declared target handle.
         connectionMode={ConnectionMode.Loose}
+        // Release anywhere on a target node and the connection lands on that
+        // node's nearest handle. The default (20) is "release on the dot", which
+        // silently discarded any connection dropped on a node's body.
+        connectionRadius={CONNECTION_SNAP_RADIUS}
+        isValidConnection={isConnectionBetweenNodes}
+        // The line dragged out of a handle defaults to a bezier, which would not
+        // resemble the right-angle edge it is about to become.
+        connectionLineType={ConnectionLineType.SmoothStep}
+        // Programmatically focusable, but kept out of the tab order: closing the
+        // label editor hands focus back here (14-node-editing), and without a
+        // tabIndex the wrapper cannot take it and the browser drops focus on
+        // <body> instead. Nodes are still individually tab-reachable.
+        tabIndex={-1}
         fitView
         // Themes React Flow's own chrome (minimap, attribution) to match the dark
         // workspace without restyling its internals.
@@ -176,7 +300,16 @@ function CanvasFlow() {
         <Panel position="bottom-center">
           <ShapePanel onAddShape={handleAddShape} />
         </Panel>
+        <Panel position="bottom-left">
+          <CanvasControls />
+        </Panel>
       </ReactFlow>
+
+      <StarterTemplatesModal
+        open={isTemplatesOpen}
+        onOpenChange={onTemplatesOpenChange}
+        onImport={handleImportTemplate}
+      />
     </div>
   );
 }

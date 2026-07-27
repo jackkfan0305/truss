@@ -2,6 +2,7 @@
 
 import { UserButton } from "@clerk/nextjs"
 import {
+  LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
   Share2,
@@ -17,6 +18,8 @@ interface EditorNavbarProps {
   /** Workspace only — the editor home has no active project. */
   projectName?: string
   onShare?: () => void
+  /** Workspace only — opens the starter template picker. */
+  onOpenTemplates?: () => void
   isAiSidebarOpen?: boolean
   onToggleAiSidebar?: () => void
   className?: string
@@ -27,6 +30,7 @@ export function EditorNavbar({
   onToggleSidebar,
   projectName,
   onShare,
+  onOpenTemplates,
   isAiSidebarOpen = false,
   onToggleAiSidebar,
   className,
@@ -61,6 +65,13 @@ export function EditorNavbar({
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2">
+        {onOpenTemplates ? (
+          <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
+            <LayoutTemplate className="h-4 w-4" />
+            <span className="hidden sm:inline">Templates</span>
+          </Button>
+        ) : null}
+
         {onToggleAiSidebar ? (
           <>
             <Button variant="ghost" size="sm" onClick={onShare}>

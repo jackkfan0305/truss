@@ -112,6 +112,17 @@
     --state-success: #34d399;
     --state-warning: #fbbf24;
 
+    /* Canvas edge stroke and arrowhead (context/ui-context.md). */
+    --canvas-edge: #f8fafc;
+
+    /*
+     * React Flow's own handle theming hooks, so the connection dots take the
+     * palette without restyling its internals. `--xy-*-default` is only the
+     * fallback these resolve to, which is why the override lands here.
+     */
+    --xy-handle-background-color: var(--text-primary);
+    --xy-handle-border-color: var(--bg-base);
+
     --radius: 0.625rem;
 
     /* shadcn/ui semantic tokens mapped onto the palette above */
@@ -161,6 +172,107 @@
         transparent 1px
     );
     background-size: 22px 22px;
+}
+
+/*
+ * React Flow draws each resize edge as a 1px-wide element and each corner as a
+ * 7px square, which are near-impossible pointer targets. The pseudo-element
+ * widens the hit area without moving the drawn line — a pointer event over a
+ * ::after still reports its owning element as the target, so React Flow's own
+ * drag handler picks it up unchanged.
+ *
+ * Only present while a node is selected, since that is the only time
+ * `NodeResizer` renders these controls at all.
+ */
+.react-flow__resize-control::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+}
+
+/*
+ * Connection handles (16-edge-behavior). Hidden at rest so an idle canvas is
+ * just nodes and edges, faded in when the node they belong to is hovered or
+ * selected — and while a connection is being dragged from or over them, or the
+ * target dot would vanish under the cursor at the moment it is being aimed at.
+ *
+ * Opacity only, never `display`: React Flow measures handle positions off the
+ * DOM, and an unrendered handle has no position to connect to.
+ *
+ * The descendant selector is load-bearing. React Flow's own `.react-flow__handle`
+ * rule is a single class, and this stylesheet's position relative to
+ * `@xyflow/react/dist/style.css` in the bundle is not guaranteed.
+ */
+.react-flow__node .react-flow__handle {
+    width: 8px;
+    height: 8px;
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+}
+
+.react-flow__node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle,
+.react-flow__handle.connectingfrom,
+.react-flow__handle.connectingto {
+    opacity: 1;
+}
+
+/*
+ * An 8px dot is a poor pointer target, so the hit area is widened to ~20px
+ * without changing what is drawn — the same pseudo-element trick the resize
+ * controls above use, and it works for the same reason: a pointer event over an
+ * ::after still reports its owning element as the target, so React Flow's
+ * `elementFromPoint` lookup in `isValidHandle` resolves it as the handle.
+ *
+ * `pointer-events` is inherited, so this ring is live exactly when the handle
+ * is — React Flow gates that with its own `.connectionindicator` rule.
+ */
+.react-flow__handle::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: 100%;
+}
+
+/* Matches the handle fade, so an edge and its dots brighten together. */
+.canvas-edge {
+    transition: opacity 150ms ease-out;
+}
+
+/*
+ * Node colour swatches (15-node-color-toolbar). The glow is the pair's own text
+ * colour, handed in as `--swatch-accent` from the palette, so it cannot be
+ * expressed as a Tailwind class.
+ *
+ * Selection is an `outline` and hover a `box-shadow` deliberately: two separate
+ * properties, so hovering the active swatch adds the glow instead of one state
+ * overwriting the other.
+ */
+.node-color-swatch {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 1.25rem;
+    width: 1.25rem;
+    border-radius: 9999px;
+    border: 1px solid color-mix(in srgb, var(--swatch-accent) 45%, transparent);
+    transition:
+        box-shadow 150ms ease-out,
+        transform 150ms ease-out;
+}
+
+.node-color-swatch:hover,
+.node-color-swatch:focus-visible {
+    /* Tight: 1px ring plus a 7px blur pulled back by a negative spread. */
+    box-shadow:
+        0 0 0 1px var(--swatch-accent),
+        0 0 7px -1px color-mix(in srgb, var(--swatch-accent) 70%, transparent);
+    transform: translateY(-1px);
+}
+
+.node-color-swatch[aria-pressed="true"] {
+    outline: 2px solid var(--swatch-accent);
+    outline-offset: 2px;
 }
 
 @layer base {

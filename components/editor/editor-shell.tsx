@@ -36,6 +36,7 @@ export function EditorShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
   const [isShareOpen, setIsShareOpen] = useState(false)
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
 
   return (
@@ -45,6 +46,9 @@ export function EditorShell({
         onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
         projectName={activeProject?.name}
         onShare={activeProject ? () => setIsShareOpen(true) : undefined}
+        onOpenTemplates={
+          activeProject ? () => setIsTemplatesOpen(true) : undefined
+        }
         isAiSidebarOpen={isAiSidebarOpen}
         onToggleAiSidebar={
           activeProject
@@ -87,7 +91,11 @@ export function EditorShell({
           <>
             {/* React Flow needs a sized parent, so the canvas fills `main`. */}
             <main aria-label="Canvas" className="relative flex-1 bg-page">
-              <CanvasRoom roomId={activeProject.id} />
+              <CanvasRoom
+                roomId={activeProject.id}
+                isTemplatesOpen={isTemplatesOpen}
+                onTemplatesOpenChange={setIsTemplatesOpen}
+              />
             </main>
 
             <AiSidebar isOpen={isAiSidebarOpen} />

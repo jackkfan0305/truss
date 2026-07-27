@@ -13,6 +13,9 @@ import { Canvas } from "@/components/canvas/canvas";
 interface CanvasRoomProps {
   /** The project ID — one identifier for the route, the row and the room. */
   roomId: string;
+  /** Owned by the editor shell, since the navbar is what opens the picker. */
+  isTemplatesOpen: boolean;
+  onTemplatesOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -23,7 +26,11 @@ interface CanvasRoomProps {
  * project membership before issuing a token — so a user who cannot open the
  * project cannot join its room either.
  */
-export function CanvasRoom({ roomId }: CanvasRoomProps) {
+export function CanvasRoom({
+  roomId,
+  isTemplatesOpen,
+  onTemplatesOpenChange,
+}: CanvasRoomProps) {
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
@@ -39,7 +46,10 @@ export function CanvasRoom({ roomId }: CanvasRoomProps) {
           <ClientSideSuspense
             fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
           >
-            <Canvas />
+            <Canvas
+              isTemplatesOpen={isTemplatesOpen}
+              onTemplatesOpenChange={onTemplatesOpenChange}
+            />
           </ClientSideSuspense>
         </ConnectionGuard>
       </RoomProvider>

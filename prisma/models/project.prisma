@@ -1,6 +1,8 @@
 enum ProjectStatus {
   DRAFT
   ARCHIVED
+  DELETING
+  DELETED
 }
 
 model Project {

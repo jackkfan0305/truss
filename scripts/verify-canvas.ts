@@ -88,11 +88,13 @@ function checkBadPayloadsAreRejected() {
  */
 function checkNodeIdsAreUnique() {
   const ids = Array.from({ length: 500 }, () => createNodeId("rectangle"));
+  const collaborativeIdPattern =
+    /^rectangle-[a-z0-9]+-[a-z0-9]+-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
   assert.equal(new Set(ids).size, ids.length, "node IDs are unique");
   assert.ok(
-    ids.every((id) => id.startsWith("rectangle-")),
-    "node IDs carry the shape name",
+    ids.every((id) => collaborativeIdPattern.test(id)),
+    "node IDs carry the shape, local counter and cross-client UUID entropy",
   );
 }
 

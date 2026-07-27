@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
+import { getLiveblocks } from "@/lib/liveblocks";
+import { deleteProjectResources } from "@/lib/project-lifecycle";
 import {
   jsonError,
   parseProjectName,
@@ -45,14 +47,29 @@ export async function DELETE(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: true });
+  const access = await authorizeProject(projectId, {
+    requireOwner: true,
+    allowDeletionStates: true,
+  });
 
   if (!access.ok) {
     return access.response;
   }
 
-  // Collaborators cascade from the schema relation.
-  await prisma.project.delete({ where: { id: projectId } });
+  try {
+    await deleteProjectResources(
+      projectId,
+      access.ownerId,
+      {
+        deleteRoom: async (roomId) => {
+          await getLiveblocks().deleteRoom(roomId);
+        },
+      },
+    );
+  } catch (error: unknown) {
+    console.error(`Project deletion failed for ${projectId}`, error);
+    return jsonError("Could not delete project", 500);
+  }
 
   return new Response(null, { status: 204 });
 }

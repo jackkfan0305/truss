@@ -18,7 +18,10 @@ export async function getOwnedProjects(
   userId: string,
 ): Promise<ProjectSummary[]> {
   return prisma.project.findMany({
-    where: { ownerId: userId },
+    where: {
+      ownerId: userId,
+      status: { notIn: ["DELETING", "DELETED"] },
+    },
     orderBy: { createdAt: "desc" },
     select: SUMMARY_SELECT,
   });
@@ -38,6 +41,7 @@ export async function getSharedProjects(
   return prisma.project.findMany({
     where: {
       ownerId: { not: identity.userId },
+      status: { notIn: ["DELETING", "DELETED"] },
       collaborators: {
         // Emails are typed by hand in the share dialog, so match case-insensitively.
         some: { email: { equals: identity.email, mode: "insensitive" } },

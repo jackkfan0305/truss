@@ -13,6 +13,29 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- PR #3 Codex review fixes — permanent deletion tombstones prevent deleted
+  Liveblocks rooms, bearer tokens, delayed cleanup and stale authorization from
+  crossing into a reused project ID. Node IDs include UUID entropy so
+  simultaneous collaborators cannot reconcile distinct drops as one node.
+  - `ProjectStatus` now includes `DELETING` and `DELETED`. Both are excluded from
+    list/access/auth queries, while owner-authorized `DELETE` can retry either
+    state.
+  - `lib/project-lifecycle.ts` atomically claims the row for the authorized owner,
+    deletes the Liveblocks room, then finalizes the permanent `DELETED` tombstone.
+    Cleanup failure leaves `DELETING` for an explicit retry and never frees the
+    globally unique project/room ID. Entering `DELETING` immediately scrubs the
+    name, description, and collaborator emails; `canvasJsonPath` remains as the
+    future Vercel Blob cleanup pointer rather than orphaning the artifact.
+  - Liveblocks auth performs a final access check after token preparation. A
+    concurrent tombstone withholds the bearer token and deletes any room the
+    in-flight request recreated.
+  - `lib/canvas-drag.ts` — IDs are now
+    `{shape}-{timestamp}-{counter}-{uuid}` rather than relying only on tab-local
+    state.
+  - `scripts/verify-project-data.ts` and `scripts/verify-canvas.ts` — regression
+    coverage for cleanup failure/retry, tombstone access/list filtering,
+    permanent ID reservation, and cross-client node entropy.
+
 - `12-shape-panel` — shape palette, drag-and-drop node creation, and a placeholder node renderer. No shape-specific visuals, no handles, no label editing.
   - `types/canvas.ts` — `NODE_DEFAULT_SIZES` (per-shape `{ width, height }`) and the `NodeSize` interface. Rectangle 180×80, diamond 200×130, circle 130×130, pill 180×56, cylinder 160×100, hexagon 180×96.
   - `lib/canvas-drag.ts` — the panel→canvas contract. `SHAPE_DRAG_MIME` is `application/x-truss-shape`, `buildShapeDragPayload(shape)`, `parseShapeDragPayload(raw)` and `createNodeId(shape)`.
@@ -140,7 +163,7 @@ Update this file whenever the current phase, active feature, or implementation s
   - The closed transform is `calc(100% + 2rem)`, not `100%`. A plain `-translate-x-full` leaves the 12px inset *and* the blurred shadow bleeding down the edge of a closed panel.
   - Tailwind v4 normalises `calc(100%+2rem)` into valid `calc(100% + 2rem)` — the underscore syntax (`calc(100%_+_2rem)`) is not needed here. Confirmed against the built CSS, not assumed.
   - Contrast is unaffected: `--bg-surface` `#111114` at 80% over `--bg-base` `#080809` composites to roughly `#0f0f11`, marginally *darker* than the opaque original.
-- **New nodes are added through `onNodesChange([{ type: "add", item }])`, never a local `setNodes`.** `useLiveblocksFlow` routes that change into a `useMutation` that writes the node to Storage, so it reaches every other client in the room. A local setter would create a node only the author can see. `applyNodeChanges` in the package treats `add` and `replace` identically — an existing ID is *reconciled*, not rejected — which is why `createNodeId` carries a counter and not just a timestamp: two shapes dropped in the same millisecond would otherwise silently overwrite each other.
+- **New nodes are added through `onNodesChange([{ type: "add", item }])`, never a local `setNodes`.** `useLiveblocksFlow` routes that change into a `useMutation` that writes the node to Storage, so it reaches every other client in the room. A local setter would create a node only the author can see. `applyNodeChanges` in the package treats `add` and `replace` identically — an existing ID is *reconciled*, not rejected — which is why `createNodeId` carries both a tab-local counter and UUID entropy in addition to the timestamp: simultaneous drops from different collaborators must not collapse into one node.
 - The drag payload uses a **custom MIME type** (`application/x-truss-shape`), not `text/plain`. `dragover` can only inspect `dataTransfer.types`, never the payload, so a specific type is the only way to decide whether to accept a drop before it happens — and it stops a dragged text selection or file from being read as a shape.
 - The payload is **parsed as untrusted input**. A `DataTransfer` can be populated by another tab or an older build of this app, so `parseShapeDragPayload` shape-checks the shape name and both dimensions and returns `null` rather than letting a malformed node into Storage.
 - `Canvas` is now just `ReactFlowProvider` wrapping `CanvasFlow`. The drop target is the wrapper *around* `<ReactFlow>`, and `useReactFlow` (for `screenToFlowPosition`) is unavailable there without the explicit provider — `ReactFlow` only supplies that context to its own children.
@@ -201,6 +224,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Session Notes
 
+- PR #3 Codex review fixes verified: `verify-project-api.ts`,
+  `verify-project-data.ts`, `verify-canvas.ts`, and `verify-liveblocks.ts` pass;
+  `tsc --noEmit`, ESLint, and the Next.js production build are clean; React
+  Doctor 0.9.2 reports 100/100 with no issues. The additive tombstone migration
+  is applied and `prisma migrate status` reports the database up to date.
 - `12-shape-panel` verification: `tsc --noEmit`, `npm run lint` and `npm run build` all clean, and `npx tsx scripts/verify-canvas.ts` passes. **Not verified in a browser** — same missing Clerk session as everything since `07`. Nothing in this unit is exercisable without a pointer on a live canvas, so the untested surface here is larger than usual: the actual drag gesture, the drop coordinate conversion, and whether a second client sees the new node.
 - `nodeTypes` is a **module-level** constant. Passing an inline object literal makes React Flow re-register every node type on each render, which remounts custom nodes and drops their local state. It logs a console warning rather than failing.
 - `useReactFlow` throws outside a `ReactFlowProvider`, and `<ReactFlow>` does *not* count as one for its own siblings or its parent — only for its children. Any hook-using code that sits beside or above `<ReactFlow>` needs the explicit provider.

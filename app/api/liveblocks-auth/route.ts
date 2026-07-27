@@ -2,6 +2,7 @@ import { currentUser } from "@clerk/nextjs/server";
 
 import { getCursorColor, getLiveblocks } from "@/lib/liveblocks";
 import { authorizeProject } from "@/lib/project-access";
+import { cleanupTombstonedRoom } from "@/lib/project-lifecycle";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
 
 /**
@@ -78,6 +79,27 @@ export async function POST(request: Request): Promise<Response> {
   session.allow(roomId, session.FULL_ACCESS);
 
   const { status, body } = await session.authorize();
+
+  // Authorization and room creation cross two external calls. Fence the result
+  // against a concurrent deletion before returning a bearer token.
+  const finalAuthorization = await authorizeProject(roomId, {
+    requireOwner: false,
+  });
+
+  if (!finalAuthorization.ok) {
+    try {
+      // If deletion won the race, remove a room this request may have recreated.
+      await cleanupTombstonedRoom(roomId, {
+        deleteRoom: async (id) => {
+          await liveblocks.deleteRoom(id);
+        },
+      });
+    } catch (error: unknown) {
+      console.error(`Liveblocks post-auth cleanup failed for ${roomId}`, error);
+    }
+
+    return finalAuthorization.response;
+  }
 
   return new Response(body, {
     status,

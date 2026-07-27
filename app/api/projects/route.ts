@@ -23,7 +23,10 @@ export async function GET(): Promise<Response> {
   }
 
   const projects = await prisma.project.findMany({
-    where: { ownerId: userId },
+    where: {
+      ownerId: userId,
+      status: { notIn: ["DELETING", "DELETED"] },
+    },
     orderBy: { createdAt: "desc" },
   });
 

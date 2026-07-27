@@ -59,14 +59,14 @@ function isPositiveSize(value: unknown): value is number {
 }
 
 /**
- * Node IDs are `{shape}-{timestamp}-{counter}`. The timestamp alone is not
- * enough — two shapes dropped inside the same millisecond would collide, and a
- * collision here silently overwrites a node in Storage instead of adding one.
+ * Node IDs are `{shape}-{timestamp}-{counter}-{uuid}`. The timestamp and
+ * counter protect repeated drops in one tab; UUID entropy protects concurrent
+ * collaborators whose tab-local counters and clocks happen to match.
  */
 let nodeIdCounter = 0;
 
 export function createNodeId(shape: NodeShape): string {
   nodeIdCounter += 1;
 
-  return `${shape}-${Date.now().toString(36)}-${nodeIdCounter.toString(36)}`;
+  return `${shape}-${Date.now().toString(36)}-${nodeIdCounter.toString(36)}-${crypto.randomUUID()}`;
 }

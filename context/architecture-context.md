@@ -28,6 +28,19 @@
 - Project records, spec records, and task run records belong in PostgreSQL.
 - Canvas content and Markdown output are stored in and retrieved from Vercel Blob.
 - The blob URL is stored in the database (`canvasJsonPath`, `filePath`) as the reference to the artifact.
+- Project IDs are never reused. Deletion first changes the project to a durable
+  `DELETING` tombstone, then deletes its Liveblocks room, then finalizes the row
+  as `DELETED`. Both states are inaccessible and excluded from project lists.
+- A cleanup failure leaves the tombstone available to the owner-only delete
+  endpoint for retry. Keeping the row permanently reserved prevents old room
+  tokens, delayed cleanup, or stale authorization from crossing generations.
+- Liveblocks auth rechecks access after token preparation. If deletion won the
+  race, it withholds the token and removes any room the request recreated.
+- Entering `DELETING` immediately scrubs the project name, description, and
+  collaborator emails. The owner ID stays for authorized cleanup retries.
+- `canvasJsonPath` is retained as a cleanup pointer until Vercel Blob deletion
+  is implemented; never clear an artifact reference without deleting the
+  referenced blob first.
 
 ## Auth and Collaboration Model
 

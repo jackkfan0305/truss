@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 
-import { buildRoomId } from "@/lib/room-id"
+import { buildRoomId, getRetryRoomIdSuffix } from "@/lib/room-id"
 import type { ProjectSummary } from "@/types/project"
 
 export type ProjectDialog =
@@ -16,6 +16,16 @@ const ROOM_ID_SUFFIX_LENGTH = 6
 
 function createRoomIdSuffix(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, ROOM_ID_SUFFIX_LENGTH)
+}
+
+class ProjectMutationError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "ProjectMutationError"
+    this.status = status
+  }
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -40,7 +50,10 @@ async function mutate(url: string, init: RequestInit): Promise<Response> {
   })
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response))
+    throw new ProjectMutationError(
+      await readErrorMessage(response),
+      response.status,
+    )
   }
 
   return response
@@ -155,6 +168,12 @@ export function useProjectActions() {
 
       setDialog(null)
     } catch (caught) {
+      if (dialog.kind === "create" && caught instanceof ProjectMutationError) {
+        setSuffix(
+          getRetryRoomIdSuffix(suffix, caught.status, createRoomIdSuffix),
+        )
+      }
+
       // Keep the dialog open so the typed name is not lost on a failed retry.
       setError(getErrorMessage(caught))
     } finally {

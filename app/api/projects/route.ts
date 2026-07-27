@@ -59,7 +59,8 @@ export async function POST(request: Request): Promise<Response> {
 
     return Response.json({ project }, { status: 201 });
   } catch (caught) {
-    // The suffix is regenerated per dialog open, so retrying resolves this.
+    // The create dialog regenerates its suffix after this response, so the
+    // user's next submit retries with a different room ID.
     if (
       caught instanceof Prisma.PrismaClientKnownRequestError &&
       caught.code === UNIQUE_VIOLATION

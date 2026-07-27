@@ -6,7 +6,11 @@ import {
   parseProjectName,
   readJsonBody,
 } from "../lib/project-requests";
-import { buildRoomId, slugify } from "../lib/room-id";
+import {
+  buildRoomId,
+  getRetryRoomIdSuffix,
+  slugify,
+} from "../lib/room-id";
 
 const jsonRequest = (body: string) =>
   new Request("http://localhost/api/projects", { method: "POST", body });
@@ -101,11 +105,38 @@ function checkRoomIdsPassValidation() {
   assert.equal(slugify("Checkout Service"), "checkout-service");
 }
 
+function checkCollisionRetryUsesFreshSuffix() {
+  let generatedSuffixCount = 0;
+  const createSuffix = () => {
+    generatedSuffixCount += 1;
+    return "d4e5f6";
+  };
+
+  assert.equal(
+    getRetryRoomIdSuffix("a1b2c3", 409, createSuffix),
+    "d4e5f6",
+    "an ID collision should rotate the room suffix",
+  );
+  assert.equal(generatedSuffixCount, 1, "a collision should generate once");
+
+  assert.equal(
+    getRetryRoomIdSuffix("a1b2c3", 500, createSuffix),
+    "a1b2c3",
+    "other failures should keep the current room suffix",
+  );
+  assert.equal(
+    generatedSuffixCount,
+    1,
+    "non-collision failures should not generate a suffix",
+  );
+}
+
 async function main() {
   await checkBodyReading();
   checkNameParsing();
   checkIdParsing();
   checkRoomIdsPassValidation();
+  checkCollisionRetryUsesFreshSuffix();
   console.log("✅ Project API request parsing verified");
 }
 

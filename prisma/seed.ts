@@ -32,20 +32,24 @@ async function main() {
     console.log(`Removed ${count} existing seed project(s)`);
   }
 
-  for (const { name, description, collaborators } of projects) {
-    const project = await prisma.project.create({
-      data: {
-        name,
-        description,
-        ownerId: SEED_OWNER_ID,
-        collaborators: {
-          create: collaborators.map((email) => ({ email })),
+  const seededProjects = await Promise.all(
+    projects.map(({ name, description, collaborators }) =>
+      prisma.project.create({
+        data: {
+          name,
+          description,
+          ownerId: SEED_OWNER_ID,
+          collaborators: {
+            create: collaborators.map((email) => ({ email })),
+          },
         },
-      },
-    });
+      }),
+    ),
+  );
 
+  for (const [index, project] of seededProjects.entries()) {
     console.log(
-      `Seeded project ${project.name} (${collaborators.length} collaborators)`,
+      `Seeded project ${project.name} (${projects[index].collaborators.length} collaborators)`,
     );
   }
 }

@@ -24,6 +24,7 @@ export function slugify(name: string): string {
  * suffix is appended — so the slug is truncated rather than rejected.
  */
 const MAX_SLUG_LENGTH = 60;
+const HTTP_CONFLICT_STATUS = 409;
 
 /**
  * `<slug>-<suffix>`, or an empty string when the name has no slugifiable
@@ -33,4 +34,18 @@ export function buildRoomId(name: string, suffix: string): string {
   const slug = slugify(name).slice(0, MAX_SLUG_LENGTH).replace(/-+$/, "");
 
   return slug && suffix ? `${slug}-${suffix}` : "";
+}
+
+/**
+ * A conflict means the client-generated ID is already taken, so the next
+ * submit must use a fresh suffix. Other failures keep the preview stable.
+ */
+export function getRetryRoomIdSuffix(
+  currentSuffix: string,
+  responseStatus: number,
+  createSuffix: () => string,
+): string {
+  return responseStatus === HTTP_CONFLICT_STATUS
+    ? createSuffix()
+    : currentSuffix;
 }

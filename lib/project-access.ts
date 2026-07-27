@@ -44,6 +44,7 @@ export async function getAccessibleProject(
   const project = await prisma.project.findFirst({
     where: {
       id: projectId,
+      status: { notIn: ["DELETING", "DELETED"] },
       OR: [
         { ownerId: identity.userId },
         // Collaboration is keyed on email, matched case-insensitively to match
@@ -94,10 +95,16 @@ export type Authorization =
  *
  * `ownerId` comes back on success so callers that need it (the member list)
  * do not repeat the lookup this function already performed.
+ *
+ * Deletion tombstones answer 404 for every normal caller. The DELETE handler
+ * alone opts into them so the original owner can retry failed room cleanup.
  */
 export async function authorizeProject(
   projectId: string,
-  { requireOwner }: { requireOwner: boolean },
+  {
+    requireOwner,
+    allowDeletionStates = false,
+  }: { requireOwner: boolean; allowDeletionStates?: boolean },
 ): Promise<Authorization> {
   const { userId } = await auth();
 
@@ -107,10 +114,20 @@ export async function authorizeProject(
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { ownerId: true },
+    select: { ownerId: true, status: true },
   });
 
   if (!project) {
+    return { ok: false, response: jsonError("Project not found", 404) };
+  }
+
+  const isDeletionState =
+    project.status === "DELETING" || project.status === "DELETED";
+
+  if (
+    isDeletionState &&
+    (!allowDeletionStates || project.ownerId !== userId)
+  ) {
     return { ok: false, response: jsonError("Project not found", 404) };
   }
 

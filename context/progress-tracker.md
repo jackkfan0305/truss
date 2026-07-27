@@ -9,9 +9,56 @@ Update this file whenever the current phase, active feature, or implementation s
 ## Current Goal
 
 - `04-project-dialogs` complete against its spec: the editor home has its create prompt, all three project dialogs exist, and the sidebar renders project lists with owner-only actions — all on mock data. Everything is wired to one hook, so `06-project-apis` → `07-wire-editor-home` only have to replace the data source and the no-op mutations.
-- `09-share-dialog` complete: the navbar's Share button is live, owners can invite and remove collaborators by email, collaborators get the same dialog read-only, and rows are enriched with Clerk names and avatars. Next is `10-liveblocks-setup` and the canvas work — the workspace canvas and AI panel are still placeholders.
+- `12-shape-panel` complete: the canvas is now creatable — drag a shape off the bottom palette (or click it) and a `canvasNode` is written into Liveblocks Storage. Nodes render as plain bordered rectangles; shape-specific visuals, connection handles and label editing are all still ahead. The AI panel is still a placeholder.
 
 ## Completed
+
+- PR #3 Codex review fixes — permanent deletion tombstones prevent deleted
+  Liveblocks rooms, bearer tokens, delayed cleanup and stale authorization from
+  crossing into a reused project ID. Node IDs include UUID entropy so
+  simultaneous collaborators cannot reconcile distinct drops as one node.
+  - `ProjectStatus` now includes `DELETING` and `DELETED`. Both are excluded from
+    list/access/auth queries, while owner-authorized `DELETE` can retry either
+    state.
+  - `lib/project-lifecycle.ts` atomically claims the row for the authorized owner,
+    deletes the Liveblocks room, then finalizes the permanent `DELETED` tombstone.
+    Cleanup failure leaves `DELETING` for an explicit retry and never frees the
+    globally unique project/room ID. Entering `DELETING` immediately scrubs the
+    name, description, and collaborator emails; `canvasJsonPath` remains as the
+    future Vercel Blob cleanup pointer rather than orphaning the artifact.
+  - Liveblocks auth performs a final access check after token preparation. A
+    concurrent tombstone withholds the bearer token and deletes any room the
+    in-flight request recreated.
+  - `lib/canvas-drag.ts` — IDs are now
+    `{shape}-{timestamp}-{counter}-{uuid}` rather than relying only on tab-local
+    state.
+  - `scripts/verify-project-data.ts` and `scripts/verify-canvas.ts` — regression
+    coverage for cleanup failure/retry, tombstone access/list filtering,
+    permanent ID reservation, and cross-client node entropy.
+
+- `12-shape-panel` — shape palette, drag-and-drop node creation, and a placeholder node renderer. No shape-specific visuals, no handles, no label editing.
+  - `types/canvas.ts` — `NODE_DEFAULT_SIZES` (per-shape `{ width, height }`) and the `NodeSize` interface. Rectangle 180×80, diamond 200×130, circle 130×130, pill 180×56, cylinder 160×100, hexagon 180×96.
+  - `lib/canvas-drag.ts` — the panel→canvas contract. `SHAPE_DRAG_MIME` is `application/x-truss-shape`, `buildShapeDragPayload(shape)`, `parseShapeDragPayload(raw)` and `createNodeId(shape)`.
+  - `components/canvas/shape-panel.tsx` — a `role="toolbar"` pill of six `draggable` icon buttons (lucide `Square`/`Diamond`/`Circle`/`Pill`/`Cylinder`/`Hexagon`), each labelled with the role `ui-context.md` assigns it.
+  - `components/canvas/canvas-node.tsx` — `CanvasNodeRenderer`, a bordered rectangle filled from `NODE_COLORS[data.color]` with the label centred. Fills the wrapper React Flow sizes from `width`/`height` rather than setting its own.
+  - `components/canvas/canvas.tsx` — split into `Canvas` (just `ReactFlowProvider`) and `CanvasFlow`. Adds the drop wrapper, `NODE_TYPES`, and `<Panel position="bottom-center">` holding the palette.
+  - `scripts/verify-canvas.ts` — payload round trip per shape, the three size rules the spec names, 13 malformed payloads rejected, and 500 same-tick IDs unique.
+
+- `11-base-canvas` — the collaborative canvas foundation. No controls, no custom node/edge rendering, no persistence, no AI.
+  - `types/canvas.ts` — `NODE_COLORS` (the 8 `ui-context.md` pairs, keyed by name), `NODE_SHAPES` (6), `CanvasNodeData`, `CanvasNode`, `CanvasEdge`, plus `CANVAS_NODE_TYPE` / `CANVAS_EDGE_TYPE` (`"canvasNode"` / `"canvasEdge"`) and the two defaults.
+  - `components/canvas/canvas-room.tsx` — `LiveblocksProvider` (`authEndpoint="/api/liveblocks-auth"`) → `RoomProvider` (`initialPresence: { cursor: null, isThinking: false }`) → `ConnectionGuard` → `ClientSideSuspense` → `Canvas`. Suspense hooks come from `@liveblocks/react/suspense`.
+  - `components/canvas/canvas.tsx` — `useLiveblocksFlow<CanvasNode, CanvasEdge>({ suspense: true, nodes: { initial: [] }, edges: { initial: [] } })` wired straight into `ReactFlow` with `connectionMode={ConnectionMode.Loose}`, `fitView`, `colorMode="dark"`, a dots `Background` at a 22px gap, and a pannable/zoomable `MiniMap`. Imports `@xyflow/react/dist/style.css`.
+  - `components/editor/editor-shell.tsx` — the `Canvas for {name}` placeholder is replaced by `<main aria-label="Canvas" className="relative flex-1 bg-page">` wrapping `CanvasRoom`. React Flow needs a sized parent, so the centring flex classes had to go.
+  - `liveblocks.config.ts` is unchanged: `Storage` is still undeclared, and `useLiveblocksFlow` writes its `flow` `LiveObject` under the permissive default. Declaring it would mean hand-writing the `LiveMap<string, LiveblocksNode<…>>` shape the package already derives.
+
+- `10-liveblocks-setup` — realtime infrastructure only: types, server client, auth route. No provider, no hooks, no canvas.
+  - `@liveblocks/node` was **not** installed despite the spec saying all packages were; added at `^3.23.0` alongside the four that were already there.
+  - `liveblocks.config.ts` — global `Liveblocks` interface. `Presence` is `{ cursor: {x,y} | null, isThinking: boolean }`; the cursor is in canvas coordinates, not screen coordinates, so it survives pan and zoom. `UserMeta.info` is `{ name, avatar, color }`. `Storage`, `RoomEvent`, `ThreadMetadata` and `RoomInfo` are **omitted rather than declared empty** — every key is optional and falls back to the permissive Liveblocks default, and `@typescript-eslint/no-empty-object-type` rejects the `{}` the starter template ships. Storage arrives with the React Flow node/edge schema.
+  - `lib/liveblocks.ts` — `getLiveblocks()` returns the node client, cached on `globalThis` outside production for the same reason `lib/prisma.ts` is. Constructed lazily inside the getter, not at module load, so a missing `LIVEBLOCKS_SECRET_KEY` fails the one request that needs it instead of every import (which would break `tsx` scripts and the build). `getCursorColor(userId)` is a djb2 hash into a fixed 8-colour palette — same user, same colour, every room and device. Raw hex, not CSS tokens: the value travels inside the token as data and cannot be resolved from a stylesheet.
+  - `app/api/liveblocks-auth/route.ts` — `POST`. Reads `{ room }` from the body the Liveblocks client sends; a project ID *is* its room ID (`lib/room-id.ts`), so the room name is the project to authorize. Order is parse → `authorizeProject(room, { requireOwner: false })` → `currentUser()` → `getOrCreateRoom` → token, so an outsider can neither create a room nor spend a Clerk lookup. Room is created with `defaultAccesses: []` (private).
+  - **Access tokens, not ID tokens**, despite ID tokens being the Liveblocks recommendation. Membership here is dynamic — a collaborator is a `ProjectCollaborator` row matched on email — so `prepareSession` + `session.allow(roomId, FULL_ACCESS)` computes permission per request from the database. The ID-token route would mean mirroring membership into the room's `usersAccesses` on every invite and removal, and keeping two sources of truth in sync.
+  - `LIVEBLOCKS_SECRET_KEY` added to `.env` **with an empty value** — the real key has to come from the Liveblocks dashboard. Until it is set, the auth route throws `LIVEBLOCKS_SECRET_KEY is not set`; build and lint are unaffected because the client is lazy.
+  - `scripts/verify-liveblocks.ts` — asserts the colour map is hex, deterministic across repeat calls (including empty, non-ASCII and 200-char IDs), and spreads across at least 4 buckets over 200 IDs, which is what would catch the hash degenerating. The route itself needs a Clerk request context and a real secret, so it is left to a live check.
 
 - `09-share-dialog` — sharing end to end: three API handlers, the dialog, and Clerk profile enrichment. No local user table.
   - `app/api/projects/[projectId]/members/route.ts` — `GET` lists (owner **or** collaborator, since the dialog is read-only for the latter), `POST` invites (owner only, `201`). Both answer `{ members }` already enriched, so the client never needs a second round trip after a mutation. A duplicate invite is `409`; inviting yourself is `400`.
@@ -87,8 +134,12 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
-- `10-liveblocks-setup` — the project ID is already the intended room ID, and `authorizeProject` is the membership check room-token issuance should reuse rather than reimplementing.
-- The canvas is a centred `Canvas for {name}` placeholder and the right panel says "AI assistant coming soon". `10-liveblocks-setup` replaces the first, the AI chat spec replaces the second. Both are in `components/editor/editor-shell.tsx`; `AiSidebar` is a local function there rather than its own file, since it is ~12 lines that get deleted wholesale.
+- **The canvas has never been seen in a browser.** Both keys are now set and the server side is verified, so the only thing left is one signed-in pass at `/editor/{projectId}`: canvas renders, minimap and dots background appear, a second tab syncs a node drag. Still blocked on the same missing Clerk session as `07`–`09`.
+- The right panel still says "AI assistant coming soon"; the AI chat spec replaces it. `AiSidebar` is a local function in `components/editor/editor-shell.tsx` rather than its own file, since it is ~12 lines that get deleted wholesale.
+- **Nodes still have no connection handles**, so `onConnect` and `connectionMode={ConnectionMode.Loose}` are both wired but unreachable — nothing can be connected to anything yet. `ui-context.md` specifies four hover-revealed handles per node; both `11` and `12` explicitly defer node visuals, so this belongs to whichever spec adds shape-specific rendering. It is the largest gap between the canvas as built and the canvas as documented.
+- Dropped nodes have an **empty label and no way to set one** — the renderer shows a faint "Untitled" placeholder. Label editing is not in any spec yet.
+- Canvas controls, shape-specific `canvasNode` visuals, `canvasEdge` rendering, and blob persistence are the next canvas slices.
+- `Cursors` from `@liveblocks/react-flow` was deliberately not added — no spec asks for it yet. It stores presence under the `"cursor"` key in canvas coordinates, which is exactly what `liveblocks.config.ts` already declares, so dropping it in is a one-line change plus the `@liveblocks/react-flow/styles.css` import.
 - `EditorNavbar` now imports `UserButton`, so it can no longer render outside a `ClerkProvider`. Any future harness or story for the navbar must be mounted under the root layout.
 
 ## Open Questions
@@ -108,6 +159,15 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Architecture Decisions
 
+- **Both editor sidebars are inset floating panels, not docked rails.** `ProjectSidebar` and `AiSidebar` were already absolute overlays, but flush to the viewport edge with a single inner border they read as docked chrome. They now sit at `inset-y-3` / `left-3` / `right-3` with `rounded-2xl`, a full border, `shadow-2xl` and `bg-surface/80 backdrop-blur-xl`, so the canvas and its dot grid stay visible around and faintly through them. This is what `ui-context.md` already specified ("floating overlay with dark semi-transparent background and subtle border"); the implementation had drifted.
+  - The closed transform is `calc(100% + 2rem)`, not `100%`. A plain `-translate-x-full` leaves the 12px inset *and* the blurred shadow bleeding down the edge of a closed panel.
+  - Tailwind v4 normalises `calc(100%+2rem)` into valid `calc(100% + 2rem)` — the underscore syntax (`calc(100%_+_2rem)`) is not needed here. Confirmed against the built CSS, not assumed.
+  - Contrast is unaffected: `--bg-surface` `#111114` at 80% over `--bg-base` `#080809` composites to roughly `#0f0f11`, marginally *darker* than the opaque original.
+- **New nodes are added through `onNodesChange([{ type: "add", item }])`, never a local `setNodes`.** `useLiveblocksFlow` routes that change into a `useMutation` that writes the node to Storage, so it reaches every other client in the room. A local setter would create a node only the author can see. `applyNodeChanges` in the package treats `add` and `replace` identically — an existing ID is *reconciled*, not rejected — which is why `createNodeId` carries both a tab-local counter and UUID entropy in addition to the timestamp: simultaneous drops from different collaborators must not collapse into one node.
+- The drag payload uses a **custom MIME type** (`application/x-truss-shape`), not `text/plain`. `dragover` can only inspect `dataTransfer.types`, never the payload, so a specific type is the only way to decide whether to accept a drop before it happens — and it stops a dragged text selection or file from being read as a shape.
+- The payload is **parsed as untrusted input**. A `DataTransfer` can be populated by another tab or an older build of this app, so `parseShapeDragPayload` shape-checks the shape name and both dimensions and returns `null` rather than letting a malformed node into Storage.
+- `Canvas` is now just `ReactFlowProvider` wrapping `CanvasFlow`. The drop target is the wrapper *around* `<ReactFlow>`, and `useReactFlow` (for `screenToFlowPosition`) is unavailable there without the explicit provider — `ReactFlow` only supplies that context to its own children.
+- The shape buttons are **click-to-add as well as drag**, which the spec does not ask for. HTML5 drag-and-drop has no keyboard equivalent, so drag alone would make node creation pointer-only. The click path centres the node using the wrapper's `getBoundingClientRect`, not `window.innerWidth/Height` — the canvas sits below a 56px navbar and beside the AI panel, so a window-centred node lands off-centre.
 - **The share list is "members", not "collaborators": the owner is in it, with a role badge.** A "People with access" list that omits the one person who always has access reads as a bug. The owner has no `ProjectCollaborator` row, so their identity is resolved from `Project.ownerId` through Clerk — which is why `ProjectMember.email` is nullable while a collaborator's never is. The route path is `/api/projects/[id]/members` to match, even though its mutations still only ever write collaborator rows.
 - Roles are **derived, not stored**. There is no role column: owner is `Project.ownerId`, collaborator is the existence of a `ProjectCollaborator` row. Adding a third role (viewer, commenter) would be the point at which that stops working and a real column is needed.
 - **One authorization gate for every project handler**: `authorizeProject(projectId, { requireOwner })` in `lib/project-access.ts`, returning `{ ok: true, role }` or `{ ok: false, response }`. It lives beside `getAccessibleProject` rather than in `lib/project-requests.ts` so that all access control is auditable in one file, at the cost of that file importing `jsonError`. Adding a handler that forgets to call it is the failure mode to watch — nothing forces the call.
@@ -164,6 +224,21 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Session Notes
 
+- PR #3 Codex review fixes verified: `verify-project-api.ts`,
+  `verify-project-data.ts`, `verify-canvas.ts`, and `verify-liveblocks.ts` pass;
+  `tsc --noEmit`, ESLint, and the Next.js production build are clean; React
+  Doctor 0.9.2 reports 100/100 with no issues. The additive tombstone migration
+  is applied and `prisma migrate status` reports the database up to date.
+- `12-shape-panel` verification: `tsc --noEmit`, `npm run lint` and `npm run build` all clean, and `npx tsx scripts/verify-canvas.ts` passes. **Not verified in a browser** — same missing Clerk session as everything since `07`. Nothing in this unit is exercisable without a pointer on a live canvas, so the untested surface here is larger than usual: the actual drag gesture, the drop coordinate conversion, and whether a second client sees the new node.
+- `nodeTypes` is a **module-level** constant. Passing an inline object literal makes React Flow re-register every node type on each render, which remounts custom nodes and drops their local state. It logs a console warning rather than failing.
+- `useReactFlow` throws outside a `ReactFlowProvider`, and `<ReactFlow>` does *not* count as one for its own siblings or its parent — only for its children. Any hook-using code that sits beside or above `<ReactFlow>` needs the explicit provider.
+- The `cd` in a Bash call **persists across tool calls** in this session. A `cd node_modules/...` to inspect a package left every following command running from there, and `npm run lint` failed with "Missing script" until the directory was reset. Use absolute paths when poking around `node_modules`.
+- `11-base-canvas` verification: `tsc --noEmit`, `npm run lint` and `npm run build` all clean. `npx tsx scripts/verify-liveblocks.ts` passes including a live `getRooms()` call, so `LIVEBLOCKS_SECRET_KEY` is confirmed good against the real Liveblocks API. Against `next dev`, an unauthenticated `POST /api/liveblocks-auth` answers a clean JSON `401` — the Clerk gate runs before any Liveblocks call, so a signed-out request never reaches the node client. **The canvas UI itself is still unverified in a browser** (no reachable signed-in session, see Open Questions).
+- Both Liveblocks keys are now in `.env`. `LIVEBLOCKS_PUBLIC_KEY` is stored **without** the `NEXT_PUBLIC_` prefix and **nothing reads it**: the canvas authenticates through `authEndpoint`, not `LiveblocksProvider`'s `publicApiKey`. Leaving the prefix off keeps an unused key out of the client bundle; rename it if a client-side consumer ever appears.
+- `scripts/verify-liveblocks.ts` gained `import "dotenv/config"` and a live secret check. It ends in `main().catch(...)`, not top-level `await` — `tsx` transforms these scripts to CJS, which rejects top-level await outright (`Top-level await is currently not supported with the "cjs" output format`). Any verify script that goes async needs the same shape.
+- No verification script was added. The only branch is `describeConnectionError`, a code→string switch, and everything else in `types/canvas.ts` is data a test would just restate. The load-bearing constraint — `CanvasNodeData` satisfying React Flow's `Record<string, unknown>` — is enforced by `tsc` on every build.
+- React Flow node data must be declared with a `type` alias, not an `interface`. `Node<T>` constrains `T extends Record<string, unknown>`, and interfaces do not get the implicit index signature that satisfies it. This is the one place `code-standards.md`'s "use `interface` for object contracts" cannot be followed.
+- `useLiveblocksFlow` seeds its own `flow` key in Storage (`setInitialStorage` inside the hook), so `RoomProvider` needs no `initialStorage` prop.
 - `06-project-apis` verification: `npx tsx scripts/verify-project-api.ts` passes, `tsc --noEmit`, `npm run lint` and `npm run build` are clean, and the build output registers `ƒ /api/projects` and `ƒ /api/projects/[projectId]`. Against `next dev`, unauthenticated `GET`, `POST`, `PATCH` and `DELETE` all return `401` with `content-type: application/json`, while `GET /editor` still returns `307` — confirming the `/api` middleware exemption did not leak to pages.
 - `07-wire-editor-home` verification: `npx tsx scripts/verify-project-api.ts` and `npx tsx scripts/verify-project-data.ts` both pass, and `tsc --noEmit`, `npm run lint`, `npm run build` are clean. The data-layer script runs against the live database and covers `getOwnedProjects`, `getSharedProjects` (case-insensitive email, own projects excluded, self-invite not double-listed, no-email → empty), creating a project with the room ID as its primary key, the `P2002` duplicate that produces the `409`, and the collaborator cascade on delete. It seeds and cleans up under `verify_owner` / `verify_other_owner`, so it does not disturb the `user_seed_owner` rows.
 - `08-editor-workspace-shell` verification: `tsc --noEmit`, `npm run lint` and `npm run build` all clean, with `ƒ /editor/[roomId]` in the build output. `npx tsx scripts/verify-project-data.ts` passes, including the six new access assertions against the live database. Unauthenticated, both `/editor/checkout-service-a1b2c3` and `/editor/verify-does-not-exist` `307` to `/sign-in` with the right `redirect_url`, so `proxy.ts` covers the new dynamic segment. The **signed-in** paths — `AccessDenied` rendering, the active-row highlight, the AI panel slide-over — are still unverified in a browser for the same reason as `07` (no reachable session; see Open Questions).

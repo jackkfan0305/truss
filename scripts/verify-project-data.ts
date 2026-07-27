@@ -5,6 +5,10 @@ import assert from "node:assert/strict";
 import { Prisma } from "../generated/prisma/client";
 import { prisma } from "../lib/prisma";
 import { getAccessibleProject } from "../lib/project-access";
+import {
+  cleanupTombstonedRoom,
+  deleteProjectResources,
+} from "../lib/project-lifecycle";
 import { getOwnedProjects, getSharedProjects } from "../lib/projects";
 import { buildRoomId } from "../lib/room-id";
 
@@ -96,6 +100,212 @@ async function checkRoomIdCreate() {
   );
 
   await prisma.project.delete({ where: { id: roomId } });
+}
+
+const CLEANUP_PROJECT_ID = "verify-room-cleanup-failure";
+
+async function checkActiveRoomIsPreserved() {
+  let roomDeletionAttempted = false;
+
+  assert.equal(
+    await cleanupTombstonedRoom("verify-owned-one", {
+      deleteRoom: async () => {
+        roomDeletionAttempted = true;
+      },
+    }),
+    false,
+    "an active project's room must never be removed by the auth fence",
+  );
+  assert.equal(roomDeletionAttempted, false);
+}
+
+async function checkMissingProjectPreservesRoom() {
+  let roomDeletionAttempted = false;
+
+  await assert.rejects(
+    deleteProjectResources(
+      "verify-does-not-exist",
+      OWNER_ID,
+      {
+        deleteRoom: async () => {
+          roomDeletionAttempted = true;
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025",
+    "a missing database row must fail deletion",
+  );
+  assert.equal(
+    roomDeletionAttempted,
+    false,
+    "a database deletion failure must not destroy Liveblocks data",
+  );
+}
+
+async function seedCleanupFailureProject() {
+  await prisma.project.create({
+    data: {
+      id: CLEANUP_PROJECT_ID,
+      ownerId: OWNER_ID,
+      name: "Cleanup Failure",
+      description: "Sensitive deletion test",
+      canvasJsonPath: "https://blob.example/verify-room-cleanup-failure.json",
+      collaborators: {
+        create: { email: "cleanup-collaborator@example.com" },
+      },
+    },
+  });
+}
+
+async function checkCleanupFailureLeavesTombstone() {
+  const cleanupFailure = new Error("Liveblocks unavailable");
+
+  await assert.rejects(
+    deleteProjectResources(
+      CLEANUP_PROJECT_ID,
+      OWNER_ID,
+      {
+        deleteRoom: async () => {
+          throw cleanupFailure;
+        },
+      },
+    ),
+    cleanupFailure,
+  );
+
+  const deletingProject = await prisma.project.findUnique({
+    where: { id: CLEANUP_PROJECT_ID },
+    select: {
+      name: true,
+      description: true,
+      status: true,
+      canvasJsonPath: true,
+    },
+  });
+  assert.deepEqual(
+    deletingProject,
+    {
+      name: "Deleted project",
+      description: null,
+      status: "DELETING",
+      canvasJsonPath:
+        "https://blob.example/verify-room-cleanup-failure.json",
+    },
+    "failed cleanup must retain only the tombstone and artifact cleanup pointer",
+  );
+  assert.equal(
+    await prisma.projectCollaborator.count({
+      where: { projectId: CLEANUP_PROJECT_ID },
+    }),
+    0,
+    "entering DELETING must scrub collaborator emails before external cleanup",
+  );
+}
+
+async function checkTombstoneIsHiddenAndReserved() {
+  assert.equal(
+    await getAccessibleProject(CLEANUP_PROJECT_ID, {
+      userId: OWNER_ID,
+      email: null,
+    }),
+    null,
+    "a deleting project must not remain accessible",
+  );
+  assert.equal(
+    (await getOwnedProjects(OWNER_ID)).some(
+      (project) => project.id === CLEANUP_PROJECT_ID,
+    ),
+    false,
+    "a deleting project must disappear from project lists",
+  );
+
+  await assert.rejects(
+    prisma.project.create({
+      data: {
+        id: CLEANUP_PROJECT_ID,
+        ownerId: OTHER_OWNER_ID,
+        name: "Must Not Reuse",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === UNIQUE_VIOLATION,
+    "a deletion tombstone must permanently reserve the project and room ID",
+  );
+}
+
+async function checkAuthFenceCleansTombstone() {
+  let roomDeletionAttempted = false;
+  assert.equal(
+    await cleanupTombstonedRoom(CLEANUP_PROJECT_ID, {
+      deleteRoom: async () => {
+        roomDeletionAttempted = true;
+      },
+    }),
+    true,
+    "the auth fence must remove a room recreated after tombstoning",
+  );
+  assert.equal(roomDeletionAttempted, true);
+}
+
+async function checkDeletionRetryFinalizesTombstone() {
+  let roomDeletionAttempted = false;
+  await deleteProjectResources(
+    CLEANUP_PROJECT_ID,
+    OWNER_ID,
+    {
+      deleteRoom: async () => {
+        roomDeletionAttempted = true;
+      },
+    },
+  );
+  assert.equal(
+    roomDeletionAttempted,
+    true,
+    "retrying a deletion must retry Liveblocks cleanup",
+  );
+  assert.deepEqual(
+    await prisma.project.findUnique({
+      where: { id: CLEANUP_PROJECT_ID },
+      select: {
+        id: true,
+        ownerId: true,
+        name: true,
+        description: true,
+        status: true,
+        canvasJsonPath: true,
+      },
+    }),
+    {
+      id: CLEANUP_PROJECT_ID,
+      ownerId: OWNER_ID,
+      name: "Deleted project",
+      description: null,
+      status: "DELETED",
+      canvasJsonPath:
+        "https://blob.example/verify-room-cleanup-failure.json",
+    },
+    "final tombstone must preserve any artifact pointer until blob deletion exists",
+  );
+  assert.equal(
+    await prisma.projectCollaborator.count({
+      where: { projectId: CLEANUP_PROJECT_ID },
+    }),
+    0,
+    "final deletion must scrub collaborator emails",
+  );
+}
+
+async function checkProjectResourceDeletion() {
+  await checkActiveRoomIsPreserved();
+  await checkMissingProjectPreservesRoom();
+  await seedCleanupFailureProject();
+  await checkCleanupFailureLeavesTombstone();
+  await checkTombstoneIsHiddenAndReserved();
+  await checkAuthFenceCleansTombstone();
+  await checkDeletionRetryFinalizesTombstone();
 }
 
 /**
@@ -239,6 +449,7 @@ async function main() {
   await checkProjectAccess();
   await checkCollaboratorMutations();
   await checkRoomIdCreate();
+  await checkProjectResourceDeletion();
 
   // Cascade: deleting a project takes its collaborator rows with it.
   await prisma.project.delete({ where: { id: "verify-shared" } });

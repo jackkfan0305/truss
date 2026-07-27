@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Plus } from "lucide-react"
 
+import { CanvasRoom } from "@/components/canvas/canvas-room"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
@@ -84,11 +85,9 @@ export function EditorShell({
 
         {activeProject ? (
           <>
-            <main className="flex flex-1 items-center justify-center bg-page px-6">
-              {/* React Flow replaces this in 12-canvas-surface. */}
-              <p className="text-sm text-copy-muted">
-                Canvas for {activeProject.name}
-              </p>
+            {/* React Flow needs a sized parent, so the canvas fills `main`. */}
+            <main aria-label="Canvas" className="relative flex-1 bg-page">
+              <CanvasRoom roomId={activeProject.id} />
             </main>
 
             <AiSidebar isOpen={isAiSidebarOpen} />
@@ -125,15 +124,15 @@ export function EditorShell({
   )
 }
 
-/** Placeholder for the AI chat panel. Mirrors ProjectSidebar's slide-over. */
+/** Placeholder for the AI chat panel. Mirrors ProjectSidebar's floating panel. */
 function AiSidebar({ isOpen }: { isOpen: boolean }) {
   return (
     <aside
       aria-label="AI assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 flex w-80 max-w-full flex-col items-center justify-center border-l border-surface-border bg-surface/95 p-4 text-center backdrop-blur transition-transform duration-200 ease-out",
-        isOpen ? "translate-x-0" : "translate-x-full"
+        "absolute inset-y-3 right-3 z-40 flex w-80 max-w-[calc(100%-1.5rem)] flex-col items-center justify-center rounded-2xl border border-surface-border bg-surface/80 p-4 text-center shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
+        isOpen ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"
       )}
     >
       <p className="text-sm text-copy-muted">AI assistant coming soon</p>

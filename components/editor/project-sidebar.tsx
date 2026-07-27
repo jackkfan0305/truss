@@ -33,13 +33,17 @@ export function ProjectSidebar({
   className,
 }: ProjectSidebarProps) {
   return (
-    // Overlay, not a flex child — opening it must not reflow the canvas.
+    // Overlay, not a flex child — opening it must not reflow the canvas. Inset
+    // on all four sides rather than docked flush, so the canvas stays visible
+    // around it and it reads as a panel floating over the workspace.
     <aside
       aria-label="Projects"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 left-0 z-40 flex w-72 flex-col gap-4 border-r border-surface-border bg-surface/95 p-4 backdrop-blur transition-transform duration-200 ease-out",
-        isOpen ? "translate-x-0" : "-translate-x-full",
+        "absolute inset-y-3 left-3 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 rounded-2xl border border-surface-border bg-surface/80 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
+        // Closed, it clears its own inset *and* its shadow — `-translate-x-full`
+        // alone would leave both bleeding down the left edge.
+        isOpen ? "translate-x-0" : "-translate-x-[calc(100%+2rem)]",
         className
       )}
     >

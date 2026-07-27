@@ -42,3 +42,14 @@ next-env.d.ts
 
 # prisma generated client
 /generated
+
+# agent skills installed from an upstream repo — skills-lock.json pins the
+# source and content hash, so re-fetch rather than vendor ~50 reference files.
+# The lockfile itself stays tracked; without it the pins are lost.
+# react-doctor predates this and is already tracked, so these rules do not
+# affect it — .gitignore never applies to tracked files. The negations are
+# there so it does not silently vanish if it is ever removed and re-added.
+/.agents/skills/*
+/.claude/skills/*
+!/.agents/skills/react-doctor/
+!/.claude/skills/react-doctor/

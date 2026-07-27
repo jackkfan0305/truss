@@ -6,13 +6,20 @@ import { Plus } from "lucide-react"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
+import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
-import type { ProjectSummary } from "@/types/project"
+import { cn } from "@/lib/utils"
+import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
 interface EditorShellProps {
   ownedProjects: ProjectSummary[]
   sharedProjects: ProjectSummary[]
+  /**
+   * Set on `/editor/[roomId]`, absent on the editor home. Its presence is what
+   * switches the shell from the create prompt to the workspace layout.
+   */
+  activeProject?: ProjectAccess
 }
 
 /**
@@ -23,8 +30,11 @@ interface EditorShellProps {
 export function EditorShell({
   ownedProjects,
   sharedProjects,
+  activeProject,
 }: EditorShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
+  const [isShareOpen, setIsShareOpen] = useState(false)
   const actions = useProjectActions()
 
   return (
@@ -32,6 +42,14 @@ export function EditorShell({
       <EditorNavbar
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
+        projectName={activeProject?.name}
+        onShare={activeProject ? () => setIsShareOpen(true) : undefined}
+        isAiSidebarOpen={isAiSidebarOpen}
+        onToggleAiSidebar={
+          activeProject
+            ? () => setIsAiSidebarOpen((open) => !open)
+            : undefined
+        }
       />
 
       {/*
@@ -47,6 +65,7 @@ export function EditorShell({
           onCreateProject={actions.openCreate}
           onRenameProject={actions.openRename}
           onDeleteProject={actions.openDelete}
+          activeProjectId={activeProject?.id}
         />
 
         {/*
@@ -63,24 +82,61 @@ export function EditorShell({
           />
         ) : null}
 
-        <main className="flex flex-1 items-center justify-center bg-page px-6">
-          <div className="flex max-w-md flex-col items-center gap-3 text-center">
-            <h1 className="text-2xl font-medium tracking-tight text-copy-primary">
-              Create a project or open an existing one
-            </h1>
-            <p className="text-sm text-copy-muted">
-              Start a new architecture workspace, or choose a project from the
-              sidebar.
-            </p>
-            <Button className="mt-3" size="lg" onClick={actions.openCreate}>
-              <Plus className="h-4 w-4" />
-              New Project
-            </Button>
-          </div>
-        </main>
+        {activeProject ? (
+          <>
+            <main className="flex flex-1 items-center justify-center bg-page px-6">
+              {/* React Flow replaces this in 12-canvas-surface. */}
+              <p className="text-sm text-copy-muted">
+                Canvas for {activeProject.name}
+              </p>
+            </main>
+
+            <AiSidebar isOpen={isAiSidebarOpen} />
+          </>
+        ) : (
+          <main className="flex flex-1 items-center justify-center bg-page px-6">
+            <div className="flex max-w-md flex-col items-center gap-3 text-center">
+              <h1 className="text-2xl font-medium tracking-tight text-copy-primary">
+                Create a project or open an existing one
+              </h1>
+              <p className="text-sm text-copy-muted">
+                Start a new architecture workspace, or choose a project from the
+                sidebar.
+              </p>
+              <Button className="mt-3" size="lg" onClick={actions.openCreate}>
+                <Plus className="h-4 w-4" />
+                New Project
+              </Button>
+            </div>
+          </main>
+        )}
       </div>
 
       <ProjectDialogs actions={actions} />
+
+      {activeProject ? (
+        <ShareDialog
+          project={activeProject}
+          open={isShareOpen}
+          onOpenChange={setIsShareOpen}
+        />
+      ) : null}
     </div>
+  )
+}
+
+/** Placeholder for the AI chat panel. Mirrors ProjectSidebar's slide-over. */
+function AiSidebar({ isOpen }: { isOpen: boolean }) {
+  return (
+    <aside
+      aria-label="AI assistant"
+      inert={!isOpen}
+      className={cn(
+        "absolute inset-y-0 right-0 z-40 flex w-80 max-w-full flex-col items-center justify-center border-l border-surface-border bg-surface/95 p-4 text-center backdrop-blur transition-transform duration-200 ease-out",
+        isOpen ? "translate-x-0" : "translate-x-full"
+      )}
+    >
+      <p className="text-sm text-copy-muted">AI assistant coming soon</p>
+    </aside>
   )
 }

@@ -1,0 +1,89 @@
+"use client";
+
+import type { DragEvent } from "react";
+import {
+  Circle,
+  Cylinder,
+  Diamond,
+  Hexagon,
+  Pill,
+  Square,
+  type LucideIcon,
+} from "lucide-react";
+
+import { SHAPE_DRAG_MIME, buildShapeDragPayload } from "@/lib/canvas-drag";
+import { NODE_SHAPES, type NodeShape } from "@/types/canvas";
+
+const SHAPE_ICONS: Record<NodeShape, LucideIcon> = {
+  rectangle: Square,
+  diamond: Diamond,
+  circle: Circle,
+  pill: Pill,
+  cylinder: Cylinder,
+  hexagon: Hexagon,
+};
+
+/** The role each shape carries on the canvas, per `context/ui-context.md`. */
+const SHAPE_LABELS: Record<NodeShape, string> = {
+  rectangle: "Rectangle — general purpose",
+  diamond: "Diamond — decision",
+  circle: "Circle — event",
+  pill: "Pill — service",
+  cylinder: "Cylinder — database",
+  hexagon: "Hexagon — external system",
+};
+
+/** Module scope: it reads only its arguments, so it never needs rebuilding. */
+function handleDragStart(
+  event: DragEvent<HTMLButtonElement>,
+  shape: NodeShape
+) {
+  event.dataTransfer.setData(
+    SHAPE_DRAG_MIME,
+    JSON.stringify(buildShapeDragPayload(shape))
+  );
+  event.dataTransfer.effectAllowed = "copy";
+}
+
+interface ShapePanelProps {
+  /**
+   * Keyboard path for the same action as the drag: adds the shape at the centre
+   * of the current viewport. Drag-and-drop alone is unreachable without a
+   * pointer.
+   */
+  onAddShape: (shape: NodeShape) => void;
+}
+
+/**
+ * Floating shape palette at the bottom of the canvas (12-shape-panel). Each
+ * button is an HTML5 drag source carrying the shape and its default size.
+ */
+export function ShapePanel({ onAddShape }: ShapePanelProps) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Add a shape"
+      aria-orientation="horizontal"
+      className="flex items-center gap-1 rounded-full border border-surface-border bg-elevated/90 p-1.5 shadow-lg backdrop-blur"
+    >
+      {NODE_SHAPES.map((shape) => {
+        const Icon = SHAPE_ICONS[shape];
+
+        return (
+          <button
+            key={shape}
+            type="button"
+            draggable
+            title={SHAPE_LABELS[shape]}
+            aria-label={SHAPE_LABELS[shape]}
+            onDragStart={(event) => handleDragStart(event, shape)}
+            onClick={() => onAddShape(shape)}
+            className="flex h-9 w-9 cursor-grab items-center justify-center rounded-full text-copy-muted transition-colors hover:bg-subtle hover:text-copy-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand active:cursor-grabbing"
+          >
+            <Icon className="h-5 w-5" aria-hidden />
+          </button>
+        );
+      })}
+    </div>
+  );
+}

@@ -16,6 +16,7 @@ interface EditorNavbarProps {
   onToggleSidebar: () => void
   /** Workspace only — the editor home has no active project. */
   projectName?: string
+  onShare?: () => void
   isAiSidebarOpen?: boolean
   onToggleAiSidebar?: () => void
   className?: string
@@ -25,6 +26,7 @@ export function EditorNavbar({
   isSidebarOpen,
   onToggleSidebar,
   projectName,
+  onShare,
   isAiSidebarOpen = false,
   onToggleAiSidebar,
   className,
@@ -61,9 +63,7 @@ export function EditorNavbar({
       <div className="flex flex-1 items-center justify-end gap-2">
         {onToggleAiSidebar ? (
           <>
-            {/* Sharing behaviour arrives with the share dialog; the control is
-                disabled rather than a silent no-op until then. */}
-            <Button variant="ghost" size="sm" disabled>
+            <Button variant="ghost" size="sm" onClick={onShare}>
               <Share2 className="h-4 w-4" />
               <span className="hidden sm:inline">Share</span>
             </Button>

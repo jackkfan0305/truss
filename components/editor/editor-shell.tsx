@@ -6,10 +6,11 @@ import { Plus } from "lucide-react"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
+import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
 import { cn } from "@/lib/utils"
-import type { ProjectSummary } from "@/types/project"
+import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
 interface EditorShellProps {
   ownedProjects: ProjectSummary[]
@@ -18,7 +19,7 @@ interface EditorShellProps {
    * Set on `/editor/[roomId]`, absent on the editor home. Its presence is what
    * switches the shell from the create prompt to the workspace layout.
    */
-  activeProject?: ProjectSummary
+  activeProject?: ProjectAccess
 }
 
 /**
@@ -33,6 +34,7 @@ export function EditorShell({
 }: EditorShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
+  const [isShareOpen, setIsShareOpen] = useState(false)
   const actions = useProjectActions()
 
   return (
@@ -41,6 +43,7 @@ export function EditorShell({
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
         projectName={activeProject?.name}
+        onShare={activeProject ? () => setIsShareOpen(true) : undefined}
         isAiSidebarOpen={isAiSidebarOpen}
         onToggleAiSidebar={
           activeProject
@@ -110,6 +113,14 @@ export function EditorShell({
       </div>
 
       <ProjectDialogs actions={actions} />
+
+      {activeProject ? (
+        <ShareDialog
+          project={activeProject}
+          open={isShareOpen}
+          onOpenChange={setIsShareOpen}
+        />
+      ) : null}
     </div>
   )
 }

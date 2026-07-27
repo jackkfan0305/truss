@@ -1,6 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
-
 import { prisma } from "@/lib/prisma";
+import { authorizeProject } from "@/lib/project-access";
 import {
   jsonError,
   parseProjectName,
@@ -11,34 +10,8 @@ interface RouteParams {
   params: Promise<{ projectId: string }>;
 }
 
-type OwnerCheck = { ok: true } | { ok: false; response: Response };
-
-/**
- * Every mutation on this route is owner-only, so both handlers run this before
- * touching the record: 401 unauthenticated, 404 unknown project, 403 non-owner.
- */
-async function authorizeOwner(projectId: string): Promise<OwnerCheck> {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return { ok: false, response: jsonError("Unauthorized", 401) };
-  }
-
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { ownerId: true },
-  });
-
-  if (!project) {
-    return { ok: false, response: jsonError("Project not found", 404) };
-  }
-
-  if (project.ownerId !== userId) {
-    return { ok: false, response: jsonError("Forbidden", 403) };
-  }
-
-  return { ok: true };
-}
+// Both handlers here are owner-only. The gate moved to lib/project-access.ts in
+// 09-share-dialog once the collaborator routes needed it too.
 
 export async function PATCH(
   request: Request,
@@ -46,10 +19,10 @@ export async function PATCH(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const owner = await authorizeOwner(projectId);
+  const access = await authorizeProject(projectId, { requireOwner: true });
 
-  if (!owner.ok) {
-    return owner.response;
+  if (!access.ok) {
+    return access.response;
   }
 
   const name = parseProjectName(await readJsonBody(request), null);
@@ -72,10 +45,10 @@ export async function DELETE(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const owner = await authorizeOwner(projectId);
+  const access = await authorizeProject(projectId, { requireOwner: true });
 
-  if (!owner.ok) {
-    return owner.response;
+  if (!access.ok) {
+    return access.response;
   }
 
   // Collaborators cascade from the schema relation.

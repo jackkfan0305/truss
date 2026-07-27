@@ -18,6 +18,8 @@ import { buildRoomId } from "../lib/room-id";
  * stranger and someone else's workspace.
  */
 
+const UNIQUE_VIOLATION = "P2002";
+
 const OWNER_ID = "verify_owner";
 const OTHER_OWNER_ID = "verify_other_owner";
 const COLLABORATOR_EMAIL = "Collaborator@Example.com";
@@ -112,13 +114,18 @@ async function checkProjectAccess() {
   const asOwner = await getAccessibleProject("verify-owned-one", owner);
   assert.deepEqual(
     asOwner,
-    { id: "verify-owned-one", name: "Owned One" },
+    { id: "verify-owned-one", name: "Owned One", isOwner: true },
     "the owner should reach their own project, id and name only",
   );
 
-  assert.ok(
-    await getAccessibleProject("verify-shared", collaborator),
-    "a collaborator should reach a shared project despite the email casing",
+  const asCollaborator = await getAccessibleProject(
+    "verify-shared",
+    collaborator,
+  );
+  assert.deepEqual(
+    asCollaborator,
+    { id: "verify-shared", name: "Shared With Me", isOwner: false },
+    "a collaborator reaches a shared project despite the email casing, but is not the owner",
   );
 
   assert.equal(
@@ -146,6 +153,57 @@ async function checkProjectAccess() {
     await getAccessibleProject("verify-unrelated", collaborator),
     null,
     "being a collaborator elsewhere grants nothing here",
+  );
+}
+
+/**
+ * The invite/remove writes behind the share dialog. The duplicate rule and the
+ * project-scoped delete are enforced by the schema and the query, not by types.
+ */
+async function checkCollaboratorMutations() {
+  const invited = await prisma.projectCollaborator.create({
+    data: { projectId: "verify-owned-one", email: "teammate@example.com" },
+  });
+
+  await assert.rejects(
+    prisma.projectCollaborator.create({
+      data: { projectId: "verify-owned-one", email: "teammate@example.com" },
+    }),
+    (error: unknown) =>
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === UNIQUE_VIOLATION,
+    "inviting the same email twice must raise P2002 so the route answers 409",
+  );
+
+  // Same email, different project: allowed.
+  await prisma.projectCollaborator.create({
+    data: { projectId: "verify-owned-two", email: "teammate@example.com" },
+  });
+
+  // The DELETE handler scopes by projectId as well as id. Without that scope
+  // this call would succeed and let an owner delete another project's row.
+  const wrongProject = await prisma.projectCollaborator.deleteMany({
+    where: { id: invited.id, projectId: "verify-owned-two" },
+  });
+  assert.equal(
+    wrongProject.count,
+    0,
+    "a collaborator row must not be deletable through another project's ID",
+  );
+
+  const rightProject = await prisma.projectCollaborator.deleteMany({
+    where: { id: invited.id, projectId: "verify-owned-one" },
+  });
+  assert.equal(rightProject.count, 1, "the owning project should delete its row");
+
+  assert.equal(
+    (
+      await prisma.projectCollaborator.deleteMany({
+        where: { id: invited.id, projectId: "verify-owned-one" },
+      })
+    ).count,
+    0,
+    "a second delete finds nothing, which is the route's 404",
   );
 }
 
@@ -179,6 +237,7 @@ async function main() {
   assert.deepEqual(Object.keys(shared[0]).sort(), ["id", "name"]);
 
   await checkProjectAccess();
+  await checkCollaboratorMutations();
   await checkRoomIdCreate();
 
   // Cascade: deleting a project takes its collaborator rows with it.

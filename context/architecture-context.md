@@ -32,9 +32,10 @@
 ## Auth and Collaboration Model
 
 - Every project has a single owner (Clerk user ID).
-- Projects can include additional collaborators.
+- Projects can include additional collaborators, stored by email. There is no local user table; names and avatars are read from the Clerk Backend API at render time.
 - Only authenticated users can access protected routes.
-- Only the owner or a collaborator can mutate project resources.
+- Owner or collaborator may **open** a project and read its contents, including the member list. That list covers everyone with access — the owner plus collaborators — each carrying a derived `owner` / `collaborator` role. Roles are not stored: owner is `Project.ownerId`, collaborator is the existence of a `ProjectCollaborator` row.
+- Only the **owner** may rename or delete a project, or invite and remove collaborators. Enforced server-side in every handler via `authorizeProject(projectId, { requireOwner })`.
 - Liveblocks room tokens are issued only after verifying project membership.
 
 ## Starter System Designs

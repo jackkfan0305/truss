@@ -17,6 +17,15 @@ const PROJECT_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MIN_ID_LENGTH = 3;
 const MAX_ID_LENGTH = 80;
 
+/**
+ * Deliberately loose: one `@`, no whitespace, a dot in the domain. Full RFC 5322
+ * validation rejects addresses that really do deliver, and Clerk is the actual
+ * authority on whether an address exists. This only has to keep obvious junk out
+ * of the collaborator table.
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
+const MAX_EMAIL_LENGTH = 254;
+
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
@@ -107,4 +116,32 @@ export function parseProjectId(body: unknown): ProjectIdResult {
     PROJECT_ID_PATTERN.test(raw);
 
   return isValid ? { ok: true, id: raw } : { ok: false };
+}
+
+/**
+ * Validates the `email` field of an invite body. Returns the address lowercased,
+ * or `null` when the caller should answer 400.
+ *
+ * Lowercasing is not cosmetic: `@@unique([projectId, email])` is case-sensitive,
+ * so storing mixed case would let the same person be invited twice, while every
+ * read matches case-insensitively.
+ */
+export function parseCollaboratorEmail(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return null;
+  }
+
+  const raw = (body as { email?: unknown }).email;
+
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  const email = raw.trim().toLowerCase();
+
+  if (email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) {
+    return null;
+  }
+
+  return email;
 }

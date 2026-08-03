@@ -17,6 +17,7 @@ import {
   isSvgShape,
 } from "../lib/node-shape-geometry";
 import { resolveShortcut, type ShortcutKeys } from "../lib/canvas-shortcuts";
+import { getInitials } from "../lib/presence";
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
@@ -342,6 +343,33 @@ function checkTemplatesAreWellFormed() {
  * enclose every node crops the preview silently — and a zero-size one on an
  * empty template divides the browser's aspect fit by nothing.
  */
+/**
+ * The avatar fallback is the only thing standing between a photo-less
+ * collaborator and an empty circle, and an empty circle looks like a rendering
+ * bug rather than a person. Every one of these degrades silently.
+ */
+function checkInitialsAlwaysRenderSomething() {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["Ada Lovelace", "AL"],
+    ["ada lovelace", "AL"],
+    ["Cher", "C"],
+    // Third word and beyond are dropped, not folded in.
+    ["Ada King Lovelace", "AK"],
+    ["  Ada   Lovelace  ", "AL"],
+    ["ada@example.com", "A"],
+    ["", "?"],
+    ["   ", "?"],
+  ];
+
+  for (const [name, expected] of cases) {
+    assert.equal(
+      getInitials(name),
+      expected,
+      `getInitials(${JSON.stringify(name)}) should be ${expected}`,
+    );
+  }
+}
+
 function checkTemplateBoundsEncloseEveryNode() {
   assert.deepEqual(
     getTemplateBounds([]),
@@ -388,8 +416,9 @@ function main() {
   checkShortcutsMatchTheSpecTable();
   checkTemplatesAreWellFormed();
   checkTemplateBoundsEncloseEveryNode();
+  checkInitialsAlwaysRenderSomething();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts and starter templates verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates and presence initials verified",
   );
 }
 

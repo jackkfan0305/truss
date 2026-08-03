@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { UserButton } from "@clerk/nextjs"
 import {
   LayoutTemplate,
@@ -22,6 +23,13 @@ interface EditorNavbarProps {
   onOpenTemplates?: () => void
   isAiSidebarOpen?: boolean
   onToggleAiSidebar?: () => void
+  /**
+   * Workspace only — the collaborator avatar stack, rendered beside the Clerk
+   * UserButton. A slot rather than a component so the navbar stays outside the
+   * Liveblocks room: the editor home has no room, and calling a presence hook
+   * there would throw (19-presence-avatars-cursors).
+   */
+  presence?: ReactNode
   className?: string
 }
 
@@ -33,6 +41,7 @@ export function EditorNavbar({
   onOpenTemplates,
   isAiSidebarOpen = false,
   onToggleAiSidebar,
+  presence,
   className,
 }: EditorNavbarProps) {
   const ToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
@@ -97,6 +106,8 @@ export function EditorNavbar({
             </Button>
           </>
         ) : null}
+
+        {presence}
 
         <UserButton />
       </div>

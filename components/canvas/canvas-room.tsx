@@ -11,49 +11,67 @@ import {
 import { Canvas } from "@/components/canvas/canvas";
 
 interface CanvasRoomProps {
-  /** The project ID — one identifier for the route, the row and the room. */
-  roomId: string;
-  /** Owned by the editor shell, since the navbar is what opens the picker. */
-  isTemplatesOpen: boolean;
-  onTemplatesOpenChange: (open: boolean) => void;
+  /**
+   * The project ID — one identifier for the route, the row and the room.
+   * Absent on the editor home, which has no project and so no room to join.
+   */
+  roomId?: string;
+  children: ReactNode;
 }
 
 /**
- * Joins the Liveblocks room for a project and mounts the canvas inside it
- * (11-base-canvas).
+ * Joins the Liveblocks room for a project (11-base-canvas).
  *
  * The room is authenticated through `/api/liveblocks-auth`, which verifies
  * project membership before issuing a token — so a user who cannot open the
  * project cannot join its room either.
+ *
+ * This wraps the whole editor workspace rather than only the canvas, because
+ * the presence avatars sit in the navbar (19-presence-avatars-cursors) and need
+ * the same room context the canvas does.
  */
-export function CanvasRoom({
-  roomId,
-  isTemplatesOpen,
-  onTemplatesOpenChange,
-}: CanvasRoomProps) {
+export function CanvasRoom({ roomId, children }: CanvasRoomProps) {
+  if (!roomId) {
+    return <>{children}</>;
+  }
+
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
         id={roomId}
         initialPresence={{ cursor: null, isThinking: false }}
       >
-        {/*
-          The guard sits *outside* the suspense boundary on purpose: a room that
-          fails to connect never resolves, so without it the loading state would
-          be permanent rather than an error.
-        */}
-        <ConnectionGuard>
-          <ClientSideSuspense
-            fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
-          >
-            <Canvas
-              isTemplatesOpen={isTemplatesOpen}
-              onTemplatesOpenChange={onTemplatesOpenChange}
-            />
-          </ClientSideSuspense>
-        </ConnectionGuard>
+        {children}
       </RoomProvider>
     </LiveblocksProvider>
+  );
+}
+
+interface CanvasSurfaceProps {
+  /** Owned by the editor shell, since the navbar is what opens the picker. */
+  isTemplatesOpen: boolean;
+  onTemplatesOpenChange: (open: boolean) => void;
+}
+
+/** The canvas itself, with the room's connection and loading states around it. */
+export function CanvasSurface({
+  isTemplatesOpen,
+  onTemplatesOpenChange,
+}: CanvasSurfaceProps) {
+  return (
+    // The guard sits *outside* the suspense boundary on purpose: a room that
+    // fails to connect never resolves, so without it the loading state would be
+    // permanent rather than an error.
+    <ConnectionGuard>
+      <ClientSideSuspense
+        fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
+      >
+        <Canvas
+          isTemplatesOpen={isTemplatesOpen}
+          onTemplatesOpenChange={onTemplatesOpenChange}
+        />
+      </ClientSideSuspense>
+    </ConnectionGuard>
   );
 }
 

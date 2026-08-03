@@ -17,6 +17,7 @@ import {
   isSvgShape,
 } from "../lib/node-shape-geometry";
 import { resolveShortcut, type ShortcutKeys } from "../lib/canvas-shortcuts";
+import { dedupeByUser, getInitials } from "../lib/presence";
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
@@ -342,6 +343,75 @@ function checkTemplatesAreWellFormed() {
  * enclose every node crops the preview silently — and a zero-size one on an
  * empty template divides the browser's aspect fit by nothing.
  */
+/**
+ * The avatar fallback is the only thing standing between a photo-less
+ * collaborator and an empty circle, and an empty circle looks like a rendering
+ * bug rather than a person. Every one of these degrades silently.
+ */
+function checkInitialsAlwaysRenderSomething() {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["Ada Lovelace", "AL"],
+    ["ada lovelace", "AL"],
+    ["Cher", "C"],
+    // Third word and beyond are dropped, not folded in.
+    ["Ada King Lovelace", "AK"],
+    ["  Ada   Lovelace  ", "AL"],
+    ["ada@example.com", "A"],
+    ["", "?"],
+    ["   ", "?"],
+  ];
+
+  for (const [name, expected] of cases) {
+    assert.equal(
+      getInitials(name),
+      expected,
+      `getInitials(${JSON.stringify(name)}) should be ${expected}`,
+    );
+  }
+}
+
+function checkAvatarsAreOnePerPerson() {
+  // Two tabs for `user_ada`, one for `user_grace` — three connections, two
+  // people. This is the case that put duplicate avatars in the navbar.
+  const connections = [
+    { id: "user_ada", connectionId: 1 },
+    { id: "user_grace", connectionId: 2 },
+    { id: "user_ada", connectionId: 3 },
+  ];
+
+  const people = dedupeByUser(connections);
+
+  // `Map` keeps a key at its first insertion while later writes replace the
+  // value, so Ada holds her original slot and does not jump down the stack when
+  // she opens another tab.
+  assert.deepEqual(
+    people.map((person) => person.id),
+    ["user_ada", "user_grace"],
+    "a person with several tabs is one avatar, in their original position",
+  );
+  assert.equal(
+    people.find((person) => person.id === "user_ada")?.connectionId,
+    3,
+    "the most recent connection wins for a duplicated person",
+  );
+
+  // An ID-less connection cannot be attributed to anyone, so it must not
+  // collapse into another one — that would silently hide a participant.
+  const anonymous = dedupeByUser([
+    { connectionId: 4 },
+    { connectionId: 5 },
+    { id: "user_ada", connectionId: 6 },
+  ]);
+
+  assert.equal(
+    anonymous.length,
+    3,
+    "connections with no user ID stay separate entries",
+  );
+
+  assert.deepEqual(dedupeByUser([]), [], "an empty room dedupes to nothing");
+}
+
 function checkTemplateBoundsEncloseEveryNode() {
   assert.deepEqual(
     getTemplateBounds([]),
@@ -388,8 +458,10 @@ function main() {
   checkShortcutsMatchTheSpecTable();
   checkTemplatesAreWellFormed();
   checkTemplateBoundsEncloseEveryNode();
+  checkInitialsAlwaysRenderSomething();
+  checkAvatarsAreOnePerPerson();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts and starter templates verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates and presence initials/dedupe verified",
   );
 }
 

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type DragEvent,
+  type MouseEvent,
+} from "react";
+import { useUpdateMyPresence } from "@liveblocks/react";
 import { useLiveblocksFlow } from "@liveblocks/react-flow";
 import {
   Background,
@@ -22,6 +29,7 @@ import {
 import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
+import { LiveCursors } from "@/components/canvas/live-cursors";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
@@ -126,6 +134,29 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
   >();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const isAwaitingImportedNodes = useRef(false);
+  const updateMyPresence = useUpdateMyPresence();
+
+  /**
+   * Broadcast the pointer in *canvas* coordinates, not screen coordinates: the
+   * other clients are panned and zoomed differently, so a screen position would
+   * land somewhere else on their diagram (19-presence-avatars-cursors).
+   *
+   * Liveblocks throttles presence updates itself (100ms by default), so the
+   * raw mousemove firing rate does not become the network rate.
+   */
+  const handleMouseMove = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      updateMyPresence({
+        cursor: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+      });
+    },
+    [screenToFlowPosition, updateMyPresence]
+  );
+
+  /** Off the canvas, there is no position to show — the cursor is hidden. */
+  const handleMouseLeave = useCallback(() => {
+    updateMyPresence({ cursor: null });
+  }, [updateMyPresence]);
 
   /**
    * `add` changes go through `onNodesChange` rather than a local `setNodes`, so
@@ -255,7 +286,8 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
   return (
     <div
       ref={wrapperRef}
-      className="h-full w-full"
+      // `relative` anchors the live-cursor overlay to the canvas.
+      className="relative h-full w-full"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -269,6 +301,10 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onDelete={onDelete}
+        // On the wrapper rather than `onPaneMouseMove`, so the cursor keeps
+        // broadcasting while the pointer is over a node instead of freezing.
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         // Handles are drawn on all four sides, so a connection must be allowed to
         // land on any of them rather than only on a declared target handle.
         connectionMode={ConnectionMode.Loose}
@@ -304,6 +340,8 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
           <CanvasControls />
         </Panel>
       </ReactFlow>
+
+      <LiveCursors />
 
       <StarterTemplatesModal
         open={isTemplatesOpen}

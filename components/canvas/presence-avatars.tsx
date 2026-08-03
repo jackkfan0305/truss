@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Image from "next/image";
 
 import { useCollaborators } from "@/hooks/use-collaborators";
 import { dedupeByUser, getInitials } from "@/lib/presence";
@@ -93,11 +94,11 @@ function CollaboratorAvatar({ name, avatar, color }: CollaboratorAvatarProps) {
       style={{ outline: `2px solid ${color}`, outlineOffset: "-2px" }}
     >
       {avatar ? (
-        /* A 28px avatar from whichever CDN host Clerk hands back — next/image
-           would need every one of those domains in `remotePatterns` to gain
-           nothing at this size. */
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        /* `img.clerk.com` has to stay in `next.config.ts`'s `remotePatterns`
+           for this to resolve. The name stays in `alt`: the wrapper's `title`
+           is a pointer tooltip, and `title` on a plain `span` is not a reliable
+           accessible name, so this is what actually names the person. */
+        <Image
           src={avatar}
           alt={name}
           width={28}

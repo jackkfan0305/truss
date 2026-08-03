@@ -24,3 +24,30 @@ export function getInitials(name: string): string {
 
   return initials || "?";
 }
+
+/**
+ * Collapse a connection list to one entry per person, keeping the most recent
+ * connection for each.
+ *
+ * `useOthers` is connection-scoped: a collaborator with the room open in two
+ * tabs is two entries. Cursors want that — each tab has its own pointer — but
+ * the avatar stack does not, or one person shows up twice and the "N other
+ * people" label counts tabs instead of people.
+ *
+ * `id` is set by the Liveblocks auth handler from the Clerk user ID, but it is
+ * optional on the Liveblocks type, so an ID-less connection falls back to its
+ * own connection ID. That keeps them as separate entries rather than collapsing
+ * every anonymous connection into one.
+ */
+export function dedupeByUser<T extends { id?: string; connectionId: number }>(
+  participants: readonly T[]
+): T[] {
+  const byUser = new Map(
+    participants.map((participant) => [
+      participant.id ?? `connection:${participant.connectionId}`,
+      participant,
+    ])
+  );
+
+  return [...byUser.values()];
+}

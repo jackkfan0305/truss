@@ -1,7 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
+
 import { useCollaborators } from "@/hooks/use-collaborators";
-import { getInitials } from "@/lib/presence";
+import { dedupeByUser, getInitials } from "@/lib/presence";
 
 /** Past this, the rest collapse into a `+N` chip rather than eating the navbar. */
 const MAX_VISIBLE_AVATARS = 5;
@@ -17,9 +19,13 @@ const MAX_VISIBLE_AVATARS = 5;
  * The trailing divider lives here rather than in the navbar because it should
  * only exist when there is something to divide: with no collaborators the whole
  * component renders nothing and the navbar is visually unchanged.
+ *
+ * One avatar per *person*, not per connection — see `dedupeByUser`. The cursor
+ * layer deliberately keeps the connection-scoped list.
  */
 export function PresenceAvatars() {
-  const collaborators = useCollaborators();
+  const connections = useCollaborators();
+  const collaborators = useMemo(() => dedupeByUser(connections), [connections]);
 
   if (collaborators.length === 0) {
     return null;

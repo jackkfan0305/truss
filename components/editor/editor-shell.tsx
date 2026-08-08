@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { Plus } from "lucide-react"
 
 import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
@@ -9,8 +9,10 @@ import { AiSidebar } from "@/components/editor/ai-sidebar"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
+import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
+import type { SaveStatus } from "@/hooks/use-canvas-autosave"
 import { useProjectActions } from "@/hooks/use-project-actions"
 import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
@@ -38,7 +40,19 @@ export function EditorShell({
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
   const actions = useProjectActions()
+
+  /*
+   * The canvas owns the autosave, because it is the only thing that can see the
+   * flow state — but the indicator belongs in the navbar. Status comes up as
+   * state; the flush comes up as a ref, since re-rendering the whole shell to
+   * store a stable callback would be a render per canvas mount for nothing.
+   */
+  const saveNowRef = useRef<(() => void) | null>(null)
+  const registerSaveNow = useCallback((saveNow: () => void) => {
+    saveNowRef.current = saveNow
+  }, [])
 
   return (
     // No-op without an active project, so the editor home never joins a room.
@@ -61,6 +75,14 @@ export function EditorShell({
           // Room-scoped, so it is only mounted where a room exists — the editor
           // home renders the navbar without it, exactly as before.
           presence={activeProject ? <PresenceAvatars /> : undefined}
+          saveStatus={
+            activeProject ? (
+              <SaveStatusButton
+                status={saveStatus}
+                onSave={() => saveNowRef.current?.()}
+              />
+            ) : undefined
+          }
         />
 
         {/*
@@ -98,8 +120,11 @@ export function EditorShell({
               {/* React Flow needs a sized parent, so the canvas fills `main`. */}
               <main aria-label="Canvas" className="relative flex-1 bg-page">
                 <CanvasSurface
+                  projectId={activeProject.id}
                   isTemplatesOpen={isTemplatesOpen}
                   onTemplatesOpenChange={setIsTemplatesOpen}
+                  onSaveStatusChange={setSaveStatus}
+                  onRegisterSaveNow={registerSaveNow}
                 />
               </main>
 

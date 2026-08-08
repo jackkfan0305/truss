@@ -30,6 +30,12 @@ interface EditorNavbarProps {
    * there would throw (19-presence-avatars-cursors).
    */
   presence?: ReactNode
+  /**
+   * Workspace only — the canvas save state. A slot for the same reason
+   * `presence` is one: it is driven by flow state that only exists inside the
+   * canvas, and the editor home has no canvas at all (21-canvas-autosave).
+   */
+  saveStatus?: ReactNode
   className?: string
 }
 
@@ -42,6 +48,7 @@ export function EditorNavbar({
   isAiSidebarOpen = false,
   onToggleAiSidebar,
   presence,
+  saveStatus,
   className,
 }: EditorNavbarProps) {
   const ToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
@@ -74,6 +81,8 @@ export function EditorNavbar({
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2">
+        {saveStatus}
+
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="h-4 w-4" />

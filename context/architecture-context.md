@@ -28,6 +28,14 @@
 - Project records, spec records, and task run records belong in PostgreSQL.
 - Canvas content and Markdown output are stored in and retrieved from Vercel Blob.
 - The blob URL is stored in the database (`canvasJsonPath`, `filePath`) as the reference to the artifact.
+- The Blob store is configured for **private** access. Every `@vercel/blob` call
+  must pass `access: "private"` — `"public"` is rejected outright, not
+  downgraded — and a stored blob URL is not fetchable on its own (`403`). Reads
+  go through `get(url, { access: "private", useCache: false })`, which attaches
+  the token; `useCache: false` is required because every save overwrites the
+  same pathname, so the CDN copy is exactly the stale artifact a read must not
+  return. Artifact URLs are therefore pointers, never something to hand to a
+  browser directly.
 - Project IDs are never reused. Deletion first changes the project to a durable
   `DELETING` tombstone, then deletes its Liveblocks room, then finalizes the row
   as `DELETED`. Both states are inaccessible and excluded from project lists.

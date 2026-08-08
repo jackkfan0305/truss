@@ -33,6 +33,9 @@ import { LiveCursors } from "@/components/canvas/live-cursors";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
+import { useCanvasAutosave, type SaveStatus } from "@/hooks/use-canvas-autosave";
+import { useCanvasRestore } from "@/hooks/use-canvas-restore";
+import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -112,6 +115,8 @@ export function Canvas(props: CanvasProps) {
 }
 
 interface CanvasProps {
+  /** Doubles as the room ID and the project the canvas is persisted under. */
+  projectId: string;
   /**
    * The starter template picker is opened from the editor navbar, which sits
    * outside the room — but importing one is a Storage write, so the dialog is
@@ -119,9 +124,23 @@ interface CanvasProps {
    */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
+  /**
+   * Autosave state is reported upward because the indicator lives in the navbar,
+   * which is outside `ReactFlowProvider` and so cannot read the flow state that
+   * drives it (21-canvas-autosave).
+   */
+  onSaveStatusChange: (status: SaveStatus) => void;
+  /** Hands the navbar's Save button a way to flush the debounce. */
+  onRegisterSaveNow: (saveNow: () => void) => void;
 }
 
-function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
+function CanvasFlow({
+  projectId,
+  isTemplatesOpen,
+  onTemplatesOpenChange,
+  onSaveStatusChange,
+  onRegisterSaveNow,
+}: CanvasProps) {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
       suspense: true,
@@ -230,6 +249,43 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
     isAwaitingImportedNodes.current = false;
     void fitView({ duration: VIEWPORT_TRANSITION_MS });
   }, [fitView, nodes]);
+
+  /**
+   * A restored snapshot is written through the same `add` changes a drop uses,
+   * so it lands in Liveblocks Storage and reaches everyone else in the room
+   * rather than existing only in this client's local flow state.
+   */
+  const handleRestore = useCallback(
+    (snapshot: CanvasSnapshot) => {
+      onNodesChange(snapshot.nodes.map((node) => ({ type: "add", item: node })));
+      onEdgesChange(snapshot.edges.map((edge) => ({ type: "add", item: edge })));
+
+      isAwaitingImportedNodes.current = true;
+    },
+    [onEdgesChange, onNodesChange]
+  );
+
+  /*
+   * ponytail: two clients opening the *same* cold room within one round trip
+   * can both restore, which duplicates every node. Narrow enough to accept for
+   * now — it needs an empty room, which means nobody has edited it since the
+   * last save. A Storage-held "restored" flag is the fix if it ever shows up.
+   */
+  useCanvasRestore(
+    projectId,
+    nodes.length === 0 && edges.length === 0,
+    handleRestore
+  );
+
+  const { status, saveNow } = useCanvasAutosave(projectId, nodes, edges);
+
+  useEffect(() => {
+    onSaveStatusChange(status);
+  }, [onSaveStatusChange, status]);
+
+  useEffect(() => {
+    onRegisterSaveNow(saveNow);
+  }, [onRegisterSaveNow, saveNow]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {

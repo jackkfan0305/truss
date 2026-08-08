@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useState } from "react"
 import { Plus } from "lucide-react"
 
 import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
+import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AiSidebar } from "@/components/editor/ai-sidebar"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
@@ -12,7 +13,6 @@ import { ProjectSidebar } from "@/components/editor/project-sidebar"
 import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
-import type { SaveStatus } from "@/hooks/use-canvas-autosave"
 import { useProjectActions } from "@/hooks/use-project-actions"
 import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
@@ -40,24 +40,17 @@ export function EditorShell({
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
   const actions = useProjectActions()
-
-  /*
-   * The canvas owns the autosave, because it is the only thing that can see the
-   * flow state — but the indicator belongs in the navbar. Status comes up as
-   * state; the flush comes up as a ref, since re-rendering the whole shell to
-   * store a stable callback would be a render per canvas mount for nothing.
-   */
-  const saveNowRef = useRef<(() => void) | null>(null)
-  const registerSaveNow = useCallback((saveNow: () => void) => {
-    saveNowRef.current = saveNow
-  }, [])
 
   return (
     // No-op without an active project, so the editor home never joins a room.
     <CanvasRoom roomId={activeProject?.id}>
-      <div className="flex flex-1 flex-col">
+      {/*
+        Wraps the navbar as well as the canvas: the save indicator sits in the
+        navbar but is driven from inside the canvas (21-canvas-autosave).
+      */}
+      <CanvasSaveProvider>
+        <div className="flex flex-1 flex-col">
         <EditorNavbar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
@@ -75,14 +68,7 @@ export function EditorShell({
           // Room-scoped, so it is only mounted where a room exists — the editor
           // home renders the navbar without it, exactly as before.
           presence={activeProject ? <PresenceAvatars /> : undefined}
-          saveStatus={
-            activeProject ? (
-              <SaveStatusButton
-                status={saveStatus}
-                onSave={() => saveNowRef.current?.()}
-              />
-            ) : undefined
-          }
+          saveStatus={activeProject ? <SaveStatusButton /> : undefined}
         />
 
         {/*
@@ -123,8 +109,6 @@ export function EditorShell({
                   projectId={activeProject.id}
                   isTemplatesOpen={isTemplatesOpen}
                   onTemplatesOpenChange={setIsTemplatesOpen}
-                  onSaveStatusChange={setSaveStatus}
-                  onRegisterSaveNow={registerSaveNow}
                 />
               </main>
 
@@ -161,7 +145,8 @@ export function EditorShell({
             onOpenChange={setIsShareOpen}
           />
         ) : null}
-      </div>
+        </div>
+      </CanvasSaveProvider>
     </CanvasRoom>
   )
 }

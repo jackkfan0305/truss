@@ -9,7 +9,6 @@ import {
 } from "@liveblocks/react/suspense";
 
 import { Canvas } from "@/components/canvas/canvas";
-import type { SaveStatus } from "@/hooks/use-canvas-autosave";
 
 interface CanvasRoomProps {
   /**
@@ -53,9 +52,6 @@ interface CanvasSurfaceProps {
   /** Owned by the editor shell, since the navbar is what opens the picker. */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
-  /** Autosave state, reported up to the navbar indicator (21-canvas-autosave). */
-  onSaveStatusChange: (status: SaveStatus) => void;
-  onRegisterSaveNow: (saveNow: () => void) => void;
 }
 
 /** The canvas itself, with the room's connection and loading states around it. */
@@ -63,8 +59,6 @@ export function CanvasSurface({
   projectId,
   isTemplatesOpen,
   onTemplatesOpenChange,
-  onSaveStatusChange,
-  onRegisterSaveNow,
 }: CanvasSurfaceProps) {
   return (
     // The guard sits *outside* the suspense boundary on purpose: a room that
@@ -78,8 +72,6 @@ export function CanvasSurface({
           projectId={projectId}
           isTemplatesOpen={isTemplatesOpen}
           onTemplatesOpenChange={onTemplatesOpenChange}
-          onSaveStatusChange={onSaveStatusChange}
-          onRegisterSaveNow={onRegisterSaveNow}
         />
       </ClientSideSuspense>
     </ConnectionGuard>

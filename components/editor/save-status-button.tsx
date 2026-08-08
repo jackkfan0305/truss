@@ -2,14 +2,10 @@
 
 import { AlertCircle, Check, Loader2, Save } from "lucide-react";
 
+import { useCanvasSave } from "@/components/canvas/canvas-save-context";
 import { Button } from "@/components/ui/button";
 import type { SaveStatus } from "@/hooks/use-canvas-autosave";
 import { cn } from "@/lib/utils";
-
-interface SaveStatusButtonProps {
-  status: SaveStatus;
-  onSave: () => void;
-}
 
 /**
  * The navbar Save control and autosave indicator in one (21-canvas-autosave).
@@ -18,15 +14,19 @@ interface SaveStatusButtonProps {
  * button rather than a label because "is my work safe" is exactly when someone
  * reaches for Save, and making them wait out a debounce to find out is worse
  * than one extra write.
+ *
+ * Reads the shared save context directly instead of taking props, so a status
+ * change re-renders this button alone rather than the whole editor shell.
  */
-export function SaveStatusButton({ status, onSave }: SaveStatusButtonProps) {
+export function SaveStatusButton() {
+  const { status, saveNow } = useCanvasSave();
   const { Icon, label, tone, isSpinning } = DISPLAY[status];
 
   return (
     <Button
       variant="ghost"
       size="sm"
-      onClick={onSave}
+      onClick={saveNow}
       // Not `disabled`: a disabled control loses focus and stops being
       // announced mid-save. `aria-busy` says the same thing without that.
       aria-busy={status === "saving"}

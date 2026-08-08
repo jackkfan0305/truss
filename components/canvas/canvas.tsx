@@ -33,7 +33,8 @@ import { LiveCursors } from "@/components/canvas/live-cursors";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
-import { useCanvasAutosave, type SaveStatus } from "@/hooks/use-canvas-autosave";
+import { useCanvasSave } from "@/components/canvas/canvas-save-context";
+import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
 import { useCanvasRestore } from "@/hooks/use-canvas-restore";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import {
@@ -124,23 +125,20 @@ interface CanvasProps {
    */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
-  /**
-   * Autosave state is reported upward because the indicator lives in the navbar,
-   * which is outside `ReactFlowProvider` and so cannot read the flow state that
-   * drives it (21-canvas-autosave).
-   */
-  onSaveStatusChange: (status: SaveStatus) => void;
-  /** Hands the navbar's Save button a way to flush the debounce. */
-  onRegisterSaveNow: (saveNow: () => void) => void;
 }
 
 function CanvasFlow({
   projectId,
   isTemplatesOpen,
   onTemplatesOpenChange,
-  onSaveStatusChange,
-  onRegisterSaveNow,
 }: CanvasProps) {
+  /*
+   * Autosave state reaches the navbar through context rather than a callback
+   * prop: the indicator lives outside `ReactFlowProvider` and cannot read the
+   * flow state that drives it, and pushing it up through an effect would
+   * re-render the whole workspace an extra time per save (21-canvas-autosave).
+   */
+  const { setStatus: setSaveStatus, registerSaveNow } = useCanvasSave();
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
       suspense: true,
@@ -277,15 +275,17 @@ function CanvasFlow({
     handleRestore
   );
 
-  const { status, saveNow } = useCanvasAutosave(projectId, nodes, edges);
+  // Status is set straight from the save lifecycle, so the navbar indicator
+  // updates without this component re-rendering to report it.
+  const { saveNow } = useCanvasAutosave(projectId, nodes, edges, setSaveStatus);
 
   useEffect(() => {
-    onSaveStatusChange(status);
-  }, [onSaveStatusChange, status]);
+    registerSaveNow(saveNow);
 
-  useEffect(() => {
-    onRegisterSaveNow(saveNow);
-  }, [onRegisterSaveNow, saveNow]);
+    // The handle must not outlive the canvas, or a Save click on the editor
+    // home would call into an unmounted room.
+    return () => registerSaveNow(null);
+  }, [registerSaveNow, saveNow]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   LAYOUT_GRID,
@@ -945,6 +946,20 @@ function checkRunTurnsRemainAnchoredForTheSession() {
   );
 }
 
+/** The worker must tee live activity into the deterministic assistant message. */
+function checkWorkerPersistsLiveActivity(): void {
+  const source = readFileSync(
+    new URL("../trigger/design-agent.ts", import.meta.url),
+    "utf8"
+  );
+
+  assert.match(source, /createAiRunChatPublisher/);
+  assert.match(source, /promptMessageId/);
+  assert.doesNotMatch(source, /publishAiChatSummary\(/);
+  assert.match(source, /finish\("complete"/);
+  assert.match(source, /finish\("error"/);
+}
+
 /**
  * Every action type describes itself. A `default` branch means a new action type
  * silently renders as its raw ID, which reads as a bug in the agent rather than
@@ -1011,6 +1026,7 @@ function main() {
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
+  checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();
   checkCanvasDescriptionCarriesSizes();
   checkHistoryDoesNotEchoTheCurrentPrompt();

@@ -1,12 +1,10 @@
 import type { XYPosition } from "@xyflow/react";
 
-import { createServerAiChatMessage } from "@/lib/ai-chat-server";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
   AI_STATUS_FEED_ID,
   AI_USER_ID,
   AI_USER_NAME,
-  MAX_CHAT_CONTENT_LENGTH,
   type AiStatusMessage,
 } from "@/types/tasks";
 
@@ -102,29 +100,6 @@ export async function publishAiStatus(
       await client.createFeed({ roomId, feedId: AI_STATUS_FEED_ID });
       await client.createFeedMessage(params);
     }
-  });
-}
-
-/** Durable assistant response, authored by the worker rather than a browser. */
-export async function publishAiChatSummary(
-  roomId: string,
-  runId: string,
-  text: string
-): Promise<void> {
-  const content = text.trim().slice(0, MAX_CHAT_CONTENT_LENGTH);
-
-  await announce("chat", roomId, async () => {
-    await createServerAiChatMessage(
-      roomId,
-      {
-        role: "assistant",
-        senderId: AI_USER_ID,
-        senderName: AI_USER_NAME,
-        content: content || "Canvas updated.",
-        sentAt: Date.now(),
-      },
-      `chat-${runId}`
-    );
   });
 }
 

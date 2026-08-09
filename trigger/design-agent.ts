@@ -5,11 +5,11 @@ import { Output, jsonSchema, streamText } from "ai";
 
 import {
   clearAiPresence,
-  publishAiChatSummary,
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
 import { selectAiChatMessages } from "@/lib/ai-chat";
+import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -195,7 +195,7 @@ const INCLUDE_THOUGHTS = true;
  * `streams.append` calls: phases, summaries, and operations can be enqueued
  * synchronously while the pipe batches transport in the background.
  */
-function openActivityStream() {
+function openActivityStream(onActivity: (part: AiActivityPart) => void) {
   let controller!: ReadableStreamDefaultController<
     AiActivityPart | AiActivityTerminalPart
   >;
@@ -216,6 +216,10 @@ function openActivityStream() {
     // Never throws: activity is commentary, and a closed stream must not be
     // able to fail the canvas write that is the actual work.
     emit: (part: AiActivityPart | AiActivityTerminalPart): void => {
+      if (part.type !== "terminal") {
+        onActivity(part);
+      }
+
       if (!isWritable) {
         return;
       }
@@ -285,7 +289,7 @@ export const designAgent = task({
   // generous rather than tight.
   maxDuration: 300,
   run: async (payload: DesignAgentPayload, { ctx }) => {
-    const { roomId, prompt } = payload;
+    const { roomId, prompt, promptMessageId } = payload;
     const runId = ctx.run.id;
     // An unknown id falls back rather than failing the run: the canvas edit is
     // the work, and refusing to design because a model name was stale would be
@@ -308,13 +312,20 @@ export const designAgent = task({
       thinkingLevel,
     });
 
-    const activity = openActivityStream();
+    const publisher = createAiRunChatPublisher({
+      roomId,
+      runId,
+      promptMessageId,
+    });
+    const activity = openActivityStream(publisher.emit);
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
     // Paced writes flush as they go, so a failure can leave part of the plan on
     // the canvas. Both are read by the error path, so both are declared out
     // here rather than inside the `try` that assigns them.
     let applied = 0;
     let planned = 0;
+
+    await publisher.start();
 
     await Promise.all([
       setAiPresence(roomId, { cursor: null, isThinking: true }),
@@ -387,11 +398,7 @@ export const designAgent = task({
           text: "No canvas changes to make.",
         });
 
-        await publishAiChatSummary(
-          roomId,
-          runId,
-          plan.summary || "No canvas changes to make."
-        );
+        await publisher.finish("complete", plan.summary || "No canvas changes to make.");
         activityOutcome = "complete";
         return { summary: plan.summary, applied: 0 };
       }
@@ -414,11 +421,7 @@ export const designAgent = task({
         text: plan.summary || `Applied ${plan.actions.length} canvas changes.`,
       });
 
-      await publishAiChatSummary(
-        roomId,
-        runId,
-        plan.summary || `Applied ${plan.actions.length} canvas changes.`
-      );
+      await publisher.finish("complete", plan.summary || `Applied ${plan.actions.length} canvas changes.`);
 
       activityOutcome = "complete";
       return { summary: plan.summary, applied };
@@ -443,7 +446,7 @@ export const designAgent = task({
         text: failureText,
       });
 
-      await publishAiChatSummary(roomId, runId, failureText);
+      await publisher.finish("error", failureText);
 
       throw error;
     } finally {

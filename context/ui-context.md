@@ -14,15 +14,21 @@ colour alone.
 - The header visibly names the active provider and exact model ID.
 - Messages use one reading edge and minimal neutral surfaces, following modern
   AI chat conventions rather than coloured role bubbles.
-- Each local generation renders as an inline, prompt-anchored work turn. A
-  shadcn Accordion progressively discloses chronological phases, curated
-  reasoning summaries, and canvas operations. Raw provider chain of thought is
-  never displayed.
+- Each generation renders as one shared, reloadable assistant work turn placed
+  directly after its prompt. A shadcn Accordion progressively discloses the
+  durable chronological phases, curated reasoning summaries, and canvas
+  operations. The initiating client retains a private Trigger subscription only
+  to settle its own composer; the transcript does not require that token. Raw
+  provider chain of thought is never displayed.
 - Canvas operations remain visually pending until the run's atomic canvas
   write completes. Completion and failure use both an icon and text.
-- Detailed activity is retained in the mounted browser session and under
-  Trigger.dev's stream-retention policy; the durable room chat keeps user
-  prompts and final AI summaries, not activity details or raw model reasoning.
+- The durable `ai-chat` row is updated in place as work arrives and carries the
+  final summary, so a reload reconstructs the activity without a Trigger token.
+  A stale `running` row becomes an explicit incomplete state after the
+  hard-kill timeout while retaining its partial work log.
+- Another collaborator's human prompt uses a left identity rail: avatar (or
+  initials fallback), name, then the message on the neutral `bg-elevated`
+  surface. Own prompts do not show the other-collaborator identity treatment.
 
 All colors are defined as CSS custom properties in `globals.css` and mapped to Tailwind tokens via `@theme inline`. Components must use these tokens — no hardcoded hex values or raw Tailwind color classes like `zinc-*`.
 

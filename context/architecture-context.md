@@ -117,22 +117,35 @@
 - Feed messages are validated on read (`parseAiStatusMessage`), not trusted. An
   entry an older or newer build cannot parse renders as nothing and never
   outranks the newest entry that does parse.
-- Detailed phases, curated reasoning summaries, and canvas operations
-  travel on the initiating run's scoped Trigger.dev activity stream. The
-  initiating client anchors that activity to its prompt and retains completed
-  turns in browser state only for the mounted session. The source stream is
-  retained by Trigger.dev under its platform stream-retention window (currently
-  up to 28 days), so it contains progress summaries rather than raw provider
-  chain of thought. Activity is never copied into the durable room chat or
-  exposed to collaborators who do not own the run token; they see the coarse
-  room status instead.
-- Each activity stream ends with an internal terminal marker. The initiating
-  client accumulates `onData` chunks itself and settles only after it has both
-  that marker and Trigger's terminal run state, so bursty chunks and the final
-  transport tail cannot be overwritten or dropped by hook cache timing.
-- Final assistant summaries are published by the Trigger worker with a
-  deterministic run-derived message ID. They survive initiator navigation or
-  disconnection and cannot be impersonated by another room client.
+- The initiating client still owns the scoped Trigger.dev activity token and
+  uses its stream only to settle its local run state. It accumulates `onData`
+  chunks until both the internal terminal marker and Trigger's terminal run
+  state arrive, so bursty chunks and the final transport tail cannot be lost to
+  hook-cache timing. `DesignRunObserver` has no visible output: it keeps the
+  initiator's composer lifecycle correct without making the shared transcript
+  depend on a private run token.
+- The visible work log is a single durable `ai-chat` assistant message per
+  run, with deterministic ID `chat-${runId}`. The worker starts that row before
+  activity arrives, ties it to the authenticated user's server-created prompt
+  with `promptMessageId`, then updates the same row in place through the
+  server-side Liveblocks writer. A final summary and terminal phase update that
+  same row rather than creating a second assistant message, so every member can
+  reload the prompt, activity, and result without the initiator's token.
+- Each durable update is a full immutable snapshot of at most 200 validated
+  activity parts. The publisher coalesces non-terminal activity for 400ms,
+  serializes writes, and sends terminal states immediately; a later successful
+  full snapshot repairs a failed intermediate update. Publishing is cosmetic to
+  the canvas task: individual write failures are logged and do not abort a
+  generation.
+- Durable activity contains chronological phases, curated reasoning summaries,
+  and canvas operations, never raw provider chain of thought. Room clients have
+  feed-read permission only: authenticated server routes author human prompts
+  from Clerk identity and the worker authors assistant rows, so clients cannot
+  forge an identity, role, or durable AI update.
+- A durable row left `running` by a hard-killed or otherwise abandoned task is
+  rendered as `incomplete` once its server update is older than 315 seconds.
+  Its partial activity remains visible; this is a display safeguard, not a
+  fabricated terminal result.
 
 ### Spec Generation
 

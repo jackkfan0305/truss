@@ -8,6 +8,31 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `34-shared-ai-run-activity` complete. Every design run now has one durable,
+  shared `ai-chat` assistant row (`chat-${runId}`), updated in place from the
+  worker and anchored beside the server-authored human prompt. It persists the
+  bounded curated work log and final summary for every collaborator and reload,
+  while the initiating Trigger subscription is retained only to settle that
+  initiator's composer. Human feed writes remain server-authored; the room is
+  feed-read-only for clients. Collaborator prompts now render avatar/name on a
+  left rail with `bg-elevated`; stale running rows become incomplete after 315s
+  and retain their partial activity. Raw provider chain of thought remains
+  excluded.
+  - The focused contract suite is GREEN: `verify-ai-chat`,
+    `verify-ai-chat-ui`, `verify-ai-run-chat`, `verify-design-api`, and
+    `verify-design-agent` all exit 0. Focused ESLint, `tsc --noEmit`, and the
+    production build also exit 0. The publisher verifier deliberately prints
+    one simulated failed Liveblocks update before proving that the following
+    full snapshot repairs it; that log is expected test output.
+  - Repo-local React Doctor did **not** pass: `npx react-doctor . --verbose`
+    exits 1 at 51/100 with 2 errors and 20 warnings. Its repository-wide output
+    includes the changed Markdown HTML sinks and observer callback, as well as
+    unrelated findings; no diagnosis or broad cleanup was folded into this
+    documentation-only delivery.
+  - Live collaborative QA remains explicitly **unverified**. The gstack browser
+    harness reports `NEEDS_SETUP`, and no two authenticated collaborator
+    sessions were supplied. Do not read the automated checks as proof that the
+    two-client, reload, console, bottom-follow, or pagination scenario passed.
 - `33-thinking-disclosure` complete. The model's reasoning is now behind a disclosure that is collapsed on every run: the closed row is the status — a spinner and "Thinking" while deltas arrive, a brain icon and "Thought process" once they stop — so a run reads as one line instead of a wall of text pushing the actions out of view. The text renders through `lib/markdown.ts` because the provider writes Markdown; as plain text its headings and lists showed up as literal `**` and `-`. Reasoning also stops arriving in paragraph-sized jumps: deltas are the *target* and `useSmoothText` reveals toward it on the frame clock at a rate proportional to the backlog, so a burst is consumed quickly and a trickle stays gentle without the text ever falling permanently behind. `MARKDOWN_STYLES` moved from `ai-chat-transcript.tsx` to `lib/markdown.ts` — the transcript imports the activity component, so hanging the styles off it would have closed an import cycle.
   - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover the reveal converging rather than stranding its tail, staying monotonic and clamped when a target shrinks, and stopping on word boundaries without letting an unbroken 400-character token land in one jump. Mutations disabling boundary snapping, and rounding the per-frame step down instead of up, each fail their check.
   - Correction worth keeping: the convergence guarantee is the step being rounded *up*, not `MIN_CHARS_PER_FRAME`, which is only a speed knob. The first version of the check credited the floor and passed against a mutation that removed it.
@@ -45,6 +70,23 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- `34-shared-ai-run-activity` — durable shared AI work activity and
+  collaborator identity rendering. The worker creates and repeatedly upserts
+  one full-snapshot `chat-${runId}` row, anchored by `promptMessageId`; it
+  coalesces active updates at 400ms, bounds persisted activity at 200 parts,
+  immediately writes terminal states, and can repair an intermediate publishing
+  failure with the next snapshot. Visible activity is curated only, never raw
+  chain of thought. `DesignRunObserver` remains mounted only for initiator
+  settlement. A stale `running` row is explicitly incomplete after 315 seconds
+  and retains partial steps. Other collaborators' prompts use the left
+  avatar/name rail and `bg-elevated` surface, with initials for legacy records.
+  - Focused contract checks, ESLint, strict TypeScript, and production build
+    pass. The publisher check intentionally logs one simulated failed write and
+    then verifies full-snapshot repair. Repo-local React Doctor exits 1 at
+    51/100 (2 errors, 20 warnings), including changed activity/transcript
+    findings and unrelated repository findings; no code cleanup is included.
+    Live two-client browser QA is unverified because gstack is `NEEDS_SETUP`
+    and no authenticated collaborator sessions are available.
 - `29-spec-ui-integration` — the Specs tab is real. It lists this project's specs, previews one as rendered Markdown in a modal, and downloads it. The `20` static card is gone.
   - `GET /api/projects/[projectId]/specs` — the one read `28` left out. Metadata only, newest first, capped at 50. `filePath` is deliberately **not** selected: it is a private Blob pointer the browser cannot fetch anyway, so returning it would only publish the storage layout. The file name is computed by `specFileName`, the same function the download route puts in `Content-Disposition`, so the name in the list is the name the file saves under. `requireOwner: false`, matching the download route.
   - `hooks/use-project-specs.ts` — `useProjectSpecs` (the list) and `useSpecContent` (one document, read as text from the **download route**). Both abort on unmount and stamp their result with what they fetched, so a stale response never renders as the current one — the `useProjectMembers` pattern.
@@ -362,6 +404,13 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
+- Run the shared-run live QA with two authorized collaborators once browser
+  harness setup and sessions are available: another user must see the prompt
+  identity rail and shared growing work log, both users must agree on the final
+  terminal state, and a reload must reconstruct it from `ai-chat` without a
+  Trigger token. Check console errors plus bottom-follow/pagination behavior.
+  Also triage the React Doctor findings before treating this delivery as a clean
+  React diagnostic pass; the current repository-wide command exits 1 at 51/100.
 - **The canvas has never been seen in a browser.** Both keys are now set and the server side is verified, so the only thing left is one signed-in pass at `/editor/{projectId}`: canvas renders, minimap and dots background appear, a second tab syncs a node drag. Still blocked on the same missing Clerk session as `07`–`09`.
 - Autosave has no **unload flush**: closing the tab inside the 1500ms debounce loses that last edit. Liveblocks Storage still has it, so the room is intact and the next client to edit saves it — but a project whose room later empties would restore to the older snapshot. `visibilitychange` + `sendBeacon` is the fix if that ever bites.
 - Two clients opening the *same* cold room within one round trip can both restore and duplicate every node. Narrow — it needs a room nobody has touched since the last save — and marked with a `ponytail:` comment in `canvas.tsx`. A "restored" flag in Storage is the fix.

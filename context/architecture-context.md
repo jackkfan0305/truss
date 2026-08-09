@@ -87,8 +87,22 @@
 - The canvas write goes through `@liveblocks/react-flow`'s server-side
   `mutateFlow`, the same Storage shape the client edits — there is no separate
   AI write path. Model output is validated into canvas objects *before* the
-  write, so the single mutation is the only thing that can touch the room and a
-  failure anywhere earlier leaves the canvas unchanged.
+  write, so nothing unvalidated can reach the room and a failure before the
+  build begins leaves the canvas untouched.
+- The build is **paced, not atomic**. One `mutateFlow` holds the whole plan, but
+  the callback sleeps between actions, and `mutateStorage` flushes buffered ops
+  on a 200ms debounce while the callback is still running — so the room receives
+  the plan progressively off a single Storage fetch. A call per action would
+  re-fetch the whole document each time, which is O(n²) transfer as the diagram
+  grows, for the same result on screen.
+- The consequence is that a mid-build failure leaves a **partial diagram**. This
+  is accepted rather than rolled back: on a shared canvas a rollback either
+  clobbers or misses concurrent human edits. The error path reports how many of
+  the planned changes landed instead of claiming the canvas is unchanged.
+- Pacing is a shared worker/client contract, not a worker detail. The cursor
+  sweep duration lives in `types/tasks.ts` because the worker waits it out
+  before writing and the browser spends it animating the cursor there; if the
+  two drift, nodes appear before the cursor arrives.
 - Task progress is visible to the whole room, not just the caller: the AI takes
   ephemeral Liveblocks presence (`setPresence`, self-expiring TTL) and publishes
   to the room-scoped `ai-status-feed`. Both are cosmetic — a failure to announce

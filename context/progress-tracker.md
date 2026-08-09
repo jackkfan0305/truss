@@ -8,6 +8,12 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `32-live-canvas-building` complete. The AI Architect now visibly builds the diagram: its cursor sweeps to each position and the node or edge appears under it, instead of the whole plan landing in one frame. The pacing is in shared state, so every client in the room watches the same build rather than one client replaying an animation. Kept to a single `mutateFlow` — `mutateStorage` fetches Storage once and flushes buffered ops on a 200ms debounce *while the callback runs*, so sleeping between actions broadcasts them progressively without the O(n²) re-fetch a call-per-action would cost. Pace is derived from the action count against a total build budget, so a 60-action plan speeds up instead of running 40s, and is floored above the flush debounce below which actions coalesce. `live-cursors.tsx` split its single `translate` into nested viewport/position/zoom-cancel layers so only position transitions — a transition on the combined transform animated pan and zoom too, sliding the cursor around behind the diagram. Arrival motion is gated by a non-reactive freshness read so opening a saved diagram does not animate every node at once.
+  - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover cursor targets resolving against nodes created earlier in the same plan (an edge points at its target, not its source), unresolvable subjects leaving the cursor still rather than flinging it to the origin, and the pace staying watchable at both ends of the plan-size range. A mutation pointing `addEdge` at its source failed the target check before it was restored.
+  - Trade-off taken deliberately: paced writes are no longer atomic, so a mid-build failure leaves a partial diagram. Rollback was rejected because on a shared canvas it either clobbers or misses concurrent human edits; the error path now reports how many changes landed instead.
+- Design agent reasoning quality raised on four fronts. `THINKING_LEVEL` is `high`, not `low`: deciding what a system is made of and where it lays out is the work, and at `low` the model reached for the generic shape of a diagram rather than the requested one. The prompt moved out of the task into `lib/design-prompt.ts`, where it now briefs the model on producing a buildable schema named in the user's own domain, and where `scripts/verify-design-agent.ts` can assert on what the model is actually shown. The canvas description carries each node's **size** as well as its position — the "nothing you add may overlap" rule was previously unfollowable, since only `pushClear` knew how big anything was — and `MAX_CONTEXT_ITEMS` went 120 → 400 with truncation now stated in the prompt instead of silently hiding nodes the model would then duplicate. Runs read the room's `ai-chat` feed for prior turns, so "now add a refund path" resolves against the conversation; history comes from the shared feed rather than the request payload, which means it includes what other collaborators asked for and cannot be forged by the caller. `maxDuration` 180 → 300 to cover high thinking plus the paced build.
+  - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover node sizes reaching the prompt (including unmeasured nodes falling back to their shape default) and history never echoing the prompt it is answering back at the model.
+  - Known gap, not addressed: the `reasoning` parts the sidebar renders are still three hardcoded sentences emitted at fixed points in the run, not the model's actual thinking. Provider thoughts remain private, so making that honest means deriving the line from the plan rather than from a string literal.
 - `31-mirrored-sidebar-toggles` complete. Projects and AI now use one persistent floating shadcn button each: the button itself owns the surface chrome and moves into its full-height, edge-aligned panel while open. The project title is an independent surface that hides only for an open Projects panel; below `xl`, an AI-open title and compact utilities share a reserved second row without covering the panel content. One union state makes the panels mutually exclusive, and the redundant internal Projects close button and interactive tap-out are gone, leaving each floating toggle as its panel's only close control.
   - Verified: `npx tsx scripts/verify-editor-controls.tsx`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. The real open/closed sidebar markup is covered, including `inert`, full-height geometry, responsive max widths, direct button chrome, state-appropriate labels/icons, title visibility, and wrapper rejection. A mutation restoring the old inset AI geometry failed the focused contract before the full-height class was restored. Repo-local React Doctor v0.9.1 reports 100/100 with no changed-scope findings; fetching the latest package was blocked by an npm cache permission collision outside the repository.
 - `30-floating-editor-controls` complete: the full-width editor navbar is gone. The canvas now fills behind three minimal floating shadcn control islands; the project title sits beside the left projects toggle, workspace utilities remain grouped, and a mirrored right toggle is the single open/close control for AI chat. Both sidebars clear the responsive control rows and retain their overlay behavior.
@@ -688,3 +694,25 @@ Update this file whenever the current phase, active feature, or implementation s
   half-overridden to stop fighting the panel palette. Verified in the built CSS
   that each one emits, including the easy-to-typo ones: `[&_li::marker]`,
   `[&_pre_code]`, `[&_p+p]`, `[&_blockquote]`, `[&_table]`.
+
+## Streaming transcript scroll
+
+- The sidebar's transcript never scrolled at all. `AiSidebar`'s wrapper around
+  `AiChatTranscript` was a plain block, and the transcript sizes itself as a
+  flex item (`min-h-0 flex-1`) whose viewport is `h-full` — against a block
+  parent both heights stay indefinite, so the viewport grew to fit the run
+  instead of scrolling it and the activity rendered over the composer.
+  Measured before the fix: wrapper 414px, viewport inside it 679px, with
+  `scrollHeight === clientHeight`. The wrapper must stay `flex … flex-col`.
+- Following the stream is a rAF ease loop, not CSS `scroll-smooth`. A run grows
+  the content every few frames and every growth re-issues the scroll; with
+  `scroll-smooth` each one restarts the browser's ease from a standstill, which
+  reads as a stutter that never catches up and then snaps. `jumpToLatest` still
+  uses native `scrollTo({behavior:"smooth"})` — nothing re-targets a one-shot.
+- The loop's cleanup must null `frameRef`, not just cancel the frame: a non-null
+  ref means "already running", so a cancelled id left behind blocks every later
+  call. StrictMode's dev remount hit this on first render and killed follow for
+  the whole session.
+- Verified by streaming fake activity into the real components on a throwaway
+  route (deleted): scrollTop traced 0→16→46→83→126→148→…→281 and held at the
+  bottom — continuous, no jump.

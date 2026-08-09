@@ -24,11 +24,22 @@ Update this file whenever the current phase, active feature, or implementation s
     production build also exit 0. The publisher verifier deliberately prints
     one simulated failed Liveblocks update before proving that the following
     full snapshot repairs it; that log is expected test output.
+  - Retained RED-stage evidence is explicit, not inferred from GREEN: Task 1's
+    parser returned `null` where a running empty assistant work-log message was
+    expected; Task 2 could not load `../lib/ai-run-chat`; Task 3 omitted
+    `promptMessageId` and had no server-authored avatar-message builder; Task 4
+    lacked `createAiRunChatPublisher` in the worker; and Task 5 lacked both
+    `arrangeAiChatMessages` and `ChatEntry`, then later lacked the local
+    edge-state helper that preserves a start failure beside a durable run.
   - Repo-local React Doctor did **not** pass: `npx react-doctor . --verbose`
     exits 1 at 51/100 with 2 errors and 20 warnings. Its repository-wide output
-    includes the changed Markdown HTML sinks and observer callback, as well as
-    unrelated findings; no diagnosis or broad cleanup was folded into this
-    documentation-only delivery.
+    includes unrelated findings. Independent review classifies the two changed
+    dynamic-HTML reports as false positives at their component sinks: both use
+    only `renderChatMarkdown`, whose markdown-it boundary has `html: false`,
+    validates link URLs, and has escaping/render verification coverage. The
+    observer-effect report is non-actionable: on stream error it performs the
+    required settlement bridge that unlocks the initiator's composer. These
+    classifications do not make the repository-wide 51/100 scan pass.
   - Live collaborative QA remains explicitly **unverified**. The gstack browser
     harness reports `NEEDS_SETUP`, and no two authenticated collaborator
     sessions were supplied. Do not read the automated checks as proof that the
@@ -83,10 +94,18 @@ Update this file whenever the current phase, active feature, or implementation s
   - Focused contract checks, ESLint, strict TypeScript, and production build
     pass. The publisher check intentionally logs one simulated failed write and
     then verifies full-snapshot repair. Repo-local React Doctor exits 1 at
-    51/100 (2 errors, 20 warnings), including changed activity/transcript
-    findings and unrelated repository findings; no code cleanup is included.
+    51/100 (2 errors, 20 warnings), including unrelated repository findings.
+    The two changed dynamic-HTML sink reports are false positives: both values
+    come exclusively from `renderChatMarkdown` (`html: false`, URL validation,
+    escaping/render tests). The observer effect is the required stream-error to
+    settlement bridge, so it is non-actionable. The scan is still not passing.
     Live two-client browser QA is unverified because gstack is `NEEDS_SETUP`
     and no authenticated collaborator sessions are available.
+  - Retained RED evidence: the Task 1 durable empty-run assertion returned
+    `null`; Task 2 had no publisher module; Task 3 lacked prompt/identity
+    boundary fields; Task 4 lacked worker publisher wiring; Task 5 lacked the
+    ordering/entry exports and later the shared edge-state helper. Each has its
+    corresponding report-recorded GREEN verification.
 - `29-spec-ui-integration` — the Specs tab is real. It lists this project's specs, previews one as rendered Markdown in a modal, and downloads it. The `20` static card is gone.
   - `GET /api/projects/[projectId]/specs` — the one read `28` left out. Metadata only, newest first, capped at 50. `filePath` is deliberately **not** selected: it is a private Blob pointer the browser cannot fetch anyway, so returning it would only publish the storage layout. The file name is computed by `specFileName`, the same function the download route puts in `Content-Disposition`, so the name in the list is the name the file saves under. `requireOwner: false`, matching the download route.
   - `hooks/use-project-specs.ts` — `useProjectSpecs` (the list) and `useSpecContent` (one document, read as text from the **download route**). Both abort on unmount and stamp their result with what they fetched, so a stale response never renders as the current one — the `useProjectMembers` pattern.

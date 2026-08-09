@@ -214,6 +214,70 @@ function checkChatRequestsAreValidated() {
     }),
     null
   );
+  assert.deepEqual(
+    parseAiChatRequest({
+      projectId: "project-1",
+      content: "  hello  ",
+      senderAvatar: "https://img.clerk.com/browser-spoof.jpg",
+      senderId: "user_spoof",
+      senderName: "Mallory",
+    }),
+    { projectId: "project-1", content: "hello" },
+    "browser-supplied identity is ignored",
+  );
+}
+
+async function checkAuthenticatedMessagesUseTheClerkAvatar() {
+  // The verifier only exercises the route's pure message builder. A valid
+  // placeholder lets its Prisma-backed authorization import initialize without
+  // asking this boundary check to contact a database.
+  process.env.DATABASE_URL ??=
+    "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
+  const aiChatRoute = await import("../app/api/ai/chat/route");
+
+  assert.ok(
+    "createAuthenticatedAiChatMessage" in aiChatRoute,
+    "the authenticated route exposes its server-authored message builder",
+  );
+
+  const createMessage = (
+    aiChatRoute as typeof aiChatRoute & {
+      createAuthenticatedAiChatMessage: (
+        request: { projectId: string; content: string },
+        senderId: string,
+        user: {
+          fullName: string | null;
+          username: string | null;
+          primaryEmailAddress: { emailAddress: string } | null;
+          imageUrl: string;
+        },
+        sentAt: number,
+      ) => AiChatMessage;
+    }
+  ).createAuthenticatedAiChatMessage;
+
+  assert.deepEqual(
+    createMessage(
+      { projectId: "project-1", content: "hello" },
+      "user_abc",
+      {
+        fullName: "Ada Lovelace",
+        username: null,
+        primaryEmailAddress: null,
+        imageUrl: "https://img.clerk.com/ada.jpg",
+      },
+      1_700_000_000_000,
+    ),
+    {
+      role: "user",
+      senderId: "user_abc",
+      senderName: "Ada Lovelace",
+      senderAvatar: "https://img.clerk.com/ada.jpg",
+      content: "hello",
+      sentAt: 1_700_000_000_000,
+    },
+    "authenticated user messages carry only the Clerk avatar snapshot",
+  );
 }
 
 function checkTranscriptIsOrderedAndFiltered() {
@@ -376,12 +440,17 @@ function checkMarkdownRendersChatFormatting() {
   assert.ok(renderChatMarkdown("see https://example.com").includes("<a "));
 }
 
+async function main() {
   checkChatMessagesAreValidated();
   checkChatRequestsAreValidated();
-checkTranscriptIsOrderedAndFiltered();
-checkTimelineCanBePersistedWithoutTransientIds();
-checkMessageIdsCanAnchorInlineRuns();
-checkMarkdownCannotInjectHtml();
-checkMarkdownRendersChatFormatting();
-console.log("✅ markdown is escaped and rendered");
-console.log("✅ ai-chat feed checks passed");
+  await checkAuthenticatedMessagesUseTheClerkAvatar();
+  checkTranscriptIsOrderedAndFiltered();
+  checkTimelineCanBePersistedWithoutTransientIds();
+  checkMessageIdsCanAnchorInlineRuns();
+  checkMarkdownCannotInjectHtml();
+  checkMarkdownRendersChatFormatting();
+  console.log("✅ markdown is escaped and rendered");
+  console.log("✅ ai-chat feed checks passed");
+}
+
+void main();

@@ -41,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     // pull the Trigger.dev worker bundle into the Next.js server bundle.
     const handle = await tasks.trigger<typeof designAgent>("design-agent", {
       prompt: designRequest.prompt,
+      promptMessageId: designRequest.promptMessageId,
       roomId: designRequest.roomId,
       modelId: designRequest.modelId,
       thinkingLevel: designRequest.thinkingLevel,

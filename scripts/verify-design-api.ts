@@ -10,6 +10,7 @@ import {
 
 const valid = {
   prompt: "Design a checkout flow",
+  promptMessageId: "chat-00000000-0000-4000-8000-000000000000",
   projectId: "checkout-flow-a1b2",
   roomId: "checkout-flow-a1b2",
 };
@@ -25,7 +26,11 @@ function checkDesignRequestParsing() {
   assert.deepEqual(parseDesignRequest(valid), parsedValid, "valid request");
 
   assert.deepEqual(
-    parseDesignRequest({ ...valid, prompt: "  Design a checkout flow  " }),
+    parseDesignRequest({
+      ...valid,
+      prompt: "  Design a checkout flow  ",
+      promptMessageId: "  chat-00000000-0000-4000-8000-000000000000  ",
+    }),
     parsedValid,
     "trims every field",
   );
@@ -49,6 +54,11 @@ function checkDesignRequestParsing() {
     { ...valid, prompt: 42 },
     { ...valid, prompt: null },
     { ...valid, prompt: "x".repeat(2001) },
+    { prompt: valid.prompt, projectId: valid.projectId, roomId: valid.roomId },
+    { ...valid, promptMessageId: "" },
+    { ...valid, promptMessageId: "   " },
+    { ...valid, promptMessageId: 42 },
+    { ...valid, promptMessageId: "x".repeat(257) },
     { ...valid, projectId: "" },
     { ...valid, projectId: 7, roomId: 7 },
     { prompt: valid.prompt, projectId: valid.projectId },
@@ -110,6 +120,10 @@ function checkDesignRequestParsing() {
   assert.ok(
     parseDesignRequest({ ...valid, prompt: "x".repeat(2000) }),
     "prompt at the limit",
+  );
+  assert.ok(
+    parseDesignRequest({ ...valid, promptMessageId: "x".repeat(256) }),
+    "prompt message ID at the limit",
   );
 }
 

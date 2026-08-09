@@ -53,6 +53,7 @@ import {
  */
 export interface DesignAgentPayload {
   prompt: string;
+  promptMessageId: string;
   roomId: string;
   /**
    * Which model to design with, chosen in the composer. Optional so a run

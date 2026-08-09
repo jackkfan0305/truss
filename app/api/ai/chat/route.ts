@@ -38,6 +38,10 @@ export async function POST(request: Request): Promise<Response> {
       role: "user",
       senderId: access.userId,
       senderName,
+      // Snapshotted, not looked up at render time: the transcript should show
+      // who wrote a line, not who that account is today. Browsers never supply
+      // this — `parseAiChatRequest` carries no identity fields at all.
+      senderAvatar: user.imageUrl,
       content: chatRequest.content,
       sentAt: Date.now(),
     });

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Image from "next/image"
 import { ArrowDown, Loader2 } from "lucide-react"
 
 import { AiRunActivity } from "@/components/editor/ai-run-activity"
@@ -10,11 +11,14 @@ import type {
   DesignRunSettlement,
   RunSubscription,
 } from "@/hooks/use-design-run"
+import { useCollaborators } from "@/hooks/use-collaborators"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
+import { selectAiActivityTimeline } from "@/lib/ai-timeline"
 import type { ChatMessage } from "@/lib/ai-chat"
 import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
+import { getInitials } from "@/lib/presence"
 import { cn } from "@/lib/utils"
-import type { AiStatusMessage } from "@/types/tasks"
+import type { AiChatRun, AiStatusMessage } from "@/types/tasks"
 
 interface AiChatTranscriptProps {
   messages: ChatMessage[]
@@ -126,8 +130,47 @@ export function AiChatTranscript({
     () => new Map(turns.map((turn) => [turn.promptMessageId, turn])),
     [turns]
   )
+
+  /*
+   * Every message written before `senderAvatar` existed carries no picture, and
+   * that is most of any existing transcript. Anyone *currently in the room* is
+   * already broadcasting theirs through presence, keyed by the same Clerk ID the
+   * message is stamped with — so their history gets a face for as long as they
+   * are here, and falls back to initials once they leave.
+   *
+   * ponytail: connected collaborators only. Backfilling a departed sender's
+   * avatar would mean fetching Clerk per unknown ID; add that if old
+   * conversations turn out to be read cold often.
+   */
+  const collaborators = useCollaborators()
+  const liveAvatars = useMemo(
+    () =>
+      new Map(
+        collaborators.flatMap((collaborator) =>
+          collaborator.info?.avatar
+            ? [[collaborator.id, collaborator.info.avatar] as const]
+            : []
+        )
+      ),
+    [collaborators]
+  )
   const hasLocalActiveTurn = turns.some(
     (turn) => turn.phase === "starting" || turn.phase === "running"
+  )
+
+  /*
+   * A settled run exists twice for whoever started it: once as this session's
+   * live turn, once as the log persisted on the assistant's message. The
+   * persisted copy is the one everyone in the room can see and the one that
+   * survives a reload, so it wins — but only for runs that actually made it onto
+   * the feed, which is why this is a set of ids rather than a flag.
+   */
+  const persistedRunIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) => (message.run ? [message.run.runId] : []))
+      ),
+    [messages]
   )
 
   useEffect(followToBottom, [followToBottom, messages, turns, isRoomActive])
@@ -231,13 +274,25 @@ export function AiChatTranscript({
             ) : null}
             {messages.map((message) => {
               const turn = turnsByPrompt.get(message.id)
+              /*
+               * Only a *settled* turn defers to its persisted copy. The worker
+               * writes the message before it emits the stream's terminal marker,
+               * so a live turn whose message has already landed is still the
+               * thing holding the observer that settles the run — dropping it
+               * there would leave the composer locked for good.
+               */
+              const isSettled =
+                turn?.phase === "complete" || turn?.phase === "error"
+              const isPersisted =
+                isSettled && Boolean(turn.runId && persistedRunIds.has(turn.runId))
 
               return (
                 <MessageWithRun
                   key={message.id}
                   message={message}
                   isOwn={message.senderId === selfId}
-                  turn={turn}
+                  liveAvatar={liveAvatars.get(message.senderId)}
+                  turn={isPersisted ? undefined : turn}
                   status={status}
                   subscription={subscription}
                   onRunSettled={onRunSettled}
@@ -271,6 +326,7 @@ export function AiChatTranscript({
 function MessageWithRun({
   message,
   isOwn,
+  liveAvatar,
   turn,
   status,
   subscription,
@@ -278,6 +334,7 @@ function MessageWithRun({
 }: {
   message: ChatMessage
   isOwn: boolean
+  liveAvatar?: string
   turn?: AiRunTurn
   status: AiStatusMessage | null
   subscription: RunSubscription | null
@@ -288,7 +345,10 @@ function MessageWithRun({
 
   return (
     <>
-      <ChatEntry message={message} isOwn={isOwn} />
+      {/* The log comes *before* the answer it produced, the way it happened —
+          and the way the live stream already reads. */}
+      {message.run ? <PersistedRunActivity run={message.run} /> : null}
+      <ChatEntry message={message} isOwn={isOwn} liveAvatar={liveAvatar} />
       {turn && subscription && isObservedRun ? (
         <DesignRunObserver
           key={subscription.runId}
@@ -305,28 +365,75 @@ function MessageWithRun({
 }
 
 /**
- * No avatars: a human message is the one on the raised surface, the assistant
- * writes straight onto the panel. That is the whole distinction, and it costs
- * nothing to read.
+ * A finished run's stored work log, rendered by the same component that draws
+ * the live one — the stored shape is the live shape minus its positional ids,
+ * so rebuilding a turn around it costs nothing and keeps one renderer.
  *
- * The name survives only where it carries information — another collaborator in
- * a shared room. "You" and "Truss" are still announced, but to screen readers
- * only, since a background colour is not something a reader can hear.
+ * `status` is always null: a status line describes a run in flight, and this one
+ * ended before the reader arrived.
  */
-function ChatEntry({ message, isOwn }: { message: ChatMessage; isOwn: boolean }) {
+function PersistedRunActivity({ run }: { run: AiChatRun }) {
+  const activity = useMemo(
+    () => selectAiActivityTimeline(run.activity),
+    [run.activity]
+  )
+
+  return (
+    <AiRunActivity
+      turn={{
+        promptMessageId: `run-${run.runId}`,
+        runId: run.runId,
+        phase: run.phase,
+        activity,
+        startedAt: 0,
+      }}
+      status={null}
+    />
+  )
+}
+
+/**
+ * A human message is the one on the raised surface, the assistant writes
+ * straight onto the panel. That distinction carries the two cases a reader is
+ * always in, and costs nothing to read.
+ *
+ * Identity is drawn only where it carries information — another collaborator in
+ * a shared room, who gets their Clerk picture and their name over the bubble.
+ * You already know which messages are yours, and the assistant is the only thing
+ * writing straight onto the panel, so "You" and "Truss" are announced to screen
+ * readers only: a background colour is not something a reader can hear.
+ */
+function ChatEntry({
+  message,
+  isOwn,
+  liveAvatar,
+}: {
+  message: ChatMessage
+  isOwn: boolean
+  liveAvatar?: string
+}) {
   const isAi = message.role === "assistant"
+  const isCollaborator = !isAi && !isOwn
   const author = isOwn ? "You" : isAi ? "Truss" : message.senderName
 
   return (
-    <li className={isAi ? "flex flex-col" : "ml-6 flex flex-col gap-1.5"}>
-      <span
-        className={cn(
-          "text-xs font-medium text-copy-secondary",
-          isOwn || isAi ? "sr-only" : undefined
-        )}
-      >
-        {author}
-      </span>
+    <li className="flex flex-col gap-1.5">
+      {/* Avatar and name ride *above* the bubble rather than beside it, so every
+          message in the panel — yours, theirs, the assistant's — shares one left
+          edge and the column reads as a single conversation. */}
+      {isCollaborator ? (
+        <span className="flex items-center gap-2">
+          <ChatAvatar
+            name={message.senderName}
+            avatar={message.senderAvatar ?? liveAvatar}
+          />
+          <span className="min-w-0 truncate text-xs font-medium text-copy-secondary">
+            {author}
+          </span>
+        </span>
+      ) : (
+        <span className="sr-only">{author}</span>
+      )}
       <time className="sr-only" dateTime={new Date(message.sentAt).toISOString()}>
         Sent at {new Date(message.sentAt).toISOString()}
       </time>
@@ -357,6 +464,33 @@ function ChatEntry({ message, isOwn }: { message: ChatMessage; isOwn: boolean })
         </p>
       )}
     </li>
+  )
+}
+
+/**
+ * A bare circle at the Clerk `UserButton`'s own 1.75rem — no ring, because this
+ * one never overlaps a neighbour the way the navbar's presence stack does, and
+ * the two should read as the same control in both places.
+ *
+ * `next/image` only resolves hosts listed in `next.config.ts`;
+ * `parseAiChatMessage` has already pinned the URL to the one that is, and
+ * anything it dropped lands on initials here.
+ */
+function ChatAvatar({ name, avatar }: { name: string; avatar?: string }) {
+  return (
+    <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-elevated text-[10px] font-medium text-copy-primary">
+      {avatar ? (
+        <Image
+          src={avatar}
+          alt={name}
+          width={28}
+          height={28}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span aria-hidden>{getInitials(name)}</span>
+      )}
+    </span>
   )
 }
 

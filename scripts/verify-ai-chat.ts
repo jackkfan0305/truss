@@ -5,7 +5,12 @@ import {
   selectAiChatMessages,
   type ChatFeedEntry,
 } from "../lib/ai-chat";
+import { fitRunToBudget } from "../lib/ai-activity";
 import { parseAiChatRequest } from "../lib/ai-chat-requests";
+import {
+  selectAiActivityTimeline,
+  toStorableActivity,
+} from "../lib/ai-timeline";
 import { renderChatMarkdown } from "../lib/markdown";
 import {
   MAX_CHAT_CONTENT_LENGTH,
@@ -84,6 +89,170 @@ function checkChatMessagesAreValidated() {
   );
 
   console.log("✅ chat messages are validated");
+}
+
+/**
+ * The avatar is the only field that turns into a network request, and the only
+ * one whose failure mode is a broken image rather than a missing message — so
+ * a bad URL has to be dropped, never rejected along with the text it came with.
+ */
+function checkSenderAvatarsAreHostPinned() {
+  const clerk = "https://img.clerk.com/eyJ0eXAiOiJKV1Qi.jpg?width=64";
+
+  assert.equal(
+    parseAiChatMessage({ ...VALID, senderAvatar: clerk })?.senderAvatar,
+    clerk,
+    "a Clerk avatar survives"
+  );
+
+  const dropped: [string, unknown][] = [
+    ["another host", "https://example.com/user.jpg"],
+    ["a lookalike host", "https://img.clerk.com.evil.test/user.jpg"],
+    ["plain http", "http://img.clerk.com/user.jpg"],
+    ["a javascript: URL", "javascript:alert(1)"],
+    ["a data: URL", "data:image/svg+xml,<svg onload=alert(1)>"],
+    ["a non-string", 12],
+    ["an oversized URL", `https://img.clerk.com/${"x".repeat(512)}`],
+  ];
+
+  for (const [what, senderAvatar] of dropped) {
+    const parsed = parseAiChatMessage({ ...VALID, senderAvatar });
+
+    assert.equal(parsed?.senderAvatar, undefined, `${what} is dropped`);
+    assert.equal(parsed?.content, VALID.content, `${what} keeps the message`);
+  }
+
+  assert.deepEqual(
+    parseAiChatMessage(VALID),
+    VALID,
+    "a message written before avatars existed still parses"
+  );
+
+  console.log("✅ sender avatars are pinned to the Clerk image host");
+}
+
+/**
+ * The persisted work log (34-persisted-run-activity). Three failure modes, all
+ * silent: a log that outlives the message it rides on, a client authoring a run
+ * it never performed, and a reload that shows a different transcript than the
+ * one that streamed.
+ */
+function checkRunLogsArePersistedAndBounded() {
+  const run = {
+    runId: "run_abc",
+    phase: "complete" as const,
+    activity: [
+      { type: "step" as const, text: "Reading the canvas" },
+      { type: "reasoning" as const, text: "The canvas is empty." },
+      { type: "action" as const, text: "addNode", detail: "Gateway" },
+    ],
+  };
+  const assistant = { ...VALID, role: "assistant" as const, run };
+
+  assert.deepEqual(
+    parseAiChatMessage(assistant)?.run,
+    run,
+    "an assistant work log survives"
+  );
+
+  assert.equal(
+    parseAiChatMessage({ ...VALID, run })?.run,
+    undefined,
+    "a *user* message cannot carry a run it did not perform"
+  );
+
+  const brokenRuns: [string, unknown][] = [
+    ["a missing runId", { ...run, runId: "" }],
+    ["an unknown phase", { ...run, phase: "running" }],
+    ["a non-array activity", { ...run, activity: "steps" }],
+    ["a null run", null],
+    ["a string run", "run_abc"],
+  ];
+
+  for (const [what, broken] of brokenRuns) {
+    const parsed = parseAiChatMessage({ ...assistant, run: broken });
+
+    assert.equal(parsed?.run, undefined, `${what} is dropped`);
+    assert.equal(parsed?.content, VALID.content, `${what} keeps the summary`);
+  }
+
+  // Junk parts are dropped individually rather than voiding the whole log.
+  assert.deepEqual(
+    parseAiChatMessage({
+      ...assistant,
+      run: { ...run, activity: [{ type: "nope" }, run.activity[0], null] },
+    })?.run?.activity,
+    [run.activity[0]],
+    "unreadable activity parts are skipped, not fatal"
+  );
+
+  const flood = {
+    ...assistant,
+    run: {
+      ...run,
+      activity: Array.from({ length: 500 }, () => ({
+        type: "action" as const,
+        text: "addNode",
+      })),
+    },
+  };
+
+  assert.equal(
+    parseAiChatMessage(flood)?.run?.activity.length,
+    200,
+    "a flood of parts is capped at the live timeline's ceiling"
+  );
+
+  // The stored shape is the live shape minus positional ids, so a reload has to
+  // rebuild exactly what streaming built.
+  assert.deepEqual(
+    toStorableActivity(selectAiActivityTimeline(run.activity)),
+    run.activity,
+    "a stored log rebuilds into the same timeline it was recorded from"
+  );
+
+  console.log("✅ run work logs are persisted and bounded");
+}
+
+/**
+ * The summary is the part a reader cannot do without, so an oversized log must
+ * give way to it rather than take the whole message down with it.
+ */
+function checkOversizedRunLogsGiveWayToTheSummary() {
+  const base = { runId: "run_abc", phase: "complete" as const };
+  const small = { ...base, activity: [{ type: "step" as const, text: "Hi" }] };
+
+  assert.deepEqual(fitRunToBudget(small, "room-1"), small, "a small log is kept");
+
+  const wordy = {
+    ...base,
+    activity: [
+      { type: "reasoning" as const, text: "x".repeat(200_000) },
+      { type: "action" as const, text: "addNode", detail: "Gateway" },
+    ],
+  };
+
+  assert.deepEqual(
+    fitRunToBudget(wordy, "room-1")?.activity,
+    [{ type: "action", text: "addNode", detail: "Gateway" }],
+    "reasoning is what gives way first"
+  );
+
+  const enormous = {
+    ...base,
+    activity: Array.from({ length: 200 }, () => ({
+      type: "action" as const,
+      text: "x".repeat(2000),
+    })),
+  };
+
+  assert.equal(
+    fitRunToBudget(enormous, "room-1"),
+    undefined,
+    "a log that cannot fit at all is dropped rather than failing the message"
+  );
+
+  console.log("✅ oversized run logs give way to the summary");
 }
 
 function checkChatRequestsAreValidated() {
@@ -233,6 +402,9 @@ function checkMarkdownRendersChatFormatting() {
 }
 
   checkChatMessagesAreValidated();
+checkSenderAvatarsAreHostPinned();
+checkRunLogsArePersistedAndBounded();
+checkOversizedRunLogsGiveWayToTheSummary();
   checkChatRequestsAreValidated();
 checkTranscriptIsOrderedAndFiltered();
 checkMessageIdsCanAnchorInlineRuns();

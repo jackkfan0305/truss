@@ -4,6 +4,26 @@
 
 Dark only. No light mode. The visual language is a dark technical workspace — near-black backgrounds, layered surfaces, and vivid accent colors for interactive elements.
 
+### AI Sidechat
+
+The AI sidechat is intentionally monochrome. It uses only the page/surface,
+border, and copy tokens from the palette — no brand, AI, success, warning, or
+error accent colours. State is communicated with iconography and text, never
+colour alone.
+
+- The header visibly names the active provider and exact model ID.
+- Messages use one reading edge and minimal neutral surfaces, following modern
+  AI chat conventions rather than coloured role bubbles.
+- Each local generation renders as an inline, prompt-anchored work turn. A
+  shadcn Accordion progressively discloses chronological phases, curated
+  reasoning summaries, and canvas operations. Raw provider chain of thought is
+  never displayed.
+- Canvas operations remain visually pending until the run's atomic canvas
+  write completes. Completion and failure use both an icon and text.
+- Detailed activity is retained in the mounted browser session and under
+  Trigger.dev's stream-retention policy; the durable room chat keeps user
+  prompts and final AI summaries, not activity details or raw model reasoning.
+
 All colors are defined as CSS custom properties in `globals.css` and mapped to Tailwind tokens via `@theme inline`. Components must use these tokens — no hardcoded hex values or raw Tailwind color classes like `zinc-*`.
 
 | Role             | CSS Variable           | Hex / Value               |
@@ -97,10 +117,10 @@ shadcn/ui on top of Tailwind. No custom design system. Components live in `compo
 
 ## Layout Patterns
 
-- Editor workspace: full-viewport layout — floating sidebar overlay on the left, center canvas, slide-over AI sidebar on the right.
-- Sidebars: floating overlay with dark semi-transparent background and subtle border.
-- Modals and dialogs: centered overlay, `rounded-3xl`, dark background with backdrop blur.
-- Navbar: top bar with dark background and bottom border.
+- Editor workspace: full-viewport canvas or editor-home background with floating control islands and floating sidebar overlays.
+- Floating controls: left projects toggle plus project title, a minimal utility group, and a mirrored right toggle for AI chat. Use existing shadcn primitives and semantic surface tokens.
+- Sidebars: floating overlays below the control row, with dark semi-transparent backgrounds and subtle borders.
+- On narrow screens, the utility group moves to a second right-aligned floating row so the title and sidebar toggles remain unobstructed.
 
 ## Icons
 

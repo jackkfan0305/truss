@@ -39,3 +39,18 @@ export interface ProjectMember {
   imageUrl: string | null
   role: ProjectRole
 }
+
+/**
+ * One generated spec, as the Specs tab lists it. Metadata only — the Markdown
+ * lives in a private Blob and is read through the download route, never held
+ * alongside the list.
+ *
+ * `createdAt` is an ISO string rather than a `Date` because it crosses JSON.
+ * `fileName` is computed server-side by `specFileName`, the same function that
+ * names the download, so the list and the saved file agree.
+ */
+export interface ProjectSpecSummary {
+  id: string
+  createdAt: string
+  fileName: string
+}

@@ -6,8 +6,11 @@
 
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
   parseAiDesignModelId,
+  parseAiThinkingLevel,
   type AiDesignModelId,
+  type AiThinkingLevel,
 } from "@/types/tasks";
 
 const MAX_PROMPT_LENGTH = 2000;
@@ -20,6 +23,7 @@ export interface DesignRequest {
   projectId: string;
   roomId: string;
   modelId: AiDesignModelId;
+  thinkingLevel: AiThinkingLevel;
 }
 
 function readString(body: unknown, key: string): string | null {
@@ -32,6 +36,15 @@ function readString(body: unknown, key: string): string | null {
   return typeof raw === "string" ? raw.trim() : null;
 }
 
+/** The raw value at `key`, for the allowlist parsers that narrow it themselves. */
+function readValue(body: unknown, key: string): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  return (body as Record<string, unknown>)[key];
+}
+
 /**
  * Validates a design trigger body. Returns `null` when the caller should answer
  * 400.
@@ -41,18 +54,15 @@ function readString(body: unknown, key: string): string | null {
  * one project trigger generation aimed at another project's room. Rejecting is
  * the only reading that cannot be wrong.
  *
- * `modelId` is optional and defaults, but an unrecognized one is refused — see
- * `parseAiDesignModelId`.
+ * `modelId` and `thinkingLevel` are optional and default, but an unrecognized
+ * one is refused — see `parseAiDesignModelId`.
  */
 export function parseDesignRequest(body: unknown): DesignRequest | null {
   const prompt = readString(body, "prompt");
   const projectId = readString(body, "projectId");
   const roomId = readString(body, "roomId");
-  const modelId = parseAiDesignModelId(
-    typeof body === "object" && body !== null && !Array.isArray(body)
-      ? (body as Record<string, unknown>).modelId
-      : undefined
-  );
+  const modelId = parseAiDesignModelId(readValue(body, "modelId"));
+  const thinkingLevel = parseAiThinkingLevel(readValue(body, "thinkingLevel"));
 
   if (!prompt || prompt.length > MAX_PROMPT_LENGTH) {
     return null;
@@ -62,7 +72,7 @@ export function parseDesignRequest(body: unknown): DesignRequest | null {
     return null;
   }
 
-  if (modelId === "invalid") {
+  if (modelId === "invalid" || thinkingLevel === "invalid") {
     return null;
   }
 
@@ -71,6 +81,7 @@ export function parseDesignRequest(body: unknown): DesignRequest | null {
     projectId,
     roomId,
     modelId: modelId ?? DEFAULT_AI_DESIGN_MODEL_ID,
+    thinkingLevel: thinkingLevel ?? DEFAULT_AI_THINKING_LEVEL,
   };
 }
 

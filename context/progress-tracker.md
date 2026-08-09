@@ -722,3 +722,21 @@ Update this file whenever the current phase, active feature, or implementation s
 - Verified by streaming fake activity into the real components on a throwaway
   route (deleted): scrollTop traced 0→16→46→83→126→148→…→281 and held at the
   bottom — continuous, no jump.
+
+## Layout the model can actually reason about
+
+- The prompt listed default node sizes but never said an x,y is the *top-left*
+  corner, and never mentioned that an edge label renders as a pill centred on
+  the edge midpoint. So a model spacing two nodes by the minimum gap produced a
+  labelled edge whose label was drawn across one of them.
+- `EDGE_LABEL_CLEARANCE` (`types/canvas.ts`, 160x24) is the label's footprint,
+  measured off `CanvasEdgeRenderer`'s own pill styling. The prompt budgets it
+  between any two nodes joined by a labelled edge, on top of `MIN_NODE_GAP`.
+- The auto-placement fallback had the same bug — 260x180 steps left 80 units
+  between columns, less than a label. Now 380x240, asserted in
+  `scripts/verify-design-agent.ts` along with the prompt stating every default
+  size and both clearances.
+- Not done: no edge-aware layout pass. The validator still only pushes nodes
+  down on overlap and knows nothing about the edges the same plan adds, so a
+  long label on a short edge can still collide. A real router (dagre/elk) is the
+  upgrade path if that shows up in practice.

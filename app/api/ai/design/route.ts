@@ -43,6 +43,7 @@ export async function POST(request: Request): Promise<Response> {
       prompt: designRequest.prompt,
       roomId: designRequest.roomId,
       modelId: designRequest.modelId,
+      thinkingLevel: designRequest.thinkingLevel,
     });
 
     runId = handle.id;

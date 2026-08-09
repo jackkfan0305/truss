@@ -5,7 +5,7 @@ import {
   toBox,
   type DesignContext,
 } from "@/lib/design-plan";
-import { NODE_DEFAULT_SIZES } from "@/types/canvas";
+import { EDGE_LABEL_CLEARANCE, NODE_DEFAULT_SIZES } from "@/types/canvas";
 import { AI_USER_NAME, type AiChatMessage } from "@/types/tasks";
 
 /**
@@ -62,12 +62,20 @@ export const SYSTEM_PROMPT = [
   "(for example teal for data stores, blue for services, orange for external systems),",
   "not decoratively. Use neutral when nothing else applies.",
   "",
-  "Layout rules:",
-  `- Position nodes on a grid with at least ${MIN_NODE_GAP} units of clear space between them.`,
-  "- Lay flows left to right, or top to bottom, consistently.",
-  `- Default sizes: ${Object.entries(NODE_DEFAULT_SIZES)
+  "Layout rules — you are placing rectangles, not points, so do the arithmetic:",
+  "- A node's x,y is its top-left corner. It occupies x..x+width by y..y+height.",
+  `- Unless you give width and height, a node is created at its shape's default size: ${Object.entries(
+    NODE_DEFAULT_SIZES
+  )
     .map(([shape, size]) => `${shape} ${size.width}x${size.height}`)
     .join(", ")}.`,
+  `- Leave at least ${MIN_NODE_GAP} units of clear space between any two node rectangles.`,
+  `- An edge's label is drawn as a pill centred on the middle of the edge, so it lands`,
+  `  in the space between the two nodes: budget ${EDGE_LABEL_CLEARANCE.width} units across the flow`,
+  `  direction and ${EDGE_LABEL_CLEARANCE.height} units across the other one for any edge you label.`,
+  "  Two nodes you connect with a labelled edge need that much room between them,",
+  "  on top of the minimum gap. Keep edge labels to a few words so they fit.",
+  "- Lay flows left to right, or top to bottom, consistently.",
   "- Every existing node is listed below with its position and its size. Nothing you",
   "  add may overlap one of those rectangles.",
   "",

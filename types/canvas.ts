@@ -72,6 +72,18 @@ export const NODE_DEFAULT_SIZES: Record<NodeShape, NodeSize> = {
 export const NODE_MIN_SIZE: NodeSize = { width: 72, height: 48 };
 
 /**
+ * The room an edge label needs at the midpoint of its edge, in flow units.
+ *
+ * `CanvasEdgeRenderer` centres the label pill on the path midpoint, so it sits
+ * *between* the two nodes rather than beside them — two nodes placed only a node
+ * gap apart get their label drawn across one of them. Measured from the pill's
+ * own styling (`text-xs`, `px-2 py-0.5`, 1px border) at a few words of label;
+ * the width is a budget, not a ceiling, which is why the prompt also asks the
+ * model to keep edge labels short.
+ */
+export const EDGE_LABEL_CLEARANCE: NodeSize = { width: 160, height: 24 };
+
+/**
  * How far from a handle a dropped connection still snaps to it, in flow units
  * (16-edge-behavior). React Flow's `connectionRadius` default is 20, which is
  * roughly "release on the dot" — a connection dropped on the *body* of a target

@@ -12,6 +12,7 @@ import {
   type DesignContext,
 } from "../lib/design-plan";
 import {
+  SYSTEM_PROMPT,
   buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
@@ -45,7 +46,9 @@ import {
   CANVAS_NODE_TYPE,
   DEFAULT_NODE_COLOR,
   DEFAULT_NODE_SHAPE,
+  EDGE_LABEL_CLEARANCE,
   NODE_COLORS,
+  NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
   type CanvasEdge,
@@ -547,6 +550,52 @@ function checkGeneratedNodesNeverOverlap() {
   }
 }
 
+/**
+ * An edge label is centred between the two nodes it connects, so the fallback
+ * layout has to leave it somewhere to sit — otherwise the label is drawn across
+ * a node and hides the thing it describes.
+ */
+function checkAutoLayoutLeavesRoomForEdgeLabels() {
+  const plan = parseDesignPlan(
+    { actions: Array.from({ length: 8 }, () => ({ type: "addNode" })) },
+    EMPTY
+  );
+  const boxes = addedNodes(plan.actions).map((added) => ({
+    x: added.position.x,
+    y: added.position.y,
+    width: added.width ?? 0,
+    height: added.height ?? 0,
+  }));
+
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const fits =
+        a.x + a.width + EDGE_LABEL_CLEARANCE.width <= b.x ||
+        b.x + b.width + EDGE_LABEL_CLEARANCE.width <= a.x ||
+        a.y + a.height + EDGE_LABEL_CLEARANCE.height <= b.y ||
+        b.y + b.height + EDGE_LABEL_CLEARANCE.height <= a.y;
+
+      assert.ok(fits, `no room for an edge label between nodes ${i} and ${j}`);
+    }
+  }
+}
+
+/** The model cannot avoid an overlap it was never told the dimensions of. */
+function checkPromptStatesSizesAndLabelClearance() {
+  for (const [shape, size] of Object.entries(NODE_DEFAULT_SIZES)) {
+    assert.ok(
+      SYSTEM_PROMPT.includes(`${shape} ${size.width}x${size.height}`),
+      `the prompt states the default size for ${shape}`
+    );
+  }
+
+  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.width)));
+  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.height)));
+  assert.ok(SYSTEM_PROMPT.includes(String(MIN_NODE_GAP)));
+}
+
 /** One response can only ever spend one bounded write on the canvas. */
 function checkActionCountIsCapped() {
   const plan = parseDesignPlan(
@@ -951,6 +1000,8 @@ function main() {
   checkDeletingANodeDeletesItsEdges();
   checkEdgesCanBeDeletedByEndpoints();
   checkGeneratedNodesNeverOverlap();
+  checkAutoLayoutLeavesRoomForEdgeLabels();
+  checkPromptStatesSizesAndLabelClearance();
   checkActionCountIsCapped();
   checkStatusMessagesAreValidated();
   checkLatestStatusIsSelectedFromTheFeed();

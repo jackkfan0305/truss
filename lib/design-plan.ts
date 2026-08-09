@@ -64,10 +64,15 @@ export const MIN_NODE_GAP = 40;
 /** How far right of the existing diagram a generated one starts. */
 const NEW_CONTENT_OFFSET = 80;
 
-/** Auto-placed nodes lay out in rows of this many before wrapping. */
+/**
+ * Auto-placed nodes lay out in rows of this many before wrapping. The steps
+ * clear the widest and tallest default node plus `EDGE_LABEL_CLEARANCE`, so a
+ * labelled edge between two auto-placed nodes has somewhere to draw itself
+ * instead of landing on one of them.
+ */
 const AUTO_COLUMNS = 4;
-const AUTO_COLUMN_STEP = 260;
-const AUTO_ROW_STEP = 180;
+const AUTO_COLUMN_STEP = 380;
+const AUTO_ROW_STEP = 240;
 
 /** A node big enough to matter, small enough to stay on a readable canvas. */
 const MAX_NODE_SIZE: NodeSize = { width: 800, height: 600 };

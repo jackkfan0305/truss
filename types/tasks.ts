@@ -128,6 +128,47 @@ export function parseAiDesignModelId(
 }
 
 /**
+ * How hard the model thinks before answering, chosen per prompt.
+ *
+ * `low`, `medium` and `high` and no `minimal`: those three are the levels every
+ * model in `AI_DESIGN_MODELS` accepts, while `minimal` is Flash-and-Lite only —
+ * Gemini 3.1 Pro rejects it. Offering a level that fails on one of four listed
+ * models would make the two pickers silently incompatible.
+ *
+ * Google's own defaults vary by model (`high` for Pro and 3 Flash, `medium` for
+ * 3.5 Flash, `minimal` for Flash-Lite), which is exactly why this is sent
+ * explicitly on every run: the same prompt at the same level should mean the
+ * same thing whichever model the composer is on.
+ */
+export const AI_THINKING_LEVELS = [
+  { id: "low", label: "Low effort", hint: "Fastest" },
+  { id: "medium", label: "Medium effort", hint: "Balanced" },
+  { id: "high", label: "High effort", hint: "Deepest" },
+] as const;
+
+export type AiThinkingLevel = (typeof AI_THINKING_LEVELS)[number]["id"];
+
+/**
+ * Designing a system is the case high effort exists for — at `low` the model
+ * reaches for the generic shape of a diagram instead of the requested one. The
+ * picker is there for when a small edit does not deserve the wait.
+ */
+export const DEFAULT_AI_THINKING_LEVEL: AiThinkingLevel = "high";
+
+/** The same allowlist rule as `parseAiDesignModelId`, for the same reason. */
+export function parseAiThinkingLevel(
+  value: unknown
+): AiThinkingLevel | "invalid" | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const match = AI_THINKING_LEVELS.find((level) => level.id === value);
+
+  return match ? match.id : "invalid";
+}
+
+/**
  * How long the AI cursor takes to travel to its next target, in milliseconds.
  *
  * Shared rather than duplicated because it is one behaviour split across two

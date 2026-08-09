@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 
 import { parseDesignRequest, parseRunId } from "../lib/design-requests";
-import { AI_DESIGN_MODELS, DEFAULT_AI_DESIGN_MODEL_ID } from "../types/tasks";
+import {
+  AI_DESIGN_MODELS,
+  AI_THINKING_LEVELS,
+  DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
+} from "../types/tasks";
 
 const valid = {
   prompt: "Design a checkout flow",
@@ -9,8 +14,12 @@ const valid = {
   roomId: "checkout-flow-a1b2",
 };
 
-/** What a body without a `modelId` must parse to: the request plus the default. */
-const parsedValid = { ...valid, modelId: DEFAULT_AI_DESIGN_MODEL_ID };
+/** What a body without run settings must parse to: the request plus defaults. */
+const parsedValid = {
+  ...valid,
+  modelId: DEFAULT_AI_DESIGN_MODEL_ID,
+  thinkingLevel: DEFAULT_AI_THINKING_LEVEL,
+};
 
 function checkDesignRequestParsing() {
   assert.deepEqual(parseDesignRequest(valid), parsedValid, "valid request");
@@ -49,6 +58,12 @@ function checkDesignRequestParsing() {
     { ...valid, modelId: "gemini-2.5-flash" },
     { ...valid, modelId: "" },
     { ...valid, modelId: 42 },
+    // Same rule for thinking effort. `minimal` is the trap: Gemini accepts it on
+    // Flash and Flash-Lite but not on Pro, so it is not offered and not allowed.
+    { ...valid, thinkingLevel: "minimal" },
+    { ...valid, thinkingLevel: "highest" },
+    { ...valid, thinkingLevel: "" },
+    { ...valid, thinkingLevel: 42 },
   ];
 
   for (const body of rejected) {
@@ -64,9 +79,31 @@ function checkDesignRequestParsing() {
   for (const model of AI_DESIGN_MODELS) {
     assert.deepEqual(
       parseDesignRequest({ ...valid, modelId: model.id }),
-      { ...valid, modelId: model.id },
+      { ...parsedValid, modelId: model.id },
       `accepts offered model: ${model.id}`,
     );
+  }
+
+  // And every effort level, against every model — the two pickers are
+  // independent, so any pair the composer can produce has to be accepted.
+  for (const level of AI_THINKING_LEVELS) {
+    assert.deepEqual(
+      parseDesignRequest({ ...valid, thinkingLevel: level.id }),
+      { ...parsedValid, thinkingLevel: level.id },
+      `accepts offered effort: ${level.id}`,
+    );
+
+    for (const model of AI_DESIGN_MODELS) {
+      assert.deepEqual(
+        parseDesignRequest({
+          ...valid,
+          modelId: model.id,
+          thinkingLevel: level.id,
+        }),
+        { ...parsedValid, modelId: model.id, thinkingLevel: level.id },
+        `accepts ${model.id} at ${level.id}`,
+      );
+    }
   }
 
   // The ceiling is inclusive — the boundary is the value most likely to drift.

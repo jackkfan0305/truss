@@ -111,6 +111,21 @@ function checkChatMessagesAreValidated() {
     VALID,
     "run metadata on a human message is dropped",
   );
+  assert.deepEqual(
+    parseAiChatMessage({
+      ...ASSISTANT_MESSAGE,
+      senderId: "user_spoof",
+      senderName: "Mallory",
+    }),
+    {
+      role: "assistant",
+      senderId: "user_spoof",
+      senderName: "Mallory",
+      content: ASSISTANT_MESSAGE.content,
+      sentAt: ASSISTANT_MESSAGE.sentAt,
+    },
+    "run metadata on an assistant-role message from a human is dropped",
+  );
 
   for (const [what, run] of [
     ["an unknown phase", { ...RUN_MESSAGE.run, phase: "pending" }],

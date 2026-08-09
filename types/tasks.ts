@@ -386,7 +386,10 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
-  const parsedRun = role === "assistant" ? parseAiChatRun(run) : undefined;
+  const parsedRun =
+    role === "assistant" && senderId === AI_USER_ID
+      ? parseAiChatRun(run)
+      : undefined;
 
   // Whitespace-only content is still a bubble with nothing in it. Only the
   // truly empty running assistant turn is represented by its durable work log.

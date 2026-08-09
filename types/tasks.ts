@@ -128,6 +128,47 @@ export function parseAiDesignModelId(
 }
 
 /**
+ * How hard the model thinks before answering, chosen per prompt.
+ *
+ * `low`, `medium` and `high` and no `minimal`: those three are the levels every
+ * model in `AI_DESIGN_MODELS` accepts, while `minimal` is Flash-and-Lite only —
+ * Gemini 3.1 Pro rejects it. Offering a level that fails on one of four listed
+ * models would make the two pickers silently incompatible.
+ *
+ * Google's own defaults vary by model (`high` for Pro and 3 Flash, `medium` for
+ * 3.5 Flash, `minimal` for Flash-Lite), which is exactly why this is sent
+ * explicitly on every run: the same prompt at the same level should mean the
+ * same thing whichever model the composer is on.
+ */
+export const AI_THINKING_LEVELS = [
+  { id: "low", label: "Low effort", hint: "Fastest" },
+  { id: "medium", label: "Medium effort", hint: "Balanced" },
+  { id: "high", label: "High effort", hint: "Deepest" },
+] as const;
+
+export type AiThinkingLevel = (typeof AI_THINKING_LEVELS)[number]["id"];
+
+/**
+ * Designing a system is the case high effort exists for — at `low` the model
+ * reaches for the generic shape of a diagram instead of the requested one. The
+ * picker is there for when a small edit does not deserve the wait.
+ */
+export const DEFAULT_AI_THINKING_LEVEL: AiThinkingLevel = "high";
+
+/** The same allowlist rule as `parseAiDesignModelId`, for the same reason. */
+export function parseAiThinkingLevel(
+  value: unknown
+): AiThinkingLevel | "invalid" | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const match = AI_THINKING_LEVELS.find((level) => level.id === value);
+
+  return match ? match.id : "invalid";
+}
+
+/**
  * How long the AI cursor takes to travel to its next target, in milliseconds.
  *
  * Shared rather than duplicated because it is one behaviour split across two
@@ -242,6 +283,67 @@ export function parseAiActivityPart(data: unknown): AiActivityPart | null {
 }
 
 /**
+ * A finished run's work log, persisted onto the assistant message that run
+ * wrote — the model's reasoning summaries and the canvas operations it called,
+ * in the order they happened.
+ *
+ * JSON on the feed message rather than rows in Postgres, on purpose: the message
+ * is already the durable record of the run, it is already replicated to everyone
+ * in the room, and a work log is only ever read back whole, with its message.
+ * Give it a table when something needs to query *across* runs.
+ */
+export type AiChatRun = {
+  /** The Trigger.dev run, so a live turn can tell it already persisted. */
+  runId: string;
+  phase: "complete" | "error";
+  activity: AiActivityPart[];
+};
+
+/** Matches the live timeline's cap, so a reload shows what the run showed. */
+const MAX_PERSISTED_ACTIVITY_PARTS = 200;
+
+/**
+ * Malformed run metadata yields `null` rather than rejecting the message it
+ * rides on: the summary is the part a reader cannot do without, and a work log
+ * this build cannot read should cost them the log, not the answer.
+ */
+export function parseAiChatRun(data: unknown): AiChatRun | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return null;
+  }
+
+  const { runId, phase, activity } = data as Record<string, unknown>;
+
+  if (
+    typeof runId !== "string" ||
+    runId.length === 0 ||
+    runId.length > MAX_CHAT_SENDER_ID_LENGTH
+  ) {
+    return null;
+  }
+
+  if (phase !== "complete" && phase !== "error") {
+    return null;
+  }
+
+  if (!Array.isArray(activity)) {
+    return null;
+  }
+
+  return {
+    runId,
+    phase,
+    activity: activity
+      .slice(0, MAX_PERSISTED_ACTIVITY_PARTS)
+      .flatMap((part) => {
+        const parsed = parseAiActivityPart(part);
+
+        return parsed ? [parsed] : [];
+      }),
+  };
+}
+
+/**
  * The room's chat feed (25-sidebar-chat-feed).
  *
  * Deliberately a *second* feed rather than a `kind` on the status one: the
@@ -275,6 +377,13 @@ export type AiChatMessage = {
   senderId: string;
   /** Display name as it was when the message was sent. */
   senderName: string;
+  /**
+   * The sender's Clerk avatar as it was when the message was sent, absent on
+   * messages written before this field existed and on the AI's own lines.
+   */
+  senderAvatar?: string;
+  /** Assistant messages only: the work log of the run that wrote this message. */
+  run?: AiChatRun;
   content: string;
   /** The sender's clock, for the visible timestamp only — see `selectAiChatMessages`. */
   sentAt: number;
@@ -296,10 +405,8 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
-  const { role, senderId, senderName, content, sentAt } = data as Record<
-    string,
-    unknown
-  >;
+  const { role, senderId, senderName, senderAvatar, run, content, sentAt } =
+    data as Record<string, unknown>;
 
   if (!isMember(AI_CHAT_ROLES, role)) {
     return null;
@@ -335,11 +442,35 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
+  // A work log only belongs to the assistant: a human message carrying one is a
+  // client trying to author a run it did not perform.
+  const parsedRun = role === "assistant" ? parseAiChatRun(run) : null;
+
   return {
     role,
     senderId,
     senderName,
+    ...(isClerkAvatarUrl(senderAvatar) ? { senderAvatar } : {}),
+    ...(parsedRun ? { run: parsedRun } : {}),
     content: content.slice(0, MAX_CHAT_CONTENT_LENGTH),
     sentAt,
   };
+}
+
+/**
+ * An avatar is the one field on a message that becomes a network request, so it
+ * is pinned to the single host `next.config.ts` allows through the image
+ * optimizer. Anything else — another host, `http:`, a `javascript:` URL, junk —
+ * is dropped and the entry falls back to initials rather than failing to parse:
+ * a missing picture must never cost a reader the message.
+ */
+const CLERK_AVATAR_ORIGIN = "https://img.clerk.com/";
+const MAX_CHAT_SENDER_AVATAR_LENGTH = 512;
+
+function isClerkAvatarUrl(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= MAX_CHAT_SENDER_AVATAR_LENGTH &&
+    value.startsWith(CLERK_AVATAR_ORIGIN)
+  );
 }

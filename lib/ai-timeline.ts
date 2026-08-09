@@ -22,6 +22,22 @@ export function selectAiActivityTimeline(
   return timeline;
 }
 
+/**
+ * A timeline as it is stored on a chat message: the parts without their ids.
+ *
+ * Ids are positional (`activity-3`) and rebuilt from the same array on the way
+ * back in, so persisting them would only be a second copy of the index.
+ */
+export function toStorableActivity(
+  timeline: readonly AiTimelinePart[]
+): AiActivityPart[] {
+  return timeline.map((part) => ({
+    type: part.type,
+    text: part.text,
+    ...(part.detail ? { detail: part.detail } : {}),
+  }));
+}
+
 /** Adds one onData chunk without relying on the Trigger hook's parts cache. */
 export function appendAiActivityTimelinePart(
   timeline: readonly AiTimelinePart[],

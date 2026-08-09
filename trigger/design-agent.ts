@@ -1,7 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { mutateFlow } from "@liveblocks/react-flow/node";
 import { logger, streams, task } from "@trigger.dev/sdk";
-import { generateObject, jsonSchema } from "ai";
+import { Output, jsonSchema, streamText } from "ai";
 
 import {
   clearAiPresence,
@@ -10,6 +10,11 @@ import {
   setAiPresence,
 } from "@/lib/ai-activity";
 import { selectAiChatMessages } from "@/lib/ai-chat";
+import {
+  appendAiActivityTimelinePart,
+  toStorableActivity,
+  type AiTimelinePart,
+} from "@/lib/ai-timeline";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -36,11 +41,16 @@ import {
   AI_CURSOR_ARRIVAL_PAD_MS,
   AI_CURSOR_SWEEP_MS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
   getBuildStepMs,
+  isAiActivityTerminalPart,
   parseAiDesignModelId,
+  parseAiThinkingLevel,
   type AiActivityPart,
   type AiActivityTerminalPart,
   type AiChatMessage,
+  type AiChatRun,
+  type AiThinkingLevel,
 } from "@/types/tasks";
 
 /**
@@ -58,6 +68,11 @@ export interface DesignAgentPayload {
    * payload is not only ever written by that route.
    */
   modelId?: string;
+  /**
+   * How hard to think before answering. Optional and re-validated for the same
+   * reasons as `modelId`.
+   */
+  thinkingLevel?: string;
 }
 
 /**
@@ -160,9 +175,24 @@ const designPlanSchema = jsonSchema({
  * generation degenerate, burning ~41k output tokens over ~167s to emit a single
  * malformed action.
  *
- * Provider thoughts stay private; the activity stream carries curated updates.
+ * The level itself is now a per-prompt choice from the composer
+ * (`AI_THINKING_LEVELS`); `high` is only its default, kept because a small edit
+ * is the case for turning it down, not the common one.
  */
-const THINKING_LEVEL = "high";
+
+/**
+ * Ask Gemini for its thought summaries, and show them.
+ *
+ * These are the provider's own summaries of its reasoning, not raw chain of
+ * thought — Gemini does not return the latter, and this is the supported way to
+ * see anything at all. Worth the extra response bytes: at `high` the thinking
+ * *is* the visible wait, and the sidebar was previously filling it with three
+ * hardcoded sentences that were the same on every run.
+ *
+ * Still model output, so still untrusted: `parseAiActivityPart` validates and
+ * clamps it on the way in, and the sidebar renders it as text, never as markup.
+ */
+const INCLUDE_THOUGHTS = true;
 
 /**
  * The run's live activity, as a stream the sidebar subscribes to.
@@ -171,13 +201,22 @@ const THINKING_LEVEL = "high";
  * `streams.append` calls: phases, summaries, and operations can be enqueued
  * synchronously while the pipe batches transport in the background.
  */
-function openActivityStream() {
+function openActivityStream(runId: string) {
   let controller!: ReadableStreamDefaultController<
     AiActivityPart | AiActivityTerminalPart
   >;
   let isWritable = true;
   let didClose = false;
   let didLogTransportError = false;
+  /*
+   * Recorded separately from the transport, and *before* it: a stream that has
+   * gone away must not also cost the run its persisted log. Built with the same
+   * function the sidebar builds its live timeline with, so what a reader sees
+   * after a reload is what they would have seen watching — adjacent reasoning
+   * deltas merged into one block, and the same 200-part ceiling.
+   */
+  let recorded: AiTimelinePart[] = [];
+  let recordedCount = 0;
 
   const { waitUntilComplete } = streams.pipe(
     AI_ACTIVITY_STREAM_ID,
@@ -192,6 +231,11 @@ function openActivityStream() {
     // Never throws: activity is commentary, and a closed stream must not be
     // able to fail the canvas write that is the actual work.
     emit: (part: AiActivityPart | AiActivityTerminalPart): void => {
+      if (!isAiActivityTerminalPart(part)) {
+        recorded = appendAiActivityTimelinePart(recorded, part, recordedCount);
+        recordedCount += 1;
+      }
+
       if (!isWritable) {
         return;
       }
@@ -203,6 +247,12 @@ function openActivityStream() {
         logActivityTransportError(error);
       }
     },
+    /** The work log as it stands, ready to persist onto the chat message. */
+    snapshot: (phase: "complete" | "error"): AiChatRun => ({
+      runId,
+      phase,
+      activity: toStorableActivity(recorded),
+    }),
     close: async (): Promise<void> => {
       if (didClose) {
         return;
@@ -271,14 +321,20 @@ export const designAgent = task({
       parsedModelId === null || parsedModelId === "invalid"
         ? DEFAULT_AI_DESIGN_MODEL_ID
         : parsedModelId;
+    const parsedThinkingLevel = parseAiThinkingLevel(payload.thinkingLevel);
+    const thinkingLevel =
+      parsedThinkingLevel === null || parsedThinkingLevel === "invalid"
+        ? DEFAULT_AI_THINKING_LEVEL
+        : parsedThinkingLevel;
 
     logger.info("Design requested", {
       roomId,
       promptLength: prompt.length,
       modelId,
+      thinkingLevel,
     });
 
-    const activity = openActivityStream();
+    const activity = openActivityStream(runId);
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
     // Paced writes flush as they go, so a failure can leave part of the plan on
     // the canvas. Both are read by the error path, so both are declared out
@@ -322,27 +378,12 @@ export const designAgent = task({
       });
 
       activity.emit({ type: "step", text: "Designing" });
-      activity.emit({
-        type: "reasoning",
-        text: "I’m mapping the request to components, boundaries, and connections that fit the existing canvas.",
-      });
 
-      // `generateObject`, not `streamText` with `Output.object`: nothing here
-      // consumes model tokens as they arrive — the sidebar is fed curated
-      // activity parts, never raw provider chain of thought — so the streaming
-      // variant bought only its partial-JSON repair, which silently truncated
-      // the action list to whatever had arrived when it decided to close the
-      // object. One request, one complete plan, validated below.
-      const { object } = await generateObject({
-        model: createGoogleGenerativeAI({ apiKey: getGoogleApiKey() })(modelId),
-        schema: designPlanSchema,
-        system: SYSTEM_PROMPT,
+      const object = await generateDesign({
+        modelId,
+        thinkingLevel,
         prompt: buildDesignPrompt({ context, history, prompt }),
-        providerOptions: {
-          google: {
-            thinkingConfig: { thinkingLevel: THINKING_LEVEL },
-          },
-        },
+        activity,
       });
 
       activity.emit({ type: "step", text: "Validating the proposed changes" });
@@ -375,7 +416,8 @@ export const designAgent = task({
         await publishAiChatSummary(
           roomId,
           runId,
-          plan.summary || "No canvas changes to make."
+          plan.summary || "No canvas changes to make.",
+          activity.snapshot("complete")
         );
         activityOutcome = "complete";
         return { summary: plan.summary, applied: 0 };
@@ -402,7 +444,8 @@ export const designAgent = task({
       await publishAiChatSummary(
         roomId,
         runId,
-        plan.summary || `Applied ${plan.actions.length} canvas changes.`
+        plan.summary || `Applied ${plan.actions.length} canvas changes.`,
+        activity.snapshot("complete")
       );
 
       activityOutcome = "complete";
@@ -428,7 +471,12 @@ export const designAgent = task({
         text: failureText,
       });
 
-      await publishAiChatSummary(roomId, runId, failureText);
+      await publishAiChatSummary(
+        roomId,
+        runId,
+        failureText,
+        activity.snapshot("error")
+      );
 
       throw error;
     } finally {
@@ -440,6 +488,76 @@ export const designAgent = task({
     }
   },
 });
+
+/** `openActivityStream`'s emitter, as much of it as a phase needs. */
+type ActivityEmitter = {
+  emit: (part: AiActivityPart | AiActivityTerminalPart) => void;
+};
+
+/**
+ * Asks for the plan, and forwards the model's thinking to the sidebar while it
+ * is still thinking.
+ *
+ * `streamText` with `Output.object`, not `generateObject`: reasoning only exists
+ * on a stream, and showing it *after* the wait it explains is not showing it.
+ * The trap `generateObject` was picked to avoid is still avoided — the plan is
+ * read from `result.output`, which parses the complete response once the stream
+ * ends. `partialOutputStream` is the thing that truncates an action list
+ * mid-array, and nothing here reads it.
+ *
+ * Deltas are emitted as they land rather than buffered into sentences:
+ * `appendAiActivityTimelinePart` already concatenates adjacent reasoning parts
+ * into one disclosure, so the sidebar renders a growing paragraph, and
+ * `streams.pipe` batches the transport underneath.
+ */
+async function generateDesign({
+  modelId,
+  thinkingLevel,
+  prompt,
+  activity,
+}: {
+  modelId: string;
+  thinkingLevel: AiThinkingLevel;
+  prompt: string;
+  activity: ActivityEmitter;
+}): Promise<unknown> {
+  const result = streamText({
+    model: createGoogleGenerativeAI({ apiKey: getGoogleApiKey() })(modelId),
+    output: Output.object({ schema: designPlanSchema }),
+    system: SYSTEM_PROMPT,
+    prompt,
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          thinkingLevel,
+          includeThoughts: INCLUDE_THOUGHTS,
+        },
+      },
+    },
+  });
+
+  let thoughts = 0;
+
+  // The stream has to be consumed to completion for `output` to resolve.
+  for await (const part of result.fullStream) {
+    if (part.type === "reasoning-delta" && part.text.length > 0) {
+      activity.emit({ type: "reasoning", text: part.text });
+      thoughts += 1;
+    }
+  }
+
+  // Not an error: whether thought summaries come back is the provider's call,
+  // and a plan without them is still a plan. Logged because a run that silently
+  // stops narrating looks like a broken sidebar from the outside.
+  if (thoughts === 0) {
+    logger.info("No thought summaries returned for this run", {
+      modelId,
+      thinkingLevel,
+    });
+  }
+
+  return result.output;
+}
 
 /**
  * Applies the plan at a watchable pace, with the AI cursor arriving before each
@@ -459,7 +577,7 @@ async function buildCanvas(
   roomId: string,
   plan: DesignPlan,
   context: DesignContext,
-  activity: { emit: (part: AiActivityPart | AiActivityTerminalPart) => void }
+  activity: ActivityEmitter
 ): Promise<number> {
   const stepMs = getBuildStepMs(plan.actions.length);
   const cursor = createCursorTargets(context);

@@ -22,9 +22,12 @@ import { useDesignRun } from "@/hooks/use-design-run"
 import { cn } from "@/lib/utils"
 import {
   AI_DESIGN_MODELS,
+  AI_THINKING_LEVELS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
   MAX_CHAT_CONTENT_LENGTH,
   type AiDesignModelId,
+  type AiThinkingLevel,
 } from "@/types/tasks"
 
 interface AiSidebarProps {
@@ -42,6 +45,9 @@ export function AiSidebar({ isOpen }: AiSidebarProps) {
   const [draft, setDraft] = useState("")
   const [modelId, setModelId] = useState<AiDesignModelId>(
     DEFAULT_AI_DESIGN_MODEL_ID
+  )
+  const [thinkingLevel, setThinkingLevel] = useState<AiThinkingLevel>(
+    DEFAULT_AI_THINKING_LEVEL
   )
   const roomId = useRoom().id
   const { message: status, isGenerating } = useAiStatus()
@@ -68,7 +74,7 @@ export function AiSidebar({ isOpen }: AiSidebarProps) {
     if (!promptMessageId) return
 
     setDraft("")
-    await start(text, promptMessageId, modelId)
+    await start(text, promptMessageId, { modelId, thinkingLevel })
   }
 
   return (
@@ -108,7 +114,12 @@ export function AiSidebar({ isOpen }: AiSidebarProps) {
           value="architect"
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
-          <div className="min-h-0 flex-1 px-4 pt-4 max-xl:pt-14">
+          {/* Must stay a flex column: the transcript sizes itself as a flex
+              item and its scroll viewport is `h-full`, so a block parent here
+              leaves both heights indefinite — the viewport grows to fit the
+              run instead of scrolling it, and the activity spills over the
+              composer. */}
+          <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 max-xl:pt-14">
             <AiChatTranscript
               messages={messages}
               selfId={selfId}
@@ -178,11 +189,21 @@ export function AiSidebar({ isOpen }: AiSidebarProps) {
                 className="max-h-40 min-h-12 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:disabled:bg-transparent"
               />
               <div className="mt-2 flex items-center justify-between gap-2">
-                <ModelPicker
-                  value={modelId}
-                  onChange={setModelId}
-                  disabled={isRunning}
-                />
+                {/* `min-w-0` on the group, not the row: both triggers truncate
+                    their own label rather than pushing the send button out of
+                    the composer on the narrowest panel width. */}
+                <div className="flex min-w-0 items-center gap-0.5">
+                  <ModelPicker
+                    value={modelId}
+                    onChange={setModelId}
+                    disabled={isRunning}
+                  />
+                  <ThinkingPicker
+                    value={thinkingLevel}
+                    onChange={setThinkingLevel}
+                    disabled={isRunning}
+                  />
+                </div>
                 <Button
                   type="submit"
                   size="icon-sm"
@@ -285,6 +306,58 @@ function ModelPicker({
 const MODEL_ITEMS = AI_DESIGN_MODELS.map((model) => ({
   value: model.id,
   label: model.label,
+}))
+
+/**
+ * How hard the model thinks before answering, for the next prompt.
+ *
+ * Deliberately the same stripped trigger as `ModelPicker` and sat directly
+ * beside it: they are two settings on one send, and giving this one its own
+ * chrome would read as a different kind of control. The effort is named on the
+ * trigger (`High effort`, not `High`) because next to a model name a bare
+ * adjective reads as a property of the model.
+ */
+function ThinkingPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: AiThinkingLevel
+  onChange: (thinkingLevel: AiThinkingLevel) => void
+  disabled: boolean
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as AiThinkingLevel)}
+      disabled={disabled}
+      items={THINKING_ITEMS}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Thinking effort"
+        className="h-7 gap-1 border-0 bg-transparent px-1.5 text-xs text-copy-secondary shadow-none hover:bg-elevated focus-visible:ring-1 focus-visible:ring-copy-primary/30 dark:bg-transparent dark:hover:bg-elevated [&_svg]:size-3 [&_svg]:text-copy-faint"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-56">
+        {AI_THINKING_LEVELS.map((level) => (
+          <SelectItem key={level.id} value={level.id} className="text-xs">
+            <span className="flex w-full items-center justify-between gap-3">
+              <span className="truncate">{level.label}</span>
+              <span className="shrink-0 text-copy-faint">{level.hint}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** Same reason as `MODEL_ITEMS`: Base UI reads the closed trigger from here. */
+const THINKING_ITEMS = AI_THINKING_LEVELS.map((level) => ({
+  value: level.id,
+  label: level.label,
 }))
 
 function EmptyChat({

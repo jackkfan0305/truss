@@ -7,7 +7,7 @@ import {
   type AiRunTurn,
 } from "@/lib/ai-run-turns";
 import type { AiTimelinePart } from "@/lib/ai-timeline";
-import type { AiDesignModelId } from "@/types/tasks";
+import type { AiDesignModelId, AiThinkingLevel } from "@/types/tasks";
 
 /**
  * Starting a design generation and following it to the end
@@ -33,12 +33,18 @@ export interface DesignRunSettlement {
   activity: AiTimelinePart[];
 }
 
+/** The composer's per-prompt run settings. */
+export interface DesignRunOptions {
+  modelId: AiDesignModelId;
+  thinkingLevel: AiThinkingLevel;
+}
+
 export interface DesignRun {
   /** Triggers a run for `prompt`. Resolves once it is *started*, not finished. */
   start: (
     prompt: string,
     promptMessageId: string,
-    modelId: AiDesignModelId
+    options: DesignRunOptions
   ) => Promise<void>;
   /** True from the request leaving the client until the run settles. */
   isRunning: boolean;
@@ -90,7 +96,7 @@ export function useDesignRun(roomId: string): DesignRun {
     async (
       prompt: string,
       promptMessageId: string,
-      modelId: AiDesignModelId
+      options: DesignRunOptions
     ): Promise<void> => {
       if (startLock.current) {
         return;
@@ -101,7 +107,7 @@ export function useDesignRun(roomId: string): DesignRun {
       dispatchTurn({ type: "start", promptMessageId, startedAt: Date.now() });
 
       try {
-        const nextSubscription = await triggerDesign(prompt, roomId, modelId);
+        const nextSubscription = await triggerDesign(prompt, roomId, options);
 
         dispatchTurn({
           type: "subscribe",
@@ -151,7 +157,7 @@ export function useDesignRun(roomId: string): DesignRun {
 async function triggerDesign(
   prompt: string,
   roomId: string,
-  modelId: AiDesignModelId
+  options: DesignRunOptions
 ): Promise<RunSubscription> {
   // `projectId` and `roomId` are the same value; the route rejects the request
   // unless both are present and agree, so both are sent.
@@ -159,7 +165,8 @@ async function triggerDesign(
     prompt,
     roomId,
     projectId: roomId,
-    modelId,
+    modelId: options.modelId,
+    thinkingLevel: options.thinkingLevel,
   });
 
   const { token } = await postJson<{ token: string }>("/api/ai/design/token", {

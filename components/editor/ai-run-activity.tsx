@@ -5,6 +5,7 @@ import {
   Check,
   Circle,
   CircleDashed,
+  CircleStop,
   CircleX,
   Loader2,
   TerminalSquare,
@@ -17,43 +18,49 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { useSmoothText } from "@/hooks/use-smooth-text"
-import type { AiRunTurn } from "@/lib/ai-run-turns"
 import type { AiTimelinePart } from "@/lib/ai-timeline"
 import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
-import { type AiStatusMessage, type AiTaskStatus } from "@/types/tasks"
 
-interface AiRunActivityProps {
-  turn: AiRunTurn
-  status: AiStatusMessage | null
+export interface AiRunActivityState {
+  id: string
+  runId: string | null
+  phase: "starting" | "running" | "complete" | "error" | "incomplete"
+  activity: AiTimelinePart[]
 }
 
-/** A Cursor-style, session-only work log anchored to the prompt that ran it. */
-export function AiRunActivity({ turn, status }: AiRunActivityProps) {
-  const isRunning = turn.phase === "starting" || turn.phase === "running"
-  const isError = turn.phase === "error"
-  const matchingStatus =
-    turn.runId && status?.runId === turn.runId ? status : null
-  const latestStep = turn.activity.findLast((part) => part.type === "step")
+interface AiRunActivityProps {
+  state: AiRunActivityState
+}
+
+/** A prompt-anchored work log, rendered from local or durable activity. */
+export function AiRunActivity({ state }: AiRunActivityProps) {
+  const isRunning = state.phase === "starting" || state.phase === "running"
+  const isStopped = state.phase === "error" || state.phase === "incomplete"
+  const latestStep = state.activity.findLast((part) => part.type === "step")
   const headline =
-    matchingStatus?.text ??
-    (matchingStatus ? STATUS_FALLBACK[matchingStatus.status] : null) ??
-    latestStep?.text ??
-    (isRunning ? "Starting…" : isError ? "Generation stopped" : "Work complete")
-  const stepCount = turn.activity.length
+    state.phase === "incomplete"
+      ? "Work stopped before completion"
+      : latestStep?.text ??
+        (isRunning
+          ? "Starting…"
+          : state.phase === "error"
+            ? "Generation stopped"
+            : "Work complete")
+  const stepCount = state.activity.length
 
   return (
-    <li data-run-id={turn.runId ?? undefined}>
+    <div data-run-id={state.runId ?? undefined}>
       {/* No card: the work log sits on the panel background like the messages
           around it, so a run reads as part of the conversation rather than as
           a widget dropped into it. */}
       <Accordion
-        defaultValue={isRunning || isError ? [turn.promptMessageId] : []}
+        defaultValue={isRunning || isStopped ? [state.id] : []}
       >
-        <AccordionItem value={turn.promptMessageId} className="border-0">
+        <AccordionItem value={state.id} className="border-0">
           <AccordionTrigger className="min-h-11 gap-3 py-1 hover:no-underline focus-visible:border-copy-primary focus-visible:ring-copy-primary/20">
             <span className="flex min-w-0 items-center gap-2.5">
-              <RunStateIcon phase={turn.phase} />
+              <RunStateIcon phase={state.phase} />
               <span className="min-w-0 text-left">
                 <span
                   role="status"
@@ -76,13 +83,13 @@ export function AiRunActivity({ turn, status }: AiRunActivityProps) {
           </AccordionTrigger>
 
           <AccordionContent className="pb-2">
-            {turn.activity.length > 0 ? (
+            {state.activity.length > 0 ? (
               <ol className="flex flex-col gap-2.5">
-                {turn.activity.map((part) => (
+                {state.activity.map((part) => (
                   <ActivityItem
                     key={part.id}
                     part={part}
-                    phase={turn.phase}
+                    phase={state.phase}
                   />
                 ))}
               </ol>
@@ -94,11 +101,11 @@ export function AiRunActivity({ turn, status }: AiRunActivityProps) {
           </AccordionContent>
         </AccordionItem>
       </Accordion>
-    </li>
+    </div>
   )
 }
 
-function RunStateIcon({ phase }: { phase: AiRunTurn["phase"] }) {
+function RunStateIcon({ phase }: { phase: AiRunActivityState["phase"] }) {
   if (phase === "starting" || phase === "running") {
     return (
       <Loader2
@@ -106,6 +113,10 @@ function RunStateIcon({ phase }: { phase: AiRunTurn["phase"] }) {
         className="size-3.5 shrink-0 motion-safe:animate-spin text-copy-primary"
       />
     )
+  }
+
+  if (phase === "incomplete") {
+    return <CircleStop aria-hidden className="size-3.5 shrink-0 text-copy-primary" />
   }
 
   if (phase === "error") {
@@ -120,7 +131,7 @@ function ActivityItem({
   phase,
 }: {
   part: AiTimelinePart
-  phase: AiRunTurn["phase"]
+  phase: AiRunActivityState["phase"]
 }) {
   if (part.type === "reasoning") {
     return (
@@ -178,7 +189,7 @@ function ThinkingDisclosure({
   phase,
 }: {
   part: AiTimelinePart
-  phase: AiRunTurn["phase"]
+  phase: AiRunActivityState["phase"]
 }) {
   // Deltas only arrive while the run is live; a finished run's text is final,
   // so it is revealed whole rather than typed out to a reader who has already
@@ -228,9 +239,11 @@ function ThinkingDisclosure({
 const ENTRANCE =
   "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-200"
 
-function ActionStateIcon({ phase }: { phase: AiRunTurn["phase"] }) {
+function ActionStateIcon({ phase }: { phase: AiRunActivityState["phase"] }) {
   return phase === "complete" ? (
     <Check aria-hidden className="size-3 shrink-0" />
+  ) : phase === "incomplete" ? (
+    <CircleStop aria-hidden className="size-3 shrink-0" />
   ) : phase === "error" ? (
     <CircleX aria-hidden className="size-3 shrink-0" />
   ) : (
@@ -242,11 +255,4 @@ function ActionStateIcon({ phase }: { phase: AiRunTurn["phase"] }) {
       )}
     />
   )
-}
-
-const STATUS_FALLBACK: Record<AiTaskStatus, string> = {
-  started: "Starting…",
-  processing: "Working on the canvas…",
-  complete: "Work complete",
-  error: "Generation stopped",
 }

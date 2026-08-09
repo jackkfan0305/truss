@@ -1,13 +1,10 @@
 import type { XYPosition } from "@xyflow/react";
 
-import { createServerAiChatMessage } from "@/lib/ai-chat-server";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
   AI_STATUS_FEED_ID,
   AI_USER_ID,
   AI_USER_NAME,
-  MAX_CHAT_CONTENT_LENGTH,
-  type AiChatRun,
   type AiStatusMessage,
 } from "@/types/tasks";
 
@@ -105,77 +102,6 @@ export async function publishAiStatus(
     }
   });
 }
-
-/**
- * Durable assistant response, authored by the worker rather than a browser.
- *
- * The run's work log rides along as JSON on the same message, so the reasoning
- * and canvas calls survive a reload and reach collaborators who were not
- * watching the stream.
- */
-export async function publishAiChatSummary(
-  roomId: string,
-  runId: string,
-  text: string,
-  run?: AiChatRun
-): Promise<void> {
-  const content = text.trim().slice(0, MAX_CHAT_CONTENT_LENGTH);
-
-  await announce("chat", roomId, async () => {
-    await createServerAiChatMessage(
-      roomId,
-      {
-        role: "assistant",
-        senderId: AI_USER_ID,
-        senderName: AI_USER_NAME,
-        ...(run ? { run: fitRunToBudget(run, roomId) } : {}),
-        content: content || "Canvas updated.",
-        sentAt: Date.now(),
-      },
-      `chat-${runId}`
-    );
-  });
-}
-
-/**
- * A long thinking run can outgrow what a feed message will hold, and an
- * oversized write fails the *whole* message — losing the summary, which is the
- * one part a reader cannot do without.
- *
- * So the log gives way in the order it can afford to: reasoning first (the bulk,
- * and the least load-bearing), then the log entirely. Steps and canvas calls are
- * short enough that they effectively always survive.
- */
-const MAX_RUN_SNAPSHOT_BYTES = 96_000;
-
-export function fitRunToBudget(
-  run: AiChatRun,
-  roomId: string
-): AiChatRun | undefined {
-  if (measure(run) <= MAX_RUN_SNAPSHOT_BYTES) {
-    return run;
-  }
-
-  const withoutReasoning: AiChatRun = {
-    ...run,
-    activity: run.activity.filter((part) => part.type !== "reasoning"),
-  };
-
-  if (measure(withoutReasoning) <= MAX_RUN_SNAPSHOT_BYTES) {
-    console.warn(
-      `AI run log dropped its reasoning to fit room ${roomId} (${run.runId})`
-    );
-    return withoutReasoning;
-  }
-
-  console.warn(
-    `AI run log dropped entirely to fit room ${roomId} (${run.runId})`
-  );
-  return undefined;
-}
-
-const measure = (run: AiChatRun): number =>
-  Buffer.byteLength(JSON.stringify(run), "utf8");
 
 /**
  * Announcements are cosmetic: a room that cannot be told about a run is not a

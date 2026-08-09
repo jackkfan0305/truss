@@ -283,67 +283,6 @@ export function parseAiActivityPart(data: unknown): AiActivityPart | null {
 }
 
 /**
- * A finished run's work log, persisted onto the assistant message that run
- * wrote — the model's reasoning summaries and the canvas operations it called,
- * in the order they happened.
- *
- * JSON on the feed message rather than rows in Postgres, on purpose: the message
- * is already the durable record of the run, it is already replicated to everyone
- * in the room, and a work log is only ever read back whole, with its message.
- * Give it a table when something needs to query *across* runs.
- */
-export type AiChatRun = {
-  /** The Trigger.dev run, so a live turn can tell it already persisted. */
-  runId: string;
-  phase: "complete" | "error";
-  activity: AiActivityPart[];
-};
-
-/** Matches the live timeline's cap, so a reload shows what the run showed. */
-const MAX_PERSISTED_ACTIVITY_PARTS = 200;
-
-/**
- * Malformed run metadata yields `null` rather than rejecting the message it
- * rides on: the summary is the part a reader cannot do without, and a work log
- * this build cannot read should cost them the log, not the answer.
- */
-export function parseAiChatRun(data: unknown): AiChatRun | null {
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    return null;
-  }
-
-  const { runId, phase, activity } = data as Record<string, unknown>;
-
-  if (
-    typeof runId !== "string" ||
-    runId.length === 0 ||
-    runId.length > MAX_CHAT_SENDER_ID_LENGTH
-  ) {
-    return null;
-  }
-
-  if (phase !== "complete" && phase !== "error") {
-    return null;
-  }
-
-  if (!Array.isArray(activity)) {
-    return null;
-  }
-
-  return {
-    runId,
-    phase,
-    activity: activity
-      .slice(0, MAX_PERSISTED_ACTIVITY_PARTS)
-      .flatMap((part) => {
-        const parsed = parseAiActivityPart(part);
-
-        return parsed ? [parsed] : [];
-      }),
-  };
-}
-
-/**
  * The room's chat feed (25-sidebar-chat-feed).
  *
  * Deliberately a *second* feed rather than a `kind` on the status one: the
@@ -354,6 +293,7 @@ export function parseAiChatRun(data: unknown): AiChatRun | null {
 export const AI_CHAT_FEED_ID = "ai-chat";
 
 export const AI_CHAT_ROLES = ["user", "assistant"] as const;
+export const AI_CHAT_RUN_PHASES = ["running", "complete", "error"] as const;
 
 /**
  * The AI's identity — in the room's presence and on the chat feed.
@@ -370,6 +310,17 @@ export const AI_USER_ID = "truss-ai-architect";
 export const AI_USER_NAME = "AI Architect";
 
 export type AiChatRole = (typeof AI_CHAT_ROLES)[number];
+export type AiChatRunPhase = (typeof AI_CHAT_RUN_PHASES)[number];
+
+/** The shared cap for a durable run snapshot and its rendered timeline. */
+export const MAX_AI_ACTIVITY_PARTS = 200;
+
+export type AiChatRun = {
+  runId: string;
+  promptMessageId: string;
+  phase: AiChatRunPhase;
+  activity: AiActivityPart[];
+};
 
 export type AiChatMessage = {
   role: AiChatRole;
@@ -377,22 +328,21 @@ export type AiChatMessage = {
   senderId: string;
   /** Display name as it was when the message was sent. */
   senderName: string;
-  /**
-   * The sender's Clerk avatar as it was when the message was sent, absent on
-   * messages written before this field existed and on the AI's own lines.
-   */
+  /** A Clerk profile-image snapshot captured when the human message was sent. */
   senderAvatar?: string;
-  /** Assistant messages only: the work log of the run that wrote this message. */
-  run?: AiChatRun;
   content: string;
   /** The sender's clock, for the visible timestamp only — see `selectAiChatMessages`. */
   sentAt: number;
+  /** The durable work log attached to an assistant's design run. */
+  run?: AiChatRun;
 };
 
 /** Long enough for a paragraph, short enough that one message can't flood the panel. */
 export const MAX_CHAT_CONTENT_LENGTH = 2000;
 const MAX_CHAT_SENDER_ID_LENGTH = 256;
 const MAX_CHAT_SENDER_NAME_LENGTH = 120;
+const MAX_CHAT_AVATAR_URL_LENGTH = 2048;
+const MAX_CHAT_RUN_ID_LENGTH = 256;
 const MAX_DATE_MILLISECONDS = 8_640_000_000_000_000;
 
 /**
@@ -405,7 +355,7 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
-  const { role, senderId, senderName, senderAvatar, run, content, sentAt } =
+  const { role, senderId, senderName, senderAvatar, content, sentAt, run } =
     data as Record<string, unknown>;
 
   if (!isMember(AI_CHAT_ROLES, role)) {
@@ -428,12 +378,6 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
-  // Whitespace-only content is a bubble with nothing in it, so it is junk here
-  // rather than a message worth rendering.
-  if (typeof content !== "string" || content.trim().length === 0) {
-    return null;
-  }
-
   if (
     typeof sentAt !== "number" ||
     !Number.isFinite(sentAt) ||
@@ -442,35 +386,86 @@ export function parseAiChatMessage(data: unknown): AiChatMessage | null {
     return null;
   }
 
-  // A work log only belongs to the assistant: a human message carrying one is a
-  // client trying to author a run it did not perform.
-  const parsedRun = role === "assistant" ? parseAiChatRun(run) : null;
+  const parsedRun =
+    role === "assistant" && senderId === AI_USER_ID
+      ? parseAiChatRun(run)
+      : undefined;
+
+  // Whitespace-only content is still a bubble with nothing in it. Only the
+  // truly empty running assistant turn is represented by its durable work log.
+  if (
+    typeof content !== "string" ||
+    (content.trim().length === 0 &&
+      (content.length !== 0 || parsedRun?.phase !== "running"))
+  ) {
+    return null;
+  }
+
+  const avatar = parseAiChatAvatar(senderAvatar);
 
   return {
     role,
     senderId,
     senderName,
-    ...(isClerkAvatarUrl(senderAvatar) ? { senderAvatar } : {}),
-    ...(parsedRun ? { run: parsedRun } : {}),
     content: content.slice(0, MAX_CHAT_CONTENT_LENGTH),
     sentAt,
+    ...(avatar ? { senderAvatar: avatar } : {}),
+    ...(parsedRun ? { run: parsedRun } : {}),
   };
 }
 
-/**
- * An avatar is the one field on a message that becomes a network request, so it
- * is pinned to the single host `next.config.ts` allows through the image
- * optimizer. Anything else — another host, `http:`, a `javascript:` URL, junk —
- * is dropped and the entry falls back to initials rather than failing to parse:
- * a missing picture must never cost a reader the message.
- */
-const CLERK_AVATAR_ORIGIN = "https://img.clerk.com/";
-const MAX_CHAT_SENDER_AVATAR_LENGTH = 512;
+function parseAiChatAvatar(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_CHAT_AVATAR_URL_LENGTH
+  ) {
+    return undefined;
+  }
 
-function isClerkAvatarUrl(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length <= MAX_CHAT_SENDER_AVATAR_LENGTH &&
-    value.startsWith(CLERK_AVATAR_ORIGIN)
-  );
+  try {
+    const url = new URL(value);
+
+    return url.origin === "https://img.clerk.com" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseAiChatRun(value: unknown): AiChatRun | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const { runId, promptMessageId, phase, activity } = value as Record<
+    string,
+    unknown
+  >;
+
+  if (
+    typeof runId !== "string" ||
+    runId.length === 0 ||
+    runId.length > MAX_CHAT_RUN_ID_LENGTH ||
+    typeof promptMessageId !== "string" ||
+    promptMessageId.length === 0 ||
+    promptMessageId.length > MAX_CHAT_RUN_ID_LENGTH ||
+    !isMember(AI_CHAT_RUN_PHASES, phase) ||
+    !Array.isArray(activity)
+  ) {
+    return undefined;
+  }
+
+  const parsedActivity: AiActivityPart[] = [];
+
+  for (const rawPart of activity.slice(0, MAX_AI_ACTIVITY_PARTS)) {
+    const part = parseAiActivityPart(rawPart);
+
+    if (!part) {
+      return undefined;
+    }
+
+    parsedActivity.push(part);
+  }
+
+  return { runId, promptMessageId, phase, activity: parsedActivity };
 }

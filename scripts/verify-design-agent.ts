@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   LAYOUT_GRID,
@@ -16,7 +17,9 @@ import {
   buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
+  selectDesignChatHistory,
 } from "../lib/design-prompt";
+import type { ChatMessage } from "../lib/ai-chat";
 import {
   appendAiActivityTimelinePart,
   selectAiActivityTimeline,
@@ -32,6 +35,7 @@ import {
   AI_BUILD_BUDGET_MS,
   AI_DESIGN_MODELS,
   AI_THINKING_LEVELS,
+  AI_USER_ID,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
   getBuildStepMs,
@@ -127,42 +131,75 @@ function checkCanvasDescriptionCarriesSizes() {
 }
 
 /**
- * The sidebar writes the prompt to the feed *before* triggering, so the run's
- * own request is normally the last line of the history it reads back.
+ * `publisher.start()` runs before history is read, so the feed already contains
+ * both the current user prompt and an empty `chat-${runId}` assistant row. The
+ * worker must exclude those exact IDs, not guess from content or array tail.
  */
-function checkHistoryDoesNotEchoTheCurrentPrompt() {
-  const messages = [
-    chat("user", "draw a checkout flow"),
-    chat("assistant", "Added 6 nodes.", "AI Architect"),
-    chat("user", "now add a refund path"),
+function checkHistoryExcludesTheCurrentRunByExactIds() {
+  const message = (
+    id: string,
+    role: "user" | "assistant",
+    content: string,
+    senderName = "Ada",
+  ): ChatMessage => ({
+    ...chat(role, content, senderName),
+    id,
+    updatedAt: 1_700_000_000_000,
+  });
+  const prompt = "now add a refund path";
+  const promptMessageId = "chat-current-prompt";
+  const runId = "run_current";
+  const messages: ChatMessage[] = [
+    message("chat-prior-prompt", "user", "draw a checkout flow"),
+    message("chat-prior-run", "assistant", "Added 6 nodes.", "AI Architect"),
+    message(promptMessageId, "user", prompt),
+    {
+      ...message(`chat-${runId}`, "assistant", "", "AI Architect"),
+      senderId: AI_USER_ID,
+      run: {
+        runId,
+        promptMessageId,
+        phase: "running",
+        activity: [],
+      },
+    },
   ];
+  const history = selectDesignChatHistory(messages, promptMessageId, runId);
+  const built = buildDesignPrompt({ context: EMPTY, history, prompt });
 
-  const history = formatChatHistory(messages, "now add a refund path");
+  assert.deepEqual(
+    history.map((item) => item.id),
+    ["chat-prior-prompt", "chat-prior-run"],
+    "only the exact prompt and deterministic current run row are removed",
+  );
+  assert.match(built, /draw a checkout flow/);
+  assert.match(built, /Added 6 nodes\./);
+  assert.equal(
+    built.split(prompt).length - 1,
+    1,
+    "the current prompt appears only in the explicit Request section",
+  );
+  assert.doesNotMatch(
+    built,
+    /AI Architect:\s*(?:\n|$)/,
+    "the deterministic empty assistant row never becomes a history line",
+  );
+  assert.ok(built.trimEnd().endsWith(`Request: ${prompt}`));
 
-  assert.match(history, /draw a checkout flow/);
-  assert.match(history, /Added 6 nodes\./);
-  assert.equal(history.includes("now add a refund path"), false);
-
-  // A first turn has nothing behind it, and an empty section must not add a
-  // stray heading to the prompt.
-  assert.equal(formatChatHistory([chat("user", "hi")], "hi"), "");
-  assert.equal(formatChatHistory([], "hi"), "");
-
-  // Same text asked twice is still one prior turn, not zero.
-  assert.match(
-    formatChatHistory([chat("user", "again"), chat("user", "again")], "again"),
-    /again/
+  // Exact IDs matter when a collaborator repeats the same request. Removing by
+  // content would erase this legitimate earlier turn.
+  const repeated = selectDesignChatHistory(
+    [
+      message("chat-earlier-identical", "user", prompt),
+      message(promptMessageId, "user", prompt),
+      message(`chat-${runId}`, "assistant", "", "AI Architect"),
+    ],
+    promptMessageId,
+    runId,
   );
 
-  // The request is the last thing the model reads.
-  const built = buildDesignPrompt({
-    context: EMPTY,
-    history: messages,
-    prompt: "now add a refund path",
-  });
-
-  assert.ok(built.trimEnd().endsWith("Request: now add a refund path"));
-  assert.match(built, /Conversation so far/);
+  assert.equal(formatChatHistory(repeated).includes(prompt), true);
+  assert.equal(formatChatHistory([]), "");
 }
 
 /**
@@ -949,10 +986,8 @@ function checkRunTurnsRemainAnchoredForTheSession() {
 /**
  * A finished run releases the composer on the stream's terminal marker alone.
  *
- * The regression this guards is invisible in types and silent in the UI: the run
- * record reaches a terminal status ~30s after the worker returns, so a gate that
- * also required it left the composer spinning for half a minute after the last
- * node had landed on the canvas.
+ * The run record can lag behind the worker, so it remains a fallback instead
+ * of gating the terminal marker delivered by the activity stream.
  */
 function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
   assert.equal(
@@ -1002,8 +1037,99 @@ function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
       didGraceElapse: true,
     }),
     "error",
-    "a run killed before its finally still releases the composer",
+    "a run killed before its terminal marker still releases the composer",
   );
+}
+
+/** The worker must tee live activity into the deterministic assistant message. */
+function assertWorkerPersistsLiveActivity(source: string): void {
+  const publisherOptions = extractPublisherOptions(source);
+
+  assert.match(publisherOptions, /\broomId\s*(?:,|:)/);
+  assert.match(publisherOptions, /\brunId\s*(?:,|:)/);
+  assert.match(publisherOptions, /\bpromptMessageId\s*(?:,|:|$)/);
+  assert.match(
+    source,
+    /openActivityStream\(\s*publisher\.emit\s*\)/,
+    "the run publisher receives every stream activity emission"
+  );
+
+  const activityStream = extractFunction(source, "openActivityStream");
+  assert.match(
+    activityStream,
+    /if\s*\(\s*part\.type\s*!==\s*["']terminal["']\s*\)\s*{\s*onActivity\(part\);\s*}/,
+    "only non-terminal activity parts reach the durable publisher"
+  );
+  assert.equal(
+    activityStream.match(/onActivity\(part\)/g)?.length,
+    1,
+    "the durable publisher has one guarded activity callback"
+  );
+
+  assert.doesNotMatch(source, /publishAiChatSummary\(/);
+  assert.match(source, /finish\("complete"/);
+  assert.match(source, /finish\("error"/);
+}
+
+function extractPublisherOptions(source: string): string {
+  const publisher = source.match(
+    /const\s+publisher\s*=\s*createAiRunChatPublisher\(\s*{([\s\S]*?)}\s*\);/
+  );
+
+  if (publisher === null) {
+    assert.fail("the worker must construct a named run publisher");
+  }
+
+  return publisher[1];
+}
+
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+
+  if (start === -1) {
+    assert.fail(`could not find ${name}`);
+  }
+
+  const openingBrace = source.indexOf("{", start);
+
+  if (openingBrace === -1) {
+    assert.fail(`${name} has no function body`);
+  }
+
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  assert.fail(`${name} has an unclosed function body`);
+}
+
+function checkWorkerPersistsLiveActivity(): void {
+  const source = readFileSync(
+    new URL("../trigger/design-agent.ts", import.meta.url),
+    "utf8"
+  );
+  const insufficientSource = `
+    const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
+    const activity = openActivityStream(() => undefined);
+    function openActivityStream(onActivity: (part: AiActivityPart) => void) {
+      onActivity(part);
+    }
+    await publisher.finish("complete", "Done.");
+    await publisher.finish("error", "Failed.");
+  `;
+
+  assertWorkerPersistsLiveActivity(source);
+  assert.throws(() => assertWorkerPersistsLiveActivity(insufficientSource));
 }
 
 /**
@@ -1073,9 +1199,10 @@ function main() {
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
   checkRunSettlesOnTheStreamMarkerNotTheRunRecord();
+  checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();
   checkCanvasDescriptionCarriesSizes();
-  checkHistoryDoesNotEchoTheCurrentPrompt();
+  checkHistoryExcludesTheCurrentRunByExactIds();
   checkCursorTargetsResolveAgainstThePlan();
   checkUnresolvableCursorTargetsDoNotMove();
   checkBuildPaceStaysWatchableAtBothEnds();

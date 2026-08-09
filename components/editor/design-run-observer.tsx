@@ -1,30 +1,23 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import type { RealtimeRun } from "@trigger.dev/core/v3"
 import { useRealtimeRun, useRealtimeStream } from "@trigger.dev/react-hooks"
 
-import { AiRunActivity } from "@/components/editor/ai-run-activity"
 import type {
   DesignRunSettlement,
   RunSubscription,
 } from "@/hooks/use-design-run"
-import { resolveAiRunPhase, type AiRunTurn } from "@/lib/ai-run-turns"
+import { resolveAiRunPhase } from "@/lib/ai-run-turns"
 import {
   appendAiActivityTimelinePart,
   type AiTimelinePart,
 } from "@/lib/ai-timeline"
 import type { designAgent } from "@/trigger/design-agent"
-import {
-  AI_ACTIVITY_STREAM_ID,
-  isAiActivityTerminalPart,
-  type AiStatusMessage,
-} from "@/types/tasks"
+import { AI_ACTIVITY_STREAM_ID, isAiActivityTerminalPart } from "@/types/tasks"
 
-interface DesignRunObserverProps {
+export interface DesignRunObserverProps {
   subscription: RunSubscription
-  turn: AiRunTurn
-  status: AiStatusMessage | null
   onSettled: (settlement: DesignRunSettlement) => void
 }
 
@@ -33,11 +26,8 @@ const TERMINAL_GRACE_MS = 1_500
 /** One keyed observer with a locally controlled, lossless activity accumulator. */
 export function DesignRunObserver({
   subscription,
-  turn,
-  status,
   onSettled,
 }: DesignRunObserverProps) {
-  const [activity, setActivity] = useState<AiTimelinePart[]>([])
   const activityRef = useRef<AiTimelinePart[]>([])
   const sourceIndexRef = useRef(0)
   const terminalPhaseRef = useRef<"complete" | "error" | null>(null)
@@ -57,9 +47,7 @@ export function DesignRunObserver({
       didGraceElapse: didGraceElapseRef.current,
     })
 
-    if (!phase) {
-      return
-    }
+    if (!phase) return
 
     didSettleRef.current = true
     if (fallbackTimerRef.current) {
@@ -68,9 +56,6 @@ export function DesignRunObserver({
     }
 
     onSettled({
-      // The observer is keyed by run id, so its subscription is the only run it
-      // can be describing — including on the terminal-marker path, which settles
-      // before there is a run record to read an id off.
       runId: subscription.runId,
       phase,
       activity: activityRef.current,
@@ -93,24 +78,17 @@ export function DesignRunObserver({
 
       sourceIndexRef.current += 1
       activityRef.current = next
-      setActivity(next)
     },
     [settleIfReady]
   )
 
   const handleComplete = useCallback(
     (run: RealtimeRun<typeof designAgent>, runError?: Error) => {
-      if (run.id !== subscription.runId) {
-        return
-      }
+      if (run.id !== subscription.runId) return
 
       runOutcomeRef.current =
         runError || run.status !== "COMPLETED" ? "error" : "complete"
 
-      // A healthy run settles off its terminal marker long before this fires —
-      // the run record lags the worker by ~30s. So reaching here without a
-      // marker means the run died without running its `finally`, and the grace
-      // period only guards against the marker being a moment behind.
       if (!didSettleRef.current && fallbackTimerRef.current === null) {
         fallbackTimerRef.current = setTimeout(() => {
           fallbackTimerRef.current = null
@@ -143,9 +121,6 @@ export function DesignRunObserver({
     onComplete: handleComplete,
   })
 
-  // A dead stream will never deliver a terminal marker, so waiting out the
-  // grace period for one is pointless — hand the run record the decision the
-  // moment it arrives (or immediately, if it already has).
   useEffect(() => {
     if (activityError) {
       didGraceElapseRef.current = true
@@ -162,5 +137,5 @@ export function DesignRunObserver({
     []
   )
 
-  return <AiRunActivity turn={{ ...turn, activity }} status={status} />
+  return null
 }

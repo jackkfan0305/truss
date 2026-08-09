@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   SHAPE_DRAG_MIME,
@@ -549,6 +550,19 @@ function checkTemplateBoundsEncloseEveryNode() {
   }
 }
 
+function checkCanvasBrandingIsHidden() {
+  const source = readFileSync(
+    new URL("../components/canvas/canvas.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /proOptions=\{\{\s*hideAttribution:\s*true\s*}}/,
+    "the bottom-right React Flow attribution box stays hidden",
+  );
+}
+
 function main() {
   checkPayloadRoundTrips();
   checkDefaultSizeRules();
@@ -565,6 +579,7 @@ function main() {
   checkInitialsAlwaysRenderSomething();
   checkAvatarsAreOnePerPerson();
   checkSnapshotsRejectJunkAndSurviveRoundTrips();
+  checkCanvasBrandingIsHidden();
   console.log(
     "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials/dedupe and snapshot validation verified",
   );

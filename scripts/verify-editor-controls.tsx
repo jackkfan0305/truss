@@ -65,7 +65,7 @@ function renderAiSidebar(isOpen: boolean): string {
         id="verify-editor-controls"
         initialPresence={{ cursor: null, isThinking: false }}
       >
-        <AiSidebar isOpen={isOpen} />
+        <AiSidebar isOpen={isOpen} useCollaboratorsSource={() => []} />
       </RoomProvider>
     </LiveblocksProvider>
   )

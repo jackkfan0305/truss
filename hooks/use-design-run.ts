@@ -107,7 +107,12 @@ export function useDesignRun(roomId: string): DesignRun {
       dispatchTurn({ type: "start", promptMessageId, startedAt: Date.now() });
 
       try {
-        const nextSubscription = await triggerDesign(prompt, roomId, options);
+        const nextSubscription = await triggerDesign(
+          prompt,
+          promptMessageId,
+          roomId,
+          options
+        );
 
         dispatchTurn({
           type: "subscribe",
@@ -156,6 +161,7 @@ export function useDesignRun(roomId: string): DesignRun {
  */
 async function triggerDesign(
   prompt: string,
+  promptMessageId: string,
   roomId: string,
   options: DesignRunOptions
 ): Promise<RunSubscription> {
@@ -163,6 +169,7 @@ async function triggerDesign(
   // unless both are present and agree, so both are sent.
   const { runId } = await postJson<{ runId: string }>("/api/ai/design", {
     prompt,
+    promptMessageId,
     roomId,
     projectId: roomId,
     modelId: options.modelId,

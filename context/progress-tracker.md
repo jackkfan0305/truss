@@ -8,6 +8,80 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `34-shared-ai-run-activity` complete. Every design run now has one durable,
+  shared `ai-chat` assistant row (`chat-${runId}`), updated in place from the
+  worker and anchored beside the server-authored human prompt. It persists the
+  bounded curated work log and final summary for every collaborator and reload,
+  while the initiating Trigger subscription is retained only to settle that
+  initiator's composer. Human feed writes remain server-authored; the room is
+  feed-read-only for clients. Collaborator prompts now render avatar/name on a
+  left rail with `bg-elevated`; stored avatar snapshots fall back to current
+  Liveblocks presence and then initials for legacy rows. Stale running rows
+  become incomplete after 315s and retain their partial activity. Raw provider
+  chain of thought remains excluded.
+  - The focused contract suite is GREEN: `verify-ai-chat`,
+    `verify-ai-chat-ui`, `verify-ai-run-chat`, `verify-design-api`, and
+    `verify-design-agent` all exit 0. Focused ESLint, `tsc --noEmit`, and the
+    production build also exit 0. The publisher verifier deliberately prints
+    one simulated failed Liveblocks update before proving that the following
+    full snapshot repairs it; that log is expected test output.
+  - Retained RED-stage evidence is explicit, not inferred from GREEN: Task 1's
+    parser returned `null` where a running empty assistant work-log message was
+    expected; Task 2 could not load `../lib/ai-run-chat`; Task 3 omitted
+    `promptMessageId` and had no server-authored avatar-message builder; Task 4
+    lacked `createAiRunChatPublisher` in the worker; and Task 5 lacked both
+    `arrangeAiChatMessages` and `ChatEntry`, then later lacked the local
+    edge-state helper that preserves a start failure beside a durable run.
+  - Repo-local React Doctor did **not** pass: `npx react-doctor . --verbose`
+    exits 1 at 51/100 with 2 errors and 20 warnings. Its repository-wide output
+    includes unrelated findings. Independent review classifies the two changed
+    dynamic-HTML reports as false positives at their component sinks: both use
+    only `renderChatMarkdown`, whose markdown-it boundary has `html: false`,
+    validates link URLs, and has escaping/render verification coverage. The
+    observer-effect report is non-actionable: on stream error it performs the
+    required settlement bridge that unlocks the initiator's composer. These
+    classifications do not make the repository-wide 51/100 scan pass.
+  - Live collaborative QA remains explicitly **unverified**. The gstack browser
+    harness reports `NEEDS_SETUP`, and no two authenticated collaborator
+    sessions were supplied. Do not read the automated checks as proof that the
+    two-client, reload, console, bottom-follow, or pagination scenario passed.
+  - Final integration review fixes are complete. The design route now reads the
+    installed Liveblocks 3.23 `getFeedMessages({ roomId, feedId })` server API
+    through a narrow injectable boundary and triggers only when the exact
+    `promptMessageId` parses as a user message in the authorized room, belongs
+    to `access.userId`, and exactly matches the normalized request prompt. The
+    worker removes the current prompt ID and `chat-${runId}` by exact ID after
+    `publisher.start()`. The initiating observer mounts once from the
+    subscription even before its prompt is visible, and a matching non-stale
+    durable running row suppresses only its duplicate coarse collaborator line.
+  - Final-review RED evidence was observed before production changes:
+    `verify-design-api` failed with `Cannot find module
+    '../lib/design-run-server'`; `verify-design-agent` failed because
+    `selectDesignChatHistory` was not a function; `verify-ai-chat-ui` rendered
+    zero observer probes where one was required; and `verify-ai-chat` failed
+    because `shouldShowRemoteRunStatus` was not a function.
+  - Final-review GREEN evidence: all five focused verifiers exit 0 with their
+    success lines, including `Design API request parsing and prompt anchor
+    verified`; focused ESLint and `npx tsc --noEmit` exit 0; `npm run build`
+    compiles, type-checks, and generates all 12 static pages. The build retains
+    the pre-existing multiple-lockfile workspace-root warning and Node 26
+    `localStorage` experimental warnings.
+  - PR #7 integration preserves its newer terminal-marker authority (the
+    Trigger run record is only a 1.5s fallback), live-presence avatar fallback,
+    per-prompt thinking effort, and oversized-log safety. Live snapshots keep
+    the run/prompt anchor even when activity must be trimmed below the 96KB
+    budget. Every repository verifier passes, including the service-backed
+    Liveblocks, Prisma, and project-data checks; full ESLint, strict TypeScript,
+    and the production build also pass.
+  - The canvas passes React Flow's supported `proOptions.hideAttribution` flag,
+    removing the bottom-right framework branding box without CSS overrides.
+  - Latest changed-scope React Doctor, run with an isolated npm cache, completes
+    at 78/100 with six warnings rather than a clean score. The only reported
+    changed-feature file is the pre-existing `DesignRunObserver` callback that
+    bridges terminal stream state to parent settlement; the other five warnings
+    are unrelated files. No live two-client QA was run, so collaborator growth,
+    reload reconstruction, console, bottom-follow, and pagination remain
+    explicitly unverified.
 - `33-thinking-disclosure` complete. The model's reasoning is now behind a disclosure that is collapsed on every run: the closed row is the status — a spinner and "Thinking" while deltas arrive, a brain icon and "Thought process" once they stop — so a run reads as one line instead of a wall of text pushing the actions out of view. The text renders through `lib/markdown.ts` because the provider writes Markdown; as plain text its headings and lists showed up as literal `**` and `-`. Reasoning also stops arriving in paragraph-sized jumps: deltas are the *target* and `useSmoothText` reveals toward it on the frame clock at a rate proportional to the backlog, so a burst is consumed quickly and a trickle stays gentle without the text ever falling permanently behind. `MARKDOWN_STYLES` moved from `ai-chat-transcript.tsx` to `lib/markdown.ts` — the transcript imports the activity component, so hanging the styles off it would have closed an import cycle.
   - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover the reveal converging rather than stranding its tail, staying monotonic and clamped when a target shrinks, and stopping on word boundaries without letting an unbroken 400-character token land in one jump. Mutations disabling boundary snapping, and rounding the per-frame step down instead of up, each fail their check.
   - Correction worth keeping: the convergence guarantee is the step being rounded *up*, not `MIN_CHARS_PER_FRAME`, which is only a speed knob. The first version of the check credited the floor and passed against a mutation that removed it.
@@ -45,6 +119,32 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- `34-shared-ai-run-activity` — durable shared AI work activity and
+  collaborator identity rendering. The worker creates and repeatedly upserts
+  one full-snapshot `chat-${runId}` row, anchored by `promptMessageId`; it
+  coalesces active updates at 400ms, bounds persisted activity at 200 parts,
+  immediately writes terminal states, and can repair an intermediate publishing
+  failure with the next snapshot. Visible activity is curated only, never raw
+  chain of thought. `DesignRunObserver` remains mounted only for initiator
+  settlement. A stale `running` row is explicitly incomplete after 315 seconds
+  and retains partial steps. Other collaborators' prompts use the left
+  avatar/name rail and `bg-elevated` surface, with initials for legacy records.
+  Stored avatars fall back to current collaborator presence before initials.
+  - Focused contract checks, ESLint, strict TypeScript, and production build
+    pass. The publisher check intentionally logs one simulated failed write and
+    then verifies full-snapshot repair. Repo-local React Doctor exits 1 at
+    51/100 (2 errors, 20 warnings), including unrelated repository findings.
+    The two changed dynamic-HTML sink reports are false positives: both values
+    come exclusively from `renderChatMarkdown` (`html: false`, URL validation,
+    escaping/render tests). The observer effect is the required stream-error to
+    settlement bridge, so it is non-actionable. The scan is still not passing.
+    Live two-client browser QA is unverified because gstack is `NEEDS_SETUP`
+    and no authenticated collaborator sessions are available.
+  - Retained RED evidence: the Task 1 durable empty-run assertion returned
+    `null`; Task 2 had no publisher module; Task 3 lacked prompt/identity
+    boundary fields; Task 4 lacked worker publisher wiring; Task 5 lacked the
+    ordering/entry exports and later the shared edge-state helper. Each has its
+    corresponding report-recorded GREEN verification.
 - `29-spec-ui-integration` — the Specs tab is real. It lists this project's specs, previews one as rendered Markdown in a modal, and downloads it. The `20` static card is gone.
   - `GET /api/projects/[projectId]/specs` — the one read `28` left out. Metadata only, newest first, capped at 50. `filePath` is deliberately **not** selected: it is a private Blob pointer the browser cannot fetch anyway, so returning it would only publish the storage layout. The file name is computed by `specFileName`, the same function the download route puts in `Content-Disposition`, so the name in the list is the name the file saves under. `requireOwner: false`, matching the download route.
   - `hooks/use-project-specs.ts` — `useProjectSpecs` (the list) and `useSpecContent` (one document, read as text from the **download route**). Both abort on unmount and stamp their result with what they fetched, so a stale response never renders as the current one — the `useProjectMembers` pattern.
@@ -90,7 +190,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 - `26-ai-chat-functional` — the sidebar is wired end to end: a prompt triggers the design agent, curated progress and canvas operations stream live, and its closing line lands back on the chat feed. The canvas is never touched by hand.
   - `hooks/use-design-run.ts` owns triggering and run-turn history; `components/editor/design-run-observer.tsx` mounts keyed `useRealtimeRun` and `useRealtimeStream` observers per run. **Two fetches, not one**: `/api/ai/design` answers `{ runId }` and `/api/ai/design/token` trades that ID for a run-scoped token. The token route checks both run ownership and current project access.
-  - Activity uses `useRealtimeStream.onData` with its own ordered accumulator rather than the hook's `parts` cache, whose ref timing can overwrite bursty chunks. A worker-emitted terminal marker and run completion normally both arrive before settlement, preserving the final tail; stream errors settle immediately, and a 1.5s post-run grace fallback prevents a missing marker or hard kill from locking the composer forever.
+  - Activity uses `useRealtimeStream.onData` with its own ordered accumulator rather than the hook's `parts` cache, whose ref timing can overwrite bursty chunks. A worker-emitted terminal marker settles immediately and authoritatively; the run record waits through a 1.5s grace period only as a fallback for a missing marker or hard kill, preventing a locked composer without adding the record's observed ~30s terminal lag.
   - The `onSettled` callback is held in a ref rather than a dependency: the sidebar hands in a fresh closure every render, and depending on it would tear the run subscription down and rebuild it mid-generation.
   - `trigger/design-agent.ts` uses `streamText` with `Output.object`, but drains provider output without exposing raw chain of thought. It emits safe summaries around canvas inspection, architectural planning, validation, and each atomic canvas action.
   - Activity goes out on a **Trigger.dev stream, not a third Liveblocks feed**. It is run-token scoped and only the initiating client renders it. Trigger.dev retains the source stream for up to 28 days, so the stream deliberately contains curated progress rather than raw thoughts.
@@ -362,6 +462,13 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Next Up
 
+- Run the shared-run live QA with two authorized collaborators once browser
+  harness setup and sessions are available: another user must see the prompt
+  identity rail and shared growing work log, both users must agree on the final
+  terminal state, and a reload must reconstruct it from `ai-chat` without a
+  Trigger token. Check console errors plus bottom-follow/pagination behavior.
+  Also triage the React Doctor findings before treating this delivery as a clean
+  React diagnostic pass; the current repository-wide command exits 1 at 51/100.
 - **The canvas has never been seen in a browser.** Both keys are now set and the server side is verified, so the only thing left is one signed-in pass at `/editor/{projectId}`: canvas renders, minimap and dots background appear, a second tab syncs a node drag. Still blocked on the same missing Clerk session as `07`–`09`.
 - Autosave has no **unload flush**: closing the tab inside the 1500ms debounce loses that last edit. Liveblocks Storage still has it, so the room is intact and the next client to edit saves it — but a project whose room later empties would restore to the older snapshot. `visibilitychange` + `sendBeacon` is the fix if that ever bites.
 - Two clients opening the *same* cold room within one round trip can both restore and duplicate every node. Narrow — it needs a room nobody has touched since the last save — and marked with a `ponytail:` comment in `canvas.tsx`. A "restored" flag in Storage is the fix.
@@ -740,91 +847,3 @@ Update this file whenever the current phase, active feature, or implementation s
   down on overlap and knows nothing about the edges the same plan adds, so a
   long label on a short edge can still collide. A real router (dagre/elk) is the
   upgrade path if that shows up in practice.
-
-## The composer stayed locked ~30s after the canvas was finished
-
-- Symptom: the agent places every block, the canvas is visibly done, and the
-  chat keeps spinning for another half minute.
-- Root cause is client-side, not the agent. `DesignRunObserver.settleIfReady`
-  required *both* the activity stream's terminal marker *and* `useRealtimeRun`'s
-  `onComplete`, and read the phase off the run record. The run record is the
-  slow one: measured on three consecutive dev runs of 12.1s, 56.4s and 96s, the
-  Trigger.dev run row reached a terminal status 30s, 27s and 28s *after* `run()`
-  returned — a near-constant tail independent of run length, so the wait was the
-  same on a six-action edit as on a thirty-action build.
-- The fast signal was already there and being thrown away: the worker emits
-  `{ type: "terminal", phase }` in its `finally` with the outcome decided, and
-  `handleActivity` discarded `phase` and used the marker only as a flag.
-- Fix: `resolveAiRunPhase` (`lib/ai-run-turns.ts`) makes the marker both the
-  fast path and the authority. The run record stays as the fallback for a run
-  hard-killed before its `finally` — that case has no marker and nothing else to
-  settle on, and a permanently locked composer is the worse failure. The 1.5s
-  grace now only covers a marker being a moment behind the record, which after
-  this measurement is close to impossible in practice.
-- Asserted in `scripts/verify-design-agent.ts`
-  (`checkRunSettlesOnTheStreamMarkerNotTheRunRecord`). Confirmed it fails on the
-  old both-signals gate before it passes on the new one.
-- Not done: `buildCanvas` still `await sleep(stepMs)`s after the *last* action,
-  so 220–900ms of the pacing budget is spent with nothing left to reveal. Small
-  next to the 30s above, and left alone rather than bundled into this fix.
-
-## Collaborator identity in the chat transcript
-
-- A collaborator's prompt now renders with their Clerk profile picture and their
-  name in a row *above* the bubble, not beside it. Every entry in the panel —
-  yours, theirs, the assistant's — shares one left edge (the old `ml-6` indent on
-  human messages is gone), so identity never costs the message its alignment.
-  `ChatAvatar` is a bare 1.75rem circle matching the navbar's `UserButton`, with
-  no presence ring: nothing overlaps it here. Identity is drawn **only for other
-  collaborators** — you already know which messages are yours, so "You" and
-  "Truss" stay `sr-only` and neither carries an avatar.
-- The avatar is **snapshotted onto the message**, not looked up at render time:
-  `app/api/ai/chat/route.ts` writes `senderAvatar: user.imageUrl` alongside the
-  name it already wrote. A presence lookup would have been less code but shows
-  nothing for anyone who has since disconnected, which is most of a transcript.
-- `senderAvatar` is optional on `AiChatMessage` and pinned by
-  `parseAiChatMessage` to `https://img.clerk.com/` — the single host
-  `next.config.ts` allows through the image optimizer. Anything else is dropped
-  and the entry falls back to `getInitials`; the *message* still parses, because
-  a bad picture must never cost a reader the text. Messages written before this
-  field existed parse unchanged. Asserted in `scripts/verify-ai-chat.ts`
-  (`checkSenderAvatarsAreHostPinned`).
-- **Existing transcripts have no snapshot at all** — confirmed by reading the
-  live `ai-chat` feed with the Liveblocks node client: zero messages carried
-  `senderAvatar`, because every one of them predates the field. So the transcript
-  also falls back to **live presence**: `useCollaborators()` is keyed by the same
-  Clerk ID a message is stamped with, so anyone currently in the room gets a face
-  on their old messages too. A sender who has left still reads as initials;
-  backfilling that would mean a Clerk fetch per unknown ID.
-- This is the identity slice of `docs/superpowers/plans/2026-08-09-shared-ai-run-activity.md`
-  only. The durable run snapshot, `arrangeAiChatMessages`, and the extraction of
-  `ChatEntry` into its own file are still open in that plan.
-
-## Persisted run work logs
-
-- A finished run's work log — the model's reasoning summaries and every canvas
-  call it made — is now stored **as JSON on the assistant message that run
-  wrote** (`AiChatRun` on `AiChatMessage.run`). It survives a reload and reaches
-  collaborators who never had the stream open; before this, activity lived only
-  in the initiator's `AiRunTurn` and died with the tab.
-- **Why the message and not Postgres.** The message is already the durable record
-  of the run, already replicated to everyone in the room, and a work log is only
-  ever read back whole with its message. A table earns its place when something
-  needs to query *across* runs; noted in `types/tasks.ts` so the next reader knows
-  it was a choice.
-- The worker records into the same `appendAiActivityTimelinePart` the sidebar
-  builds its live timeline with, so a reload shows what the run showed — reasoning
-  deltas merged into one block, same 200-part ceiling. Recording happens *before*
-  the transport write in `emit`, so a stream that has gone away cannot also cost
-  the run its log. Ids are positional and stripped on the way out
-  (`toStorableActivity`), rebuilt on the way in (`selectAiActivityTimeline`).
-- **An oversized log gives way to the summary, never the reverse.** An oversized
-  feed write fails the *whole* message, so `fitRunToBudget` drops reasoning first
-  (the bulk, the least load-bearing) and then the log entirely, at a 96KB ceiling.
-  Asserted in `scripts/verify-ai-chat.ts`.
-- A user message carrying a `run` is a client claiming a run it never performed;
-  `parseAiChatMessage` only reads the field on assistant messages.
-- The transcript deduplicates: a *settled* local turn whose run is on the feed
-  defers to the persisted copy. Only settled ones — the worker writes the message
-  before it emits the stream's terminal marker, so dropping a live turn there
-  would unmount the observer that settles the run and lock the composer for good.

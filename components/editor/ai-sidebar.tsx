@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useAiChat } from "@/hooks/use-ai-chat"
 import { useAiStatus } from "@/hooks/use-ai-status"
+import { useCollaborators } from "@/hooks/use-collaborators"
 import { useDesignRun } from "@/hooks/use-design-run"
 import { cn } from "@/lib/utils"
 import {
@@ -32,6 +33,7 @@ import {
 
 interface AiSidebarProps {
   isOpen: boolean
+  useCollaboratorsSource?: typeof useCollaborators
 }
 
 const STARTER_PROMPTS = [
@@ -41,7 +43,7 @@ const STARTER_PROMPTS = [
 ]
 
 /** Monochrome AI workspace with room chat and run-scoped activity streams. */
-export function AiSidebar({ isOpen }: AiSidebarProps) {
+export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const [draft, setDraft] = useState("")
   const [modelId, setModelId] = useState<AiDesignModelId>(
     DEFAULT_AI_DESIGN_MODEL_ID
@@ -131,6 +133,7 @@ export function AiSidebar({ isOpen }: AiSidebarProps) {
               hasOlderMessages={hasOlderMessages}
               isFetchingOlder={isFetchingOlder}
               onFetchOlder={fetchOlderMessages}
+              useCollaboratorsSource={useCollaboratorsSource}
               emptyState={
                 <EmptyChat
                   onPick={submit}

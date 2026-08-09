@@ -381,7 +381,8 @@ function CanvasFlow({
         // <body> instead. Nodes are still individually tab-reachable.
         tabIndex={-1}
         fitView
-        // Themes React Flow's own chrome (minimap, attribution) to match the dark
+        proOptions={{ hideAttribution: true }}
+        // Themes React Flow's remaining chrome (the minimap) to match the dark
         // workspace without restyling its internals.
         colorMode="dark"
       >

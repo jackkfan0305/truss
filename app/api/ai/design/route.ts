@@ -1,6 +1,8 @@
 import { tasks } from "@trigger.dev/sdk";
 
 import { parseDesignRequest } from "@/lib/design-requests";
+import { startVerifiedDesignRun } from "@/lib/design-run-server";
+import { getLiveblocks } from "@/lib/liveblocks";
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
@@ -37,16 +39,24 @@ export async function POST(request: Request): Promise<Response> {
   let runId: string;
 
   try {
-    // Type-only import plus trigger-by-ID: importing the task instance would
-    // pull the Trigger.dev worker bundle into the Next.js server bundle.
-    const handle = await tasks.trigger<typeof designAgent>("design-agent", {
-      prompt: designRequest.prompt,
-      roomId: designRequest.roomId,
-      modelId: designRequest.modelId,
-      thinkingLevel: designRequest.thinkingLevel,
-    });
+    const verifiedRunId = await startVerifiedDesignRun(
+      designRequest,
+      access.userId,
+      {
+        readFeedMessages: (params) =>
+          getLiveblocks().getFeedMessages(params),
+        // Type-only import plus trigger-by-ID: importing the task instance
+        // would pull the Trigger.dev worker bundle into the Next.js bundle.
+        trigger: (payload) =>
+          tasks.trigger<typeof designAgent>("design-agent", payload),
+      },
+    );
 
-    runId = handle.id;
+    if (!verifiedRunId) {
+      return jsonError("The prompt message could not be verified", 400);
+    }
+
+    runId = verifiedRunId;
   } catch (error: unknown) {
     console.error(`Design trigger failed for ${designRequest.projectId}`, error);
     return jsonError("Could not start design generation", 502);

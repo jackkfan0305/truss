@@ -14,12 +14,14 @@ import {
 } from "@/types/tasks";
 
 const MAX_PROMPT_LENGTH = 2000;
+const MAX_PROMPT_MESSAGE_ID_LENGTH = 256;
 
 /** Trigger.dev run IDs are `run_<cuid>`; the cap is slack, not a format check. */
 const MAX_RUN_ID_LENGTH = 100;
 
 export interface DesignRequest {
   prompt: string;
+  promptMessageId: string;
   projectId: string;
   roomId: string;
   modelId: AiDesignModelId;
@@ -59,12 +61,17 @@ function readValue(body: unknown, key: string): unknown {
  */
 export function parseDesignRequest(body: unknown): DesignRequest | null {
   const prompt = readString(body, "prompt");
+  const promptMessageId = readString(body, "promptMessageId");
   const projectId = readString(body, "projectId");
   const roomId = readString(body, "roomId");
   const modelId = parseAiDesignModelId(readValue(body, "modelId"));
   const thinkingLevel = parseAiThinkingLevel(readValue(body, "thinkingLevel"));
 
   if (!prompt || prompt.length > MAX_PROMPT_LENGTH) {
+    return null;
+  }
+
+  if (!promptMessageId || promptMessageId.length > MAX_PROMPT_MESSAGE_ID_LENGTH) {
     return null;
   }
 
@@ -78,6 +85,7 @@ export function parseDesignRequest(body: unknown): DesignRequest | null {
 
   return {
     prompt,
+    promptMessageId,
     projectId,
     roomId,
     modelId: modelId ?? DEFAULT_AI_DESIGN_MODEL_ID,

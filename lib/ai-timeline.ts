@@ -1,9 +1,23 @@
-import { parseAiActivityPart, type AiActivityPart } from "@/types/tasks";
+import {
+  MAX_AI_ACTIVITY_PARTS,
+  parseAiActivityPart,
+  type AiActivityPart,
+} from "@/types/tasks";
 
 export type AiTimelinePart = AiActivityPart & { id: string };
 
-const MAX_TIMELINE_PARTS = 200;
-const MAX_TIMELINE_REASONING_LENGTH = 16_000;
+export const MAX_TIMELINE_PARTS = MAX_AI_ACTIVITY_PARTS;
+export const MAX_TIMELINE_REASONING_LENGTH = 16_000;
+
+/** Removes client-only IDs before a timeline is written to the durable feed. */
+export function toPersistedAiActivity(
+  timeline: readonly AiTimelinePart[]
+): AiActivityPart[] {
+  return timeline.map(({ id, ...part }) => {
+    void id;
+    return part;
+  });
+}
 
 /**
  * Turns untrusted Trigger.dev stream chunks into the chronological activity

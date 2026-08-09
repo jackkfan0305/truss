@@ -1,11 +1,24 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import Image from "next/image"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react"
 import { ArrowDown, Loader2 } from "lucide-react"
 
-import { AiRunActivity } from "@/components/editor/ai-run-activity"
-import { DesignRunObserver } from "@/components/editor/design-run-observer"
+import {
+  AiRunActivity,
+  type AiRunActivityState,
+} from "@/components/editor/ai-run-activity"
+import { ChatEntry } from "@/components/editor/chat-entry"
+import {
+  DesignRunObserver,
+  type DesignRunObserverProps,
+} from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
 import type {
   DesignRunSettlement,
@@ -13,12 +26,16 @@ import type {
 } from "@/hooks/use-design-run"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
+import {
+  armAiChatRunStaleTimer,
+  arrangeAiChatMessages,
+  resolveAiChatRunPhase,
+  shouldShowLocalAiRunActivity,
+  shouldShowRemoteRunStatus,
+  type ChatMessage,
+} from "@/lib/ai-chat"
 import { selectAiActivityTimeline } from "@/lib/ai-timeline"
-import type { ChatMessage } from "@/lib/ai-chat"
-import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
-import { getInitials } from "@/lib/presence"
-import { cn } from "@/lib/utils"
-import type { AiChatRun, AiStatusMessage } from "@/types/tasks"
+import type { AiStatusMessage } from "@/types/tasks"
 
 interface AiChatTranscriptProps {
   messages: ChatMessage[]
@@ -32,6 +49,8 @@ interface AiChatTranscriptProps {
   hasOlderMessages: boolean
   isFetchingOlder: boolean
   onFetchOlder: () => void
+  ObserverComponent?: ComponentType<DesignRunObserverProps>
+  useCollaboratorsSource?: typeof useCollaborators
 }
 
 const FOLLOW_THRESHOLD_PX = 48
@@ -56,6 +75,8 @@ export function AiChatTranscript({
   hasOlderMessages,
   isFetchingOlder,
   onFetchOlder,
+  ObserverComponent = DesignRunObserver,
+  useCollaboratorsSource = useCollaborators,
 }: AiChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldFollow = useRef(true)
@@ -126,23 +147,21 @@ export function AiChatTranscript({
     },
     []
   )
+  const arrangedMessages = useMemo(() => arrangeAiChatMessages(messages), [messages])
   const turnsByPrompt = useMemo(
     () => new Map(turns.map((turn) => [turn.promptMessageId, turn])),
     [turns]
   )
-
-  /*
-   * Every message written before `senderAvatar` existed carries no picture, and
-   * that is most of any existing transcript. Anyone *currently in the room* is
-   * already broadcasting theirs through presence, keyed by the same Clerk ID the
-   * message is stamped with — so their history gets a face for as long as they
-   * are here, and falls back to initials once they leave.
-   *
-   * ponytail: connected collaborators only. Backfilling a departed sender's
-   * avatar would mean fetching Clerk per unknown ID; add that if old
-   * conversations turn out to be read cold often.
-   */
-  const collaborators = useCollaborators()
+  const persistedRunPromptIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) =>
+          message.run ? [message.run.promptMessageId] : []
+        )
+      ),
+    [messages]
+  )
+  const collaborators = useCollaboratorsSource()
   const liveAvatars = useMemo(
     () =>
       new Map(
@@ -156,21 +175,6 @@ export function AiChatTranscript({
   )
   const hasLocalActiveTurn = turns.some(
     (turn) => turn.phase === "starting" || turn.phase === "running"
-  )
-
-  /*
-   * A settled run exists twice for whoever started it: once as this session's
-   * live turn, once as the log persisted on the assistant's message. The
-   * persisted copy is the one everyone in the room can see and the one that
-   * survives a reload, so it wins — but only for runs that actually made it onto
-   * the feed, which is why this is a set of ids rather than a flag.
-   */
-  const persistedRunIds = useMemo(
-    () =>
-      new Set(
-        messages.flatMap((message) => (message.run ? [message.run.runId] : []))
-      ),
-    [messages]
   )
 
   useEffect(followToBottom, [followToBottom, messages, turns, isRoomActive])
@@ -272,19 +276,8 @@ export function AiChatTranscript({
                 </Button>
               </li>
             ) : null}
-            {messages.map((message) => {
+            {arrangedMessages.map((message) => {
               const turn = turnsByPrompt.get(message.id)
-              /*
-               * Only a *settled* turn defers to its persisted copy. The worker
-               * writes the message before it emits the stream's terminal marker,
-               * so a live turn whose message has already landed is still the
-               * thing holding the observer that settles the run — dropping it
-               * there would leave the composer locked for good.
-               */
-              const isSettled =
-                turn?.phase === "complete" || turn?.phase === "error"
-              const isPersisted =
-                isSettled && Boolean(turn.runId && persistedRunIds.has(turn.runId))
 
               return (
                 <MessageWithRun
@@ -292,20 +285,29 @@ export function AiChatTranscript({
                   message={message}
                   isOwn={message.senderId === selfId}
                   liveAvatar={liveAvatars.get(message.senderId)}
-                  turn={isPersisted ? undefined : turn}
-                  status={status}
-                  subscription={subscription}
-                  onRunSettled={onRunSettled}
+                  turn={turn}
+                  hasPersistedRun={persistedRunPromptIds.has(message.id)}
                 />
               )
             })}
 
-            {isRoomActive && !hasLocalActiveTurn ? (
-              <RemoteRunStatus status={status} />
-            ) : null}
+            <RemoteRunStatus
+              isRoomActive={isRoomActive}
+              hasLocalActiveTurn={hasLocalActiveTurn}
+              messages={messages}
+              status={status}
+            />
           </ol>
         )}
       </div>
+
+      {subscription ? (
+        <ObserverComponent
+          key={subscription.runId}
+          subscription={subscription}
+          onSettled={onRunSettled}
+        />
+      ) : null}
 
       {showJump ? (
         <Button
@@ -328,175 +330,124 @@ function MessageWithRun({
   isOwn,
   liveAvatar,
   turn,
-  status,
-  subscription,
-  onRunSettled,
+  hasPersistedRun,
 }: {
   message: ChatMessage
   isOwn: boolean
   liveAvatar?: string
   turn?: AiRunTurn
-  status: AiStatusMessage | null
-  subscription: RunSubscription | null
-  onRunSettled: (settlement: DesignRunSettlement) => void
+  hasPersistedRun: boolean
 }) {
-  const isObservedRun =
-    Boolean(turn?.runId) && turn?.runId === subscription?.runId
+  const showLocalActivity = Boolean(
+    turn && shouldShowLocalAiRunActivity(turn, hasPersistedRun)
+  )
 
   return (
     <>
-      {/* The log comes *before* the answer it produced, the way it happened —
-          and the way the live stream already reads. */}
-      {message.run ? <PersistedRunActivity run={message.run} /> : null}
-      <ChatEntry message={message} isOwn={isOwn} liveAvatar={liveAvatar} />
-      {turn && subscription && isObservedRun ? (
-        <DesignRunObserver
-          key={subscription.runId}
-          subscription={subscription}
-          turn={turn}
-          status={status}
-          onSettled={onRunSettled}
-        />
-      ) : turn ? (
-        <AiRunActivity turn={turn} status={status} />
+      <ChatEntry
+        message={message}
+        isOwn={isOwn}
+        liveAvatar={liveAvatar}
+        activity={message.run ? <PersistedAiRunActivity message={message} /> : undefined}
+      />
+      {turn && showLocalActivity ? (
+        <li>
+          <AiRunActivity state={toAiRunActivityState(turn)} />
+        </li>
       ) : null}
     </>
   )
 }
 
-/**
- * A finished run's stored work log, rendered by the same component that draws
- * the live one — the stored shape is the live shape minus its positional ids,
- * so rebuilding a turn around it costs nothing and keeps one renderer.
- *
- * `status` is always null: a status line describes a run in flight, and this one
- * ended before the reader arrived.
- */
-function PersistedRunActivity({ run }: { run: AiChatRun }) {
-  const activity = useMemo(
-    () => selectAiActivityTimeline(run.activity),
-    [run.activity]
-  )
+function toAiRunActivityState(turn: AiRunTurn): AiRunActivityState {
+  return {
+    id: turn.promptMessageId,
+    runId: turn.runId,
+    phase: turn.phase,
+    activity: turn.activity,
+  }
+}
+
+/** A persisted run is authoritative and turns incomplete only after its TTL. */
+function PersistedAiRunActivity({ message }: { message: ChatMessage }) {
+  const run = message.run
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (run?.phase !== "running") return
+
+    return armAiChatRunStaleTimer(
+      message.updatedAt,
+      {
+        now: () => Date.now(),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (timer) => window.clearTimeout(timer),
+      },
+      () => setNow(Date.now())
+    )
+  }, [message.updatedAt, run?.phase])
+
+  if (!run) return null
 
   return (
     <AiRunActivity
-      turn={{
-        promptMessageId: `run-${run.runId}`,
+      state={{
+        id: message.id,
         runId: run.runId,
-        phase: run.phase,
-        activity,
-        startedAt: 0,
+        phase: resolveAiChatRunPhase(run.phase, message.updatedAt, now),
+        activity: selectAiActivityTimeline(run.activity),
       }}
-      status={null}
     />
   )
 }
 
-/**
- * A human message is the one on the raised surface, the assistant writes
- * straight onto the panel. That distinction carries the two cases a reader is
- * always in, and costs nothing to read.
- *
- * Identity is drawn only where it carries information — another collaborator in
- * a shared room, who gets their Clerk picture and their name over the bubble.
- * You already know which messages are yours, and the assistant is the only thing
- * writing straight onto the panel, so "You" and "Truss" are announced to screen
- * readers only: a background colour is not something a reader can hear.
- */
-function ChatEntry({
-  message,
-  isOwn,
-  liveAvatar,
+
+
+function RemoteRunStatus({
+  isRoomActive,
+  hasLocalActiveTurn,
+  messages,
+  status,
 }: {
-  message: ChatMessage
-  isOwn: boolean
-  liveAvatar?: string
+  isRoomActive: boolean
+  hasLocalActiveTurn: boolean
+  messages: ChatMessage[]
+  status: AiStatusMessage | null
 }) {
-  const isAi = message.role === "assistant"
-  const isCollaborator = !isAi && !isOwn
-  const author = isOwn ? "You" : isAi ? "Truss" : message.senderName
+  const [now, setNow] = useState(() => Date.now())
+  const matchingUpdatedAt = messages.find(
+    (message) =>
+      status?.kind === "design" &&
+      message.run?.phase === "running" &&
+      message.run.runId === status.runId
+  )?.updatedAt
 
-  return (
-    <li className="flex flex-col gap-1.5">
-      {/* Avatar and name ride *above* the bubble rather than beside it, so every
-          message in the panel — yours, theirs, the assistant's — shares one left
-          edge and the column reads as a single conversation. */}
-      {isCollaborator ? (
-        <span className="flex items-center gap-2">
-          <ChatAvatar
-            name={message.senderName}
-            avatar={message.senderAvatar ?? liveAvatar}
-          />
-          <span className="min-w-0 truncate text-xs font-medium text-copy-secondary">
-            {author}
-          </span>
-        </span>
-      ) : (
-        <span className="sr-only">{author}</span>
-      )}
-      <time className="sr-only" dateTime={new Date(message.sentAt).toISOString()}>
-        Sent at {new Date(message.sentAt).toISOString()}
-      </time>
-      {isAi ? (
-        /*
-         * Markdown, and only on the assistant's side. A prompt is something a
-         * person typed, so rendering it would silently eat their asterisks and
-         * underscores; the assistant's replies are the ones written as prose
-         * with lists and code in them.
-         *
-         * `dangerouslySetInnerHTML` is safe here for exactly one reason —
-         * `lib/markdown.ts` runs markdown-it with `html: false`, so raw HTML in
-         * a message is escaped into visible text rather than parsed. That file
-         * is the sanitizer; read it before changing anything here.
-         */
-        <div
-          className={cn(
-            "wrap-anywhere text-sm leading-relaxed text-copy-primary",
-            MARKDOWN_STYLES
-          )}
-          dangerouslySetInnerHTML={{
-            __html: renderChatMarkdown(message.content),
-          }}
-        />
-      ) : (
-        <p className="whitespace-pre-wrap wrap-anywhere rounded-xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
-          {message.content}
-        </p>
-      )}
-    </li>
-  )
-}
+  useEffect(() => {
+    if (matchingUpdatedAt === undefined) return
 
-/**
- * A bare circle at the Clerk `UserButton`'s own 1.75rem — no ring, because this
- * one never overlaps a neighbour the way the navbar's presence stack does, and
- * the two should read as the same control in both places.
- *
- * `next/image` only resolves hosts listed in `next.config.ts`;
- * `parseAiChatMessage` has already pinned the URL to the one that is, and
- * anything it dropped lands on initials here.
- */
-function ChatAvatar({ name, avatar }: { name: string; avatar?: string }) {
-  return (
-    <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-elevated text-[10px] font-medium text-copy-primary">
-      {avatar ? (
-        <Image
-          src={avatar}
-          alt={name}
-          width={28}
-          height={28}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <span aria-hidden>{getInitials(name)}</span>
-      )}
-    </span>
-  )
-}
+    return armAiChatRunStaleTimer(
+      matchingUpdatedAt,
+      {
+        now: () => Date.now(),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (timer) => window.clearTimeout(timer),
+      },
+      () => setNow(Date.now())
+    )
+  }, [matchingUpdatedAt])
 
+  if (
+    !shouldShowRemoteRunStatus({
+      isRoomActive,
+      hasLocalActiveTurn,
+      messages,
+      status,
+      now,
+    })
+  ) {
+    return null
+  }
 
-
-function RemoteRunStatus({ status }: { status: AiStatusMessage | null }) {
   return (
     <li
       role="status"

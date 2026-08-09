@@ -5,16 +5,11 @@ import { Output, jsonSchema, streamText } from "ai";
 
 import {
   clearAiPresence,
-  publishAiChatSummary,
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
-import { selectAiChatMessages } from "@/lib/ai-chat";
-import {
-  appendAiActivityTimelinePart,
-  toStorableActivity,
-  type AiTimelinePart,
-} from "@/lib/ai-timeline";
+import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
+import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -27,7 +22,11 @@ import {
   type DesignContext,
   type DesignPlan,
 } from "@/lib/design-plan";
-import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
+import {
+  SYSTEM_PROMPT,
+  buildDesignPrompt,
+  selectDesignChatHistory,
+} from "@/lib/design-prompt";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
@@ -43,13 +42,10 @@ import {
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
   getBuildStepMs,
-  isAiActivityTerminalPart,
   parseAiDesignModelId,
   parseAiThinkingLevel,
   type AiActivityPart,
   type AiActivityTerminalPart,
-  type AiChatMessage,
-  type AiChatRun,
   type AiThinkingLevel,
 } from "@/types/tasks";
 
@@ -60,6 +56,7 @@ import {
  */
 export interface DesignAgentPayload {
   prompt: string;
+  promptMessageId: string;
   roomId: string;
   /**
    * Which model to design with, chosen in the composer. Optional so a run
@@ -201,22 +198,13 @@ const INCLUDE_THOUGHTS = true;
  * `streams.append` calls: phases, summaries, and operations can be enqueued
  * synchronously while the pipe batches transport in the background.
  */
-function openActivityStream(runId: string) {
+function openActivityStream(onActivity: (part: AiActivityPart) => void) {
   let controller!: ReadableStreamDefaultController<
     AiActivityPart | AiActivityTerminalPart
   >;
   let isWritable = true;
   let didClose = false;
   let didLogTransportError = false;
-  /*
-   * Recorded separately from the transport, and *before* it: a stream that has
-   * gone away must not also cost the run its persisted log. Built with the same
-   * function the sidebar builds its live timeline with, so what a reader sees
-   * after a reload is what they would have seen watching — adjacent reasoning
-   * deltas merged into one block, and the same 200-part ceiling.
-   */
-  let recorded: AiTimelinePart[] = [];
-  let recordedCount = 0;
 
   const { waitUntilComplete } = streams.pipe(
     AI_ACTIVITY_STREAM_ID,
@@ -231,9 +219,8 @@ function openActivityStream(runId: string) {
     // Never throws: activity is commentary, and a closed stream must not be
     // able to fail the canvas write that is the actual work.
     emit: (part: AiActivityPart | AiActivityTerminalPart): void => {
-      if (!isAiActivityTerminalPart(part)) {
-        recorded = appendAiActivityTimelinePart(recorded, part, recordedCount);
-        recordedCount += 1;
+      if (part.type !== "terminal") {
+        onActivity(part);
       }
 
       if (!isWritable) {
@@ -247,12 +234,6 @@ function openActivityStream(runId: string) {
         logActivityTransportError(error);
       }
     },
-    /** The work log as it stands, ready to persist onto the chat message. */
-    snapshot: (phase: "complete" | "error"): AiChatRun => ({
-      runId,
-      phase,
-      activity: toStorableActivity(recorded),
-    }),
     close: async (): Promise<void> => {
       if (didClose) {
         return;
@@ -311,7 +292,7 @@ export const designAgent = task({
   // generous rather than tight.
   maxDuration: 300,
   run: async (payload: DesignAgentPayload, { ctx }) => {
-    const { roomId, prompt } = payload;
+    const { roomId, prompt, promptMessageId } = payload;
     const runId = ctx.run.id;
     // An unknown id falls back rather than failing the run: the canvas edit is
     // the work, and refusing to design because a model name was stale would be
@@ -334,13 +315,20 @@ export const designAgent = task({
       thinkingLevel,
     });
 
-    const activity = openActivityStream(runId);
+    const publisher = createAiRunChatPublisher({
+      roomId,
+      runId,
+      promptMessageId,
+    });
+    const activity = openActivityStream(publisher.emit);
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
     // Paced writes flush as they go, so a failure can leave part of the plan on
     // the canvas. Both are read by the error path, so both are declared out
     // here rather than inside the `try` that assigns them.
     let applied = 0;
     let planned = 0;
+
+    await publisher.start();
 
     await Promise.all([
       setAiPresence(roomId, { cursor: null, isThinking: true }),
@@ -359,7 +347,7 @@ export const designAgent = task({
       // against the same room.
       const [context, history] = await Promise.all([
         readCanvas(roomId),
-        readChatHistory(roomId),
+        readChatHistory(roomId, promptMessageId, runId),
       ]);
 
       activity.emit({
@@ -413,12 +401,7 @@ export const designAgent = task({
           text: "No canvas changes to make.",
         });
 
-        await publishAiChatSummary(
-          roomId,
-          runId,
-          plan.summary || "No canvas changes to make.",
-          activity.snapshot("complete")
-        );
+        await publisher.finish("complete", plan.summary || "No canvas changes to make.");
         activityOutcome = "complete";
         return { summary: plan.summary, applied: 0 };
       }
@@ -441,12 +424,7 @@ export const designAgent = task({
         text: plan.summary || `Applied ${plan.actions.length} canvas changes.`,
       });
 
-      await publishAiChatSummary(
-        roomId,
-        runId,
-        plan.summary || `Applied ${plan.actions.length} canvas changes.`,
-        activity.snapshot("complete")
-      );
+      await publisher.finish("complete", plan.summary || `Applied ${plan.actions.length} canvas changes.`);
 
       activityOutcome = "complete";
       return { summary: plan.summary, applied };
@@ -471,12 +449,7 @@ export const designAgent = task({
         text: failureText,
       });
 
-      await publishAiChatSummary(
-        roomId,
-        runId,
-        failureText,
-        activity.snapshot("error")
-      );
+      await publisher.finish("error", failureText);
 
       throw error;
     } finally {
@@ -651,14 +624,22 @@ async function readCanvas(roomId: string): Promise<DesignContext> {
  * Never throws. A run that cannot fetch history is a run with less context, not
  * a failed one — the canvas edit is still the work.
  */
-async function readChatHistory(roomId: string): Promise<AiChatMessage[]> {
+async function readChatHistory(
+  roomId: string,
+  promptMessageId: string,
+  runId: string,
+): Promise<ChatMessage[]> {
   try {
     const { data } = await getLiveblocks().getFeedMessages({
       roomId,
       feedId: AI_CHAT_FEED_ID,
     });
 
-    return selectAiChatMessages(data);
+    return selectDesignChatHistory(
+      selectAiChatMessages(data),
+      promptMessageId,
+      runId,
+    );
   } catch (error: unknown) {
     logger.warn("Chat history unavailable; designing without it", {
       roomId,

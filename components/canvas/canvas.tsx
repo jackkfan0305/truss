@@ -29,6 +29,7 @@ import {
 import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
+import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
@@ -110,7 +111,9 @@ const isConnectionBetweenNodes: IsValidConnection<CanvasEdge> = ({
 export function Canvas(props: CanvasProps) {
   return (
     <ReactFlowProvider>
-      <CanvasFlow {...props} />
+      <CanvasMotionProvider>
+        <CanvasFlow {...props} />
+      </CanvasMotionProvider>
     </ReactFlowProvider>
   );
 }

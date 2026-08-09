@@ -9,6 +9,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 
+import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import {
   CANVAS_EDGE_STYLE,
   type CanvasEdge,
@@ -52,6 +53,7 @@ export function CanvasEdgeRenderer({
   style,
 }: EdgeProps<CanvasEdge>) {
   const { updateEdgeData } = useReactFlow<CanvasNode, CanvasEdge>();
+  const isFreshArrival = useIsFreshArrival();
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -119,6 +121,12 @@ export function CanvasEdgeRenderer({
         <BaseEdge
           path={path}
           markerEnd={markerEnd}
+          // An edge that arrives while the canvas is on screen draws itself
+          // along its own path (32-live-canvas-building). `pathLength`
+          // normalises the geometry to 1, so one dash length covers any route
+          // and the CSS needs no knowledge of how long this particular edge is.
+          className={isFreshArrival ? "canvas-edge-draw" : undefined}
+          pathLength={isFreshArrival ? 1 : undefined}
           style={{ ...CANVAS_EDGE_STYLE, ...style }}
         />
       </g>

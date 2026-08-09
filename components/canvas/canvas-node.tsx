@@ -11,6 +11,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 
+import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import { NodeColorToolbar } from "@/components/canvas/node-color-toolbar";
 import { NodeShapeFrame } from "@/components/canvas/node-shape";
 import {
@@ -102,6 +103,7 @@ export function CanvasNodeRenderer({
   const fallback = NODE_DEFAULT_SIZES[data.shape];
   const { updateNodeData } = useReactFlow<CanvasNode, CanvasEdge>();
   const store = useStoreApi<CanvasNode, CanvasEdge>();
+  const isFreshArrival = useIsFreshArrival();
   const [isEditing, setIsEditing] = useState(false);
 
   const stopEditing = useCallback(() => setIsEditing(false), []);
@@ -149,6 +151,10 @@ export function CanvasNodeRenderer({
         width={width ?? fallback.width}
         height={height ?? fallback.height}
         selected={selected}
+        // Only nodes that arrive while the canvas is already on screen — the
+        // AI placing one, a collaborator adding one. Opening a saved diagram
+        // mounts every node at once and animates none of them.
+        className={isFreshArrival ? "canvas-node-arrive" : undefined}
       >
         {/*
          * `nopan` covers the whole label area, not just the textarea: React Flow

@@ -4,7 +4,11 @@ import {
   AI_RUN_CHAT_FLUSH_MS,
   createAiRunChatPublisher,
 } from "../lib/ai-run-chat";
-import type { AiChatMessage } from "../types/tasks";
+import {
+  upsertAiChatMessageWithClient,
+  type AiChatFeedClient,
+} from "../lib/ai-chat-server";
+import { AI_CHAT_FEED_ID, type AiChatMessage } from "../types/tasks";
 
 type ScheduledCallback = () => Promise<void>;
 
@@ -172,6 +176,68 @@ async function checkPublisherRetainsPartialActivityOnError(): Promise<void> {
   console.log("✅ publisher retains partial activity on errors");
 }
 
+async function checkConcurrentFinishCallsAwaitOneTerminalWrite(): Promise<void> {
+  let releaseTerminalWrite: (() => void) | undefined;
+  const terminalWriteStarted = new Promise<void>((resolve) => {
+    releaseTerminalWrite = resolve;
+  });
+  let allowTerminalWrite: (() => void) | undefined;
+  const terminalWrite = new Promise<void>((resolve) => {
+    allowTerminalWrite = resolve;
+  });
+  const scheduler = createFakeScheduler();
+  const publisher = createAiRunChatPublisher({
+    roomId: "project-1",
+    runId: "concurrent-finish",
+    promptMessageId: "chat-prompt",
+    write: async (_roomId, _messageId, message) => {
+      if (message.run?.phase === "complete") {
+        releaseTerminalWrite?.();
+        await terminalWrite;
+      }
+    },
+    schedule: scheduler.schedule,
+    cancel: scheduler.cancel,
+  });
+
+  await publisher.start();
+  const firstFinish = publisher.finish("complete", "Canvas updated.");
+  const secondFinish = publisher.finish("complete", "Canvas updated.");
+
+  assert.equal(
+    secondFinish,
+    firstFinish,
+    "concurrent callers receive the same terminal completion promise",
+  );
+
+  let firstFinished = false;
+  let secondFinished = false;
+  firstFinish.then(() => {
+    firstFinished = true;
+  });
+  secondFinish.then(() => {
+    secondFinished = true;
+  });
+
+  await terminalWriteStarted;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    firstFinished,
+    false,
+    "the first finish remains blocked on its terminal write",
+  );
+  assert.equal(
+    secondFinished,
+    false,
+    "a concurrent finish must wait for the blocked terminal write",
+  );
+
+  allowTerminalWrite?.();
+  await Promise.all([firstFinish, secondFinish]);
+  console.log("✅ concurrent finish calls share the terminal write");
+}
+
 async function checkPublisherRepairsAfterAnIntermediateWriteFails(): Promise<void> {
   const writes: AiChatMessage[] = [];
   const scheduler = createFakeScheduler();
@@ -211,13 +277,108 @@ async function checkPublisherRepairsAfterAnIntermediateWriteFails(): Promise<voi
   console.log("✅ publisher repairs a failed intermediate write");
 }
 
+const SERVER_MESSAGE: AiChatMessage = {
+  role: "assistant",
+  senderId: "truss-ai-architect",
+  senderName: "AI Architect",
+  content: "Canvas updated.",
+  sentAt: 1_700_000_000_000,
+};
+
+type FeedOperation = "update" | "create-message" | "create-feed";
+
+function createFakeFeedClient(
+  outcomes: readonly (number | null)[]
+): { client: AiChatFeedClient; calls: FeedOperation[] } {
+  const calls: FeedOperation[] = [];
+  let outcomeIndex = 0;
+
+  const respond = async (operation: FeedOperation): Promise<void> => {
+    calls.push(operation);
+    const outcome = outcomes[outcomeIndex];
+    outcomeIndex += 1;
+
+    if (typeof outcome === "number") {
+      throw Object.assign(new Error(`${operation} failed`), { status: outcome });
+    }
+  };
+
+  const client: AiChatFeedClient = {
+    updateFeedMessage: async (params) => {
+      assert.equal(params.roomId, "project-1");
+      assert.equal(params.feedId, AI_CHAT_FEED_ID);
+      assert.equal(params.messageId, "chat-run-1");
+      assert.deepEqual(params.data, SERVER_MESSAGE);
+      await respond("update");
+    },
+    createFeedMessage: async (params) => {
+      assert.equal(params.roomId, "project-1");
+      assert.equal(params.feedId, AI_CHAT_FEED_ID);
+      assert.equal(params.id, "chat-run-1");
+      assert.deepEqual(params.data, SERVER_MESSAGE);
+      await respond("create-message");
+    },
+    createFeed: async (params) => {
+      assert.equal(params.roomId, "project-1");
+      assert.equal(params.feedId, AI_CHAT_FEED_ID);
+      await respond("create-feed");
+    },
+  };
+
+  return { client, calls };
+}
+
+async function checkServerUpsertRecoveryPaths(): Promise<void> {
+  const cases: readonly [string, readonly (number | null)[], FeedOperation[]][] = [
+    ["updates an existing message", [null], ["update"]],
+    ["creates a missing message", [404, null], ["update", "create-message"]],
+    [
+      "creates a missing feed before its message",
+      [404, 404, null, null],
+      ["update", "create-message", "create-feed", "create-message"],
+    ],
+    [
+      "retries update when another worker creates the deterministic message",
+      [404, 409, null],
+      ["update", "create-message", "update"],
+    ],
+    [
+      "continues after another worker creates the missing feed",
+      [404, 404, 409, null],
+      ["update", "create-message", "create-feed", "create-message"],
+    ],
+    [
+      "retries update when the post-feed create races",
+      [404, 404, null, 409, null],
+      ["update", "create-message", "create-feed", "create-message", "update"],
+    ],
+  ];
+
+  for (const [description, outcomes, expectedCalls] of cases) {
+    const { client, calls } = createFakeFeedClient(outcomes);
+
+    await upsertAiChatMessageWithClient(
+      client,
+      "project-1",
+      "chat-run-1",
+      SERVER_MESSAGE,
+    );
+
+    assert.deepEqual(calls, expectedCalls, description);
+  }
+
+  console.log("✅ server upsert recovers deterministic Liveblocks races");
+}
+
 async function main(): Promise<void> {
   await checkPublisherCoalescesAReasoningBurst();
   await checkPublisherKeepsActivityChronological();
   await checkPublisherBoundsActivityAtTwoHundredParts();
   await checkPublisherFlushesTerminalStateImmediately();
   await checkPublisherRetainsPartialActivityOnError();
+  await checkConcurrentFinishCallsAwaitOneTerminalWrite();
   await checkPublisherRepairsAfterAnIntermediateWriteFails();
+  await checkServerUpsertRecoveryPaths();
 }
 
 main().catch((error: unknown) => {

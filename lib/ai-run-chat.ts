@@ -66,6 +66,7 @@ export function createAiRunChatPublisher(
   let started = false;
   let finished = false;
   let queuedWrite: Promise<void> = Promise.resolve();
+  let finishPromise: Promise<void> | undefined;
 
   const snapshot = (): AiChatMessage => ({
     role: "assistant",
@@ -136,13 +137,12 @@ export function createAiRunChatPublisher(
     }
   };
 
-  const finish = async (
+  const finish = (
     terminalPhase: Exclude<AiChatRunPhase, "running">,
     terminalContent: string
   ): Promise<void> => {
-    if (finished) {
-      await queuedWrite;
-      return;
+    if (finishPromise) {
+      return finishPromise;
     }
 
     finished = true;
@@ -152,10 +152,14 @@ export function createAiRunChatPublisher(
       scheduledHandle = undefined;
     }
 
-    await queuedWrite;
-    phase = terminalPhase;
-    content = terminalContent;
-    await enqueueSnapshot();
+    finishPromise = (async (): Promise<void> => {
+      await queuedWrite;
+      phase = terminalPhase;
+      content = terminalContent;
+      await enqueueSnapshot();
+    })();
+
+    return finishPromise;
   };
 
   return { start, emit, finish };

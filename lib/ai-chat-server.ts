@@ -2,6 +2,23 @@ import { createAiChatMessageId } from "@/lib/ai-chat";
 import { getLiveblocks } from "@/lib/liveblocks";
 import { AI_CHAT_FEED_ID, type AiChatMessage } from "@/types/tasks";
 
+/** The narrow server-side Liveblocks surface required for a chat-message upsert. */
+export interface AiChatFeedClient {
+  updateFeedMessage: (params: {
+    roomId: string;
+    feedId: string;
+    messageId: string;
+    data: AiChatMessage;
+  }) => Promise<unknown>;
+  createFeedMessage: (params: {
+    roomId: string;
+    feedId: string;
+    id: string;
+    data: AiChatMessage;
+  }) => Promise<unknown>;
+  createFeed: (params: { roomId: string; feedId: string }) => Promise<unknown>;
+}
+
 /** Authoritative feed write used by authenticated routes and the AI worker. */
 export async function createServerAiChatMessage(
   roomId: string,
@@ -36,7 +53,24 @@ export async function upsertServerAiChatMessage(
   messageId: string,
   message: AiChatMessage
 ): Promise<void> {
-  const client = getLiveblocks();
+  await upsertAiChatMessageWithClient(
+    getLiveblocks(),
+    roomId,
+    messageId,
+    message
+  );
+}
+
+/**
+ * The recovery policy behind the server upsert. Its narrow client dependency
+ * makes 404 and deterministic-ID race handling verifiable without a room.
+ */
+export async function upsertAiChatMessageWithClient(
+  client: AiChatFeedClient,
+  roomId: string,
+  messageId: string,
+  message: AiChatMessage
+): Promise<void> {
   const update = () =>
     client.updateFeedMessage({
       roomId,

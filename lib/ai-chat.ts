@@ -25,6 +25,14 @@ export interface ChatMessage extends AiChatMessage {
 
 /** A room activity snapshot older than this cannot keep the composer-looking live. */
 export const AI_RUN_STALE_AFTER_MS = 315_000;
+/** Browser timers coerce values beyond this signed 32-bit limit. */
+export const MAX_AI_RUN_STALE_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+export interface AiChatRunStaleTimerScheduler {
+  now: () => number;
+  setTimeout: (callback: () => void, delay: number) => number;
+  clearTimeout: (timer: number) => void;
+}
 
 /**
  * A durable activity snapshot cannot receive a terminal update after a worker
@@ -39,6 +47,64 @@ export function resolveAiChatRunPhase(
   return phase === "running" && now - updatedAt > AI_RUN_STALE_AFTER_MS
     ? "incomplete"
     : phase;
+}
+
+/**
+ * Keeps checking a durable running snapshot until it crosses the stale
+ * threshold. A timeout is only a wake-up hint: browsers can fire it early and
+ * wall clocks can move backwards, so each callback recomputes phase and arms
+ * one bounded replacement instead of assuming the deadline has arrived.
+ */
+export function armAiChatRunStaleTimer(
+  updatedAt: number,
+  scheduler: AiChatRunStaleTimerScheduler,
+  onStale: () => void
+): () => void {
+  let timer: number | null = null;
+  let isStopped = false;
+
+  const checkAndArm = () => {
+    if (isStopped) return;
+
+    const now = scheduler.now();
+
+    if (resolveAiChatRunPhase("running", updatedAt, now) === "incomplete") {
+      onStale();
+      return;
+    }
+
+    const remaining = AI_RUN_STALE_AFTER_MS - (now - updatedAt) + 1;
+    const delay = Math.min(
+      MAX_AI_RUN_STALE_TIMER_DELAY_MS,
+      Math.max(1, remaining)
+    );
+
+    timer = scheduler.setTimeout(() => {
+      timer = null;
+      checkAndArm();
+    }, delay);
+  };
+
+  checkAndArm();
+
+  return () => {
+    isStopped = true;
+
+    if (timer !== null) {
+      scheduler.clearTimeout(timer);
+      timer = null;
+    }
+  };
+}
+
+/** Local terminal start failures must survive the durable run appearing first. */
+export function shouldShowLocalAiRunActivity(
+  turn: { phase: "starting" | "running" | "complete" | "error"; runId: string | null },
+  hasPersistedRun: boolean
+): boolean {
+  return (
+    !hasPersistedRun || (turn.phase === "error" && turn.runId === null)
+  );
 }
 
 /**

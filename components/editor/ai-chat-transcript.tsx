@@ -16,9 +16,10 @@ import type {
 } from "@/hooks/use-design-run"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import {
-  AI_RUN_STALE_AFTER_MS,
+  armAiChatRunStaleTimer,
   arrangeAiChatMessages,
   resolveAiChatRunPhase,
+  shouldShowLocalAiRunActivity,
   type ChatMessage,
 } from "@/lib/ai-chat"
 import { selectAiActivityTimeline } from "@/lib/ai-timeline"
@@ -303,7 +304,9 @@ function MessageWithRun({
 }) {
   const isObservedRun =
     Boolean(turn?.runId) && turn?.runId === subscription?.runId
-  const showLocalActivity = Boolean(turn && !hasPersistedRun)
+  const showLocalActivity = Boolean(
+    turn && shouldShowLocalAiRunActivity(turn, hasPersistedRun)
+  )
 
   return (
     <>
@@ -345,13 +348,15 @@ function PersistedAiRunActivity({ message }: { message: ChatMessage }) {
   useEffect(() => {
     if (run?.phase !== "running") return
 
-    const remaining = AI_RUN_STALE_AFTER_MS - (Date.now() - message.updatedAt)
-    const timeout = window.setTimeout(
-      () => setNow(Date.now()),
-      Math.max(0, remaining + 1)
+    return armAiChatRunStaleTimer(
+      message.updatedAt,
+      {
+        now: () => Date.now(),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (timer) => window.clearTimeout(timer),
+      },
+      () => setNow(Date.now())
     )
-
-    return () => window.clearTimeout(timeout)
   }, [message.updatedAt, run?.phase])
 
   if (!run) return null

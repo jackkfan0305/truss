@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 
 import {
   arrangeAiChatMessages,
+  armAiChatRunStaleTimer,
   createAiChatMessageId,
+  MAX_AI_RUN_STALE_TIMER_DELAY_MS,
   resolveAiChatRunPhase,
   selectAiChatMessages,
+  shouldShowLocalAiRunActivity,
   type ChatFeedEntry,
   type ChatMessage,
 } from "../lib/ai-chat";
@@ -432,6 +435,144 @@ function checkPromptLinkedRunsAreArrangedAndExpire() {
   );
 }
 
+/**
+ * The design request can create a durable run and then fail while fetching its
+ * scoped token. The initiator needs that local start failure even though the
+ * room already has a run snapshot; only local running/completed UI is redundant.
+ */
+function checkLocalStartFailuresRemainVisibleBesideDurableRuns() {
+  assert.equal(
+    shouldShowLocalAiRunActivity(
+      { phase: "error", runId: null },
+      true,
+    ),
+    true,
+    "a token-request start failure remains visible when its durable run exists",
+  );
+  assert.equal(
+    shouldShowLocalAiRunActivity(
+      { phase: "running", runId: "run-123" },
+      true,
+    ),
+    false,
+    "local running activity stays hidden once durable activity exists",
+  );
+  assert.equal(
+    shouldShowLocalAiRunActivity(
+      { phase: "complete", runId: "run-123" },
+      true,
+    ),
+    false,
+    "local completed activity stays hidden once durable activity exists",
+  );
+}
+
+interface FakeTimer {
+  callback: () => void;
+  delay: number;
+}
+
+function createFakeStaleTimerScheduler(now: number) {
+  let currentTime = now;
+  let nextId = 0;
+  const timers = new Map<number, FakeTimer>();
+
+  return {
+    scheduler: {
+      now: () => currentTime,
+      setTimeout: (callback: () => void, delay: number) => {
+        const id = nextId;
+        nextId += 1;
+        timers.set(id, { callback, delay });
+        return id;
+      },
+      clearTimeout: (id: number) => {
+        timers.delete(id);
+      },
+    },
+    setNow: (next: number) => {
+      currentTime = next;
+    },
+    fireNext: () => {
+      const timer = timers.entries().next().value as
+        | [number, FakeTimer]
+        | undefined;
+
+      assert.ok(timer, "a stale timer must be armed");
+      timers.delete(timer[0]);
+      timer[1].callback();
+    },
+    delays: () => [...timers.values()].map((timer) => timer.delay),
+    timerCount: () => timers.size,
+  };
+}
+
+/**
+ * Browsers can fire a timeout early and laptops can move their wall clock
+ * backwards. A stale timer must re-check phase and re-arm instead of declaring
+ * an active run stopped or letting a future-dated snapshot wait forever.
+ */
+function checkStaleTimerReevaluatesUntilItSettles() {
+  const early = createFakeStaleTimerScheduler(1_000);
+  let earlySettles = 0;
+  const stopEarly = armAiChatRunStaleTimer(
+    1_000,
+    early.scheduler,
+    () => {
+      earlySettles += 1;
+    },
+  );
+
+  assert.deepEqual(early.delays(), [315_001]);
+  early.fireNext();
+  assert.equal(earlySettles, 0, "an early timer callback does not settle a live run");
+  assert.deepEqual(early.delays(), [315_001], "an early callback re-arms the timer");
+  early.setNow(-9_000);
+  early.fireNext();
+  assert.equal(earlySettles, 0, "a backward clock does not settle a live run");
+  assert.deepEqual(
+    early.delays(),
+    [325_001],
+    "a backward clock re-arms from its newly observed time",
+  );
+  stopEarly();
+  assert.equal(early.timerCount(), 0, "cleanup cancels the replacement timer");
+
+  const future = createFakeStaleTimerScheduler(0);
+  let futureSettles = 0;
+  armAiChatRunStaleTimer(
+    MAX_AI_RUN_STALE_TIMER_DELAY_MS * 2,
+    future.scheduler,
+    () => {
+      futureSettles += 1;
+    },
+  );
+
+  assert.deepEqual(
+    future.delays(),
+    [MAX_AI_RUN_STALE_TIMER_DELAY_MS],
+    "a far-future snapshot is capped to a browser-safe timer delay",
+  );
+  future.setNow(MAX_AI_RUN_STALE_TIMER_DELAY_MS);
+  future.fireNext();
+  assert.equal(futureSettles, 0, "a capped future timer re-evaluates instead of stopping");
+  assert.deepEqual(
+    future.delays(),
+    [MAX_AI_RUN_STALE_TIMER_DELAY_MS],
+    "a far-future snapshot stays safely re-armed",
+  );
+
+  const stale = createFakeStaleTimerScheduler(1_000);
+  let staleSettles = 0;
+  armAiChatRunStaleTimer(1_000, stale.scheduler, () => {
+    staleSettles += 1;
+  });
+  stale.setNow(316_001);
+  stale.fireNext();
+  assert.equal(staleSettles, 1, "a run settles only after the strict stale threshold");
+  assert.equal(stale.timerCount(), 0, "a settled timer does not re-arm itself");
+}
+
 function checkTimelineCanBePersistedWithoutTransientIds() {
   assert.deepEqual(
     toPersistedAiActivity([
@@ -526,6 +667,8 @@ async function main() {
   await checkAuthenticatedMessagesUseTheClerkAvatar();
   checkTranscriptIsOrderedAndFiltered();
   checkPromptLinkedRunsAreArrangedAndExpire();
+  checkLocalStartFailuresRemainVisibleBesideDurableRuns();
+  checkStaleTimerReevaluatesUntilItSettles();
   checkTimelineCanBePersistedWithoutTransientIds();
   checkMessageIdsCanAnchorInlineRuns();
   checkMarkdownCannotInjectHtml();

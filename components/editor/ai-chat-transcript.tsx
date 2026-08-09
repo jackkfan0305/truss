@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, Loader2 } from "lucide-react"
 
-import { AiRunActivity } from "@/components/editor/ai-run-activity"
+import {
+  AiRunActivity,
+  type AiRunActivityState,
+} from "@/components/editor/ai-run-activity"
+import { ChatEntry } from "@/components/editor/chat-entry"
 import { DesignRunObserver } from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
 import type {
@@ -11,9 +15,13 @@ import type {
   RunSubscription,
 } from "@/hooks/use-design-run"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
-import type { ChatMessage } from "@/lib/ai-chat"
-import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
-import { cn } from "@/lib/utils"
+import {
+  AI_RUN_STALE_AFTER_MS,
+  arrangeAiChatMessages,
+  resolveAiChatRunPhase,
+  type ChatMessage,
+} from "@/lib/ai-chat"
+import { selectAiActivityTimeline } from "@/lib/ai-timeline"
 import type { AiStatusMessage } from "@/types/tasks"
 
 interface AiChatTranscriptProps {
@@ -122,9 +130,19 @@ export function AiChatTranscript({
     },
     []
   )
+  const arrangedMessages = useMemo(() => arrangeAiChatMessages(messages), [messages])
   const turnsByPrompt = useMemo(
     () => new Map(turns.map((turn) => [turn.promptMessageId, turn])),
     [turns]
+  )
+  const persistedRunPromptIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) =>
+          message.run ? [message.run.promptMessageId] : []
+        )
+      ),
+    [messages]
   )
   const hasLocalActiveTurn = turns.some(
     (turn) => turn.phase === "starting" || turn.phase === "running"
@@ -229,7 +247,7 @@ export function AiChatTranscript({
                 </Button>
               </li>
             ) : null}
-            {messages.map((message) => {
+            {arrangedMessages.map((message) => {
               const turn = turnsByPrompt.get(message.id)
 
               return (
@@ -238,7 +256,7 @@ export function AiChatTranscript({
                   message={message}
                   isOwn={message.senderId === selfId}
                   turn={turn}
-                  status={status}
+                  hasPersistedRun={persistedRunPromptIds.has(message.id)}
                   subscription={subscription}
                   onRunSettled={onRunSettled}
                 />
@@ -272,91 +290,81 @@ function MessageWithRun({
   message,
   isOwn,
   turn,
-  status,
+  hasPersistedRun,
   subscription,
   onRunSettled,
 }: {
   message: ChatMessage
   isOwn: boolean
   turn?: AiRunTurn
-  status: AiStatusMessage | null
+  hasPersistedRun: boolean
   subscription: RunSubscription | null
   onRunSettled: (settlement: DesignRunSettlement) => void
 }) {
   const isObservedRun =
     Boolean(turn?.runId) && turn?.runId === subscription?.runId
+  const showLocalActivity = Boolean(turn && !hasPersistedRun)
 
   return (
     <>
-      <ChatEntry message={message} isOwn={isOwn} />
+      <ChatEntry
+        message={message}
+        isOwn={isOwn}
+        activity={message.run ? <PersistedAiRunActivity message={message} /> : undefined}
+      />
+      {turn && showLocalActivity ? (
+        <li>
+          <AiRunActivity state={toAiRunActivityState(turn)} />
+        </li>
+      ) : null}
       {turn && subscription && isObservedRun ? (
         <DesignRunObserver
           key={subscription.runId}
           subscription={subscription}
-          turn={turn}
-          status={status}
           onSettled={onRunSettled}
         />
-      ) : turn ? (
-        <AiRunActivity turn={turn} status={status} />
       ) : null}
     </>
   )
 }
 
-/**
- * No avatars: a human message is the one on the raised surface, the assistant
- * writes straight onto the panel. That is the whole distinction, and it costs
- * nothing to read.
- *
- * The name survives only where it carries information — another collaborator in
- * a shared room. "You" and "Truss" are still announced, but to screen readers
- * only, since a background colour is not something a reader can hear.
- */
-function ChatEntry({ message, isOwn }: { message: ChatMessage; isOwn: boolean }) {
-  const isAi = message.role === "assistant"
-  const author = isOwn ? "You" : isAi ? "Truss" : message.senderName
+function toAiRunActivityState(turn: AiRunTurn): AiRunActivityState {
+  return {
+    id: turn.promptMessageId,
+    runId: turn.runId,
+    phase: turn.phase,
+    activity: turn.activity,
+  }
+}
+
+/** A persisted run is authoritative and turns incomplete only after its TTL. */
+function PersistedAiRunActivity({ message }: { message: ChatMessage }) {
+  const run = message.run
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (run?.phase !== "running") return
+
+    const remaining = AI_RUN_STALE_AFTER_MS - (Date.now() - message.updatedAt)
+    const timeout = window.setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, remaining + 1)
+    )
+
+    return () => window.clearTimeout(timeout)
+  }, [message.updatedAt, run?.phase])
+
+  if (!run) return null
 
   return (
-    <li className={isAi ? "flex flex-col" : "ml-6 flex flex-col gap-1.5"}>
-      <span
-        className={cn(
-          "text-xs font-medium text-copy-secondary",
-          isOwn || isAi ? "sr-only" : undefined
-        )}
-      >
-        {author}
-      </span>
-      <time className="sr-only" dateTime={new Date(message.sentAt).toISOString()}>
-        Sent at {new Date(message.sentAt).toISOString()}
-      </time>
-      {isAi ? (
-        /*
-         * Markdown, and only on the assistant's side. A prompt is something a
-         * person typed, so rendering it would silently eat their asterisks and
-         * underscores; the assistant's replies are the ones written as prose
-         * with lists and code in them.
-         *
-         * `dangerouslySetInnerHTML` is safe here for exactly one reason —
-         * `lib/markdown.ts` runs markdown-it with `html: false`, so raw HTML in
-         * a message is escaped into visible text rather than parsed. That file
-         * is the sanitizer; read it before changing anything here.
-         */
-        <div
-          className={cn(
-            "wrap-anywhere text-sm leading-relaxed text-copy-primary",
-            MARKDOWN_STYLES
-          )}
-          dangerouslySetInnerHTML={{
-            __html: renderChatMarkdown(message.content),
-          }}
-        />
-      ) : (
-        <p className="whitespace-pre-wrap wrap-anywhere rounded-xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
-          {message.content}
-        </p>
-      )}
-    </li>
+    <AiRunActivity
+      state={{
+        id: message.id,
+        runId: run.runId,
+        phase: resolveAiChatRunPhase(run.phase, message.updatedAt, now),
+        activity: selectAiActivityTimeline(run.activity),
+      }}
+    />
   )
 }
 

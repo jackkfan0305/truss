@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  arrangeAiChatMessages,
   createAiChatMessageId,
+  resolveAiChatRunPhase,
   selectAiChatMessages,
   type ChatFeedEntry,
+  type ChatMessage,
 } from "../lib/ai-chat";
 import { parseAiChatRequest } from "../lib/ai-chat-requests";
 import { toPersistedAiActivity } from "../lib/ai-timeline";
@@ -352,6 +355,83 @@ function checkTranscriptIsOrderedAndFiltered() {
   console.log("✅ the transcript is ordered and filtered");
 }
 
+/**
+ * A shared AI turn belongs immediately after the prompt that caused it, even
+ * when the durable feed publishes the run after a later collaborator prompt.
+ * This catches a transcript that follows raw feed order rather than the
+ * project-worklog order readers need to understand what work answers what.
+ */
+function checkPromptLinkedRunsAreArrangedAndExpire() {
+  const promptA: ChatMessage = {
+    ...VALID,
+    content: "Map the checkout flow",
+    sentAt: 100,
+    id: "prompt-a",
+    updatedAt: 100,
+  };
+  const promptB: ChatMessage = {
+    ...VALID,
+    content: "Add the refund path",
+    sentAt: 200,
+    id: "prompt-b",
+    updatedAt: 200,
+  };
+  const runA: ChatMessage = {
+    ...RUN_MESSAGE,
+    id: "run-a",
+    updatedAt: 300,
+    sentAt: 300,
+    run: { ...RUN_MESSAGE.run, promptMessageId: promptA.id },
+  };
+  const runB: ChatMessage = {
+    ...RUN_MESSAGE,
+    id: "run-b",
+    updatedAt: 400,
+    sentAt: 400,
+    run: { ...RUN_MESSAGE.run, runId: "run-456", promptMessageId: promptB.id },
+  };
+
+  assert.deepEqual(
+    arrangeAiChatMessages([promptA, promptB, runA, runB]).map((message) => message.id),
+    [promptA.id, runA.id, promptB.id, runB.id],
+    "a durable run follows its loaded prompt rather than its feed position",
+  );
+  assert.equal(
+    resolveAiChatRunPhase("running", 1_000, 316_001),
+    "incomplete",
+    "a run older than the stale deadline stops claiming it is live",
+  );
+  assert.equal(
+    resolveAiChatRunPhase("running", 1_000, 316_000),
+    "running",
+    "the exact stale deadline remains live until it has passed",
+  );
+
+  const legacyAssistant: ChatMessage = {
+    ...LEGACY_ASSISTANT_MESSAGE,
+    id: "legacy-assistant",
+    updatedAt: 500,
+  };
+  const orphanedRun: ChatMessage = {
+    ...runA,
+    id: "orphaned-run",
+    run: { ...RUN_MESSAGE.run, promptMessageId: "unloaded-prompt" },
+  };
+  const selfReferentialRun: ChatMessage = {
+    ...runA,
+    id: "self-referential-run",
+    run: { ...RUN_MESSAGE.run, promptMessageId: "self-referential-run" },
+  };
+
+  assert.deepEqual(
+    arrangeAiChatMessages([legacyAssistant, orphanedRun, selfReferentialRun]).map(
+      (message) => message.id,
+    ),
+    [legacyAssistant.id, orphanedRun.id, selfReferentialRun.id],
+    "only a loaded human prompt can claim a run; unlinked feed entries stay ordered",
+  );
+}
+
 function checkTimelineCanBePersistedWithoutTransientIds() {
   assert.deepEqual(
     toPersistedAiActivity([
@@ -445,6 +525,7 @@ async function main() {
   checkChatRequestsAreValidated();
   await checkAuthenticatedMessagesUseTheClerkAvatar();
   checkTranscriptIsOrderedAndFiltered();
+  checkPromptLinkedRunsAreArrangedAndExpire();
   checkTimelineCanBePersistedWithoutTransientIds();
   checkMessageIdsCanAnchorInlineRuns();
   checkMarkdownCannotInjectHtml();

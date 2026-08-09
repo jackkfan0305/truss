@@ -1,30 +1,22 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import type { RealtimeRun } from "@trigger.dev/core/v3"
 import { useRealtimeRun, useRealtimeStream } from "@trigger.dev/react-hooks"
 
-import { AiRunActivity } from "@/components/editor/ai-run-activity"
 import type {
   DesignRunSettlement,
   RunSubscription,
 } from "@/hooks/use-design-run"
-import type { AiRunTurn } from "@/lib/ai-run-turns"
 import {
   appendAiActivityTimelinePart,
   type AiTimelinePart,
 } from "@/lib/ai-timeline"
 import type { designAgent } from "@/trigger/design-agent"
-import {
-  AI_ACTIVITY_STREAM_ID,
-  isAiActivityTerminalPart,
-  type AiStatusMessage,
-} from "@/types/tasks"
+import { AI_ACTIVITY_STREAM_ID, isAiActivityTerminalPart } from "@/types/tasks"
 
 interface DesignRunObserverProps {
   subscription: RunSubscription
-  turn: AiRunTurn
-  status: AiStatusMessage | null
   onSettled: (settlement: DesignRunSettlement) => void
 }
 
@@ -38,11 +30,8 @@ const TERMINAL_GRACE_MS = 1_500
 /** One keyed observer with a locally controlled, lossless activity accumulator. */
 export function DesignRunObserver({
   subscription,
-  turn,
-  status,
   onSettled,
 }: DesignRunObserverProps) {
-  const [activity, setActivity] = useState<AiTimelinePart[]>([])
   const activityRef = useRef<AiTimelinePart[]>([])
   const sourceIndexRef = useRef(0)
   const receivedTerminalRef = useRef(false)
@@ -93,7 +82,6 @@ export function DesignRunObserver({
 
       sourceIndexRef.current += 1
       activityRef.current = next
-      setActivity(next)
     },
     [settleIfReady]
   )
@@ -152,5 +140,5 @@ export function DesignRunObserver({
     []
   )
 
-  return <AiRunActivity turn={{ ...turn, activity }} status={status} />
+  return null
 }

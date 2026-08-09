@@ -1,5 +1,9 @@
 import type { FeedEntry } from "@/lib/ai-status";
-import { parseAiChatMessage, type AiChatMessage } from "@/types/tasks";
+import {
+  parseAiChatMessage,
+  type AiChatMessage,
+  type AiChatRunPhase,
+} from "@/types/tasks";
 
 /**
  * Turning the raw `ai-chat` feed into a transcript (25-sidebar-chat-feed).
@@ -17,6 +21,24 @@ export interface ChatFeedEntry extends FeedEntry {
 export interface ChatMessage extends AiChatMessage {
   id: string;
   updatedAt: number;
+}
+
+/** A room activity snapshot older than this cannot keep the composer-looking live. */
+export const AI_RUN_STALE_AFTER_MS = 315_000;
+
+/**
+ * A durable activity snapshot cannot receive a terminal update after a worker
+ * disappears. Treat only an *elapsed* deadline as stopped so the precise
+ * boundary does not flicker while a normal update is landing.
+ */
+export function resolveAiChatRunPhase(
+  phase: AiChatRunPhase,
+  updatedAt: number,
+  now: number
+): AiChatRunPhase | "incomplete" {
+  return phase === "running" && now - updatedAt > AI_RUN_STALE_AFTER_MS
+    ? "incomplete"
+    : phase;
 }
 
 /**
@@ -53,4 +75,45 @@ export function selectAiChatMessages(
         ? [{ ...parsed, id: entry.id, updatedAt: entry.updatedAt }]
         : [];
     });
+}
+
+/**
+ * Keep the server feed's chronology except for durable run snapshots, whose
+ * meaningful place is immediately after the loaded prompt they answer. The
+ * selector already establishes server-created order and JavaScript's stable
+ * iteration keeps multiple snapshots for one prompt in that order.
+ */
+export function arrangeAiChatMessages(
+  messages: readonly ChatMessage[]
+): ChatMessage[] {
+  const promptIds = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      promptIds.add(message.id);
+    }
+  }
+  const runsByPrompt = new Map<string, ChatMessage[]>();
+
+  for (const message of messages) {
+    const promptMessageId = message.run?.promptMessageId;
+
+    if (!promptMessageId || !promptIds.has(promptMessageId)) {
+      continue;
+    }
+
+    const runs = runsByPrompt.get(promptMessageId) ?? [];
+    runs.push(message);
+    runsByPrompt.set(promptMessageId, runs);
+  }
+
+  return messages.flatMap((message) => {
+    const promptMessageId = message.run?.promptMessageId;
+
+    if (promptMessageId && promptIds.has(promptMessageId)) {
+      return [];
+    }
+
+    return [message, ...(runsByPrompt.get(message.id) ?? [])];
+  });
 }

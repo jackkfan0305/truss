@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { CircleAlert, Download, FileText, Loader2 } from "lucide-react"
 
-import { MARKDOWN_STYLES } from "@/components/editor/ai-chat-transcript"
+import { MARKDOWN_STYLES } from "@/lib/markdown"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,

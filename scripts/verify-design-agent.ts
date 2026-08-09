@@ -25,12 +25,16 @@ import {
   type AiRunTurn,
 } from "../lib/ai-run-turns";
 import { selectLatestAiStatus } from "../lib/ai-status";
+import { isFullyRevealed, nextRevealLength } from "../lib/smooth-text";
 import {
   AI_BUILD_BUDGET_MS,
   AI_DESIGN_MODELS,
+  AI_THINKING_LEVELS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
   getBuildStepMs,
   parseAiDesignModelId,
+  parseAiThinkingLevel,
   isAiActivityTerminalPart,
   parseAiActivityPart,
   parseAiStatusMessage,
@@ -224,6 +228,78 @@ function checkBuildPaceStaysWatchableAtBothEnds() {
 }
 
 /** Junk in, empty plan out — never a throw, which would fail the whole run. */
+
+/**
+ * The reveal must always finish. A rate proportional to the backlog shrinks as
+ * it catches up, so the tail is where it can stall: rounding the step *up* is
+ * what guarantees a frame always moves at least one character, and the
+ * per-frame floor above it is a speed knob rather than the safety net. Swap
+ * that rounding for `floor` and the last characters never arrive.
+ */
+function checkSmoothRevealAlwaysConverges() {
+  const target =
+    "The gateway fans out to three services, so I will place them in a column and wire each from the gateway.";
+
+  let revealed = 0;
+  let frames = 0;
+
+  while (!isFullyRevealed(revealed, target) && frames < 500) {
+    const next = nextRevealLength(revealed, target);
+
+    assert.ok(next > revealed, "each frame must make progress");
+    revealed = next;
+    frames += 1;
+  }
+
+  assert.ok(isFullyRevealed(revealed, target), "reveal must reach the end");
+  assert.equal(revealed, target.length, "and must not overshoot it");
+}
+
+/** Monotonic and clamped, so a reader never sees text un-reveal itself. */
+function checkSmoothRevealNeverWalksBackwards() {
+  const target = "abcdef";
+
+  // Past the end — a shorter target arriving must clamp, not go negative.
+  assert.equal(nextRevealLength(99, target), target.length);
+  assert.equal(nextRevealLength(target.length, target), target.length);
+  assert.equal(nextRevealLength(-5, ""), 0);
+
+  // An empty target is fully revealed rather than a frame that never settles.
+  assert.equal(isFullyRevealed(0, ""), true);
+}
+
+/**
+ * Stopping mid-word is what makes a reveal look cheap, but chasing a boundary
+ * that does not exist is worse — an unbroken token would land in one jump. The
+ * lookahead is bounded, so a long token reveals in steady pieces instead.
+ */
+function checkSmoothRevealPrefersWordBoundaries() {
+  const target = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+
+  let revealed = 0;
+
+  for (let frame = 0; frame < 6 && !isFullyRevealed(revealed, target); frame += 1) {
+    revealed = nextRevealLength(revealed, target);
+
+    if (isFullyRevealed(revealed, target)) {
+      break;
+    }
+
+    const shown = target.slice(0, revealed);
+
+    assert.ok(
+      shown.endsWith(" ") || target[revealed] === undefined,
+      `partial reveal should stop on a boundary, got "${shown}"`,
+    );
+  }
+
+  // A single unbroken token still advances, and by less than the whole thing.
+  const unbroken = "x".repeat(400);
+  const step = nextRevealLength(0, unbroken);
+
+  assert.ok(step > 0 && step < unbroken.length);
+}
+
 function checkGarbageNeverThrows() {
   for (const raw of [
     null,
@@ -657,6 +733,30 @@ function checkDesignModelAllowlist() {
 }
 
 /**
+ * The effort allowlist. `minimal` is the one worth naming: Gemini accepts it on
+ * Flash and Flash-Lite but rejects it on 3.1 Pro, so offering it would make the
+ * effort picker's valid options depend on the model picker's selection.
+ */
+function checkThinkingLevelAllowlist() {
+  assert.ok(
+    AI_THINKING_LEVELS.some((level) => level.id === DEFAULT_AI_THINKING_LEVEL),
+    "the default effort must be one the picker offers"
+  );
+
+  for (const level of AI_THINKING_LEVELS) {
+    assert.equal(parseAiThinkingLevel(level.id), level.id);
+    assert.ok(level.label.length > 0 && level.hint.length > 0);
+  }
+
+  assert.equal(parseAiThinkingLevel(undefined), null);
+  assert.equal(parseAiThinkingLevel(null), null);
+
+  for (const rejected of ["minimal", "none", "HIGH", "", 2, { id: "high" }]) {
+    assert.equal(parseAiThinkingLevel(rejected), "invalid");
+  }
+}
+
+/**
  * Cursor-style activity is a timeline, not three buckets. Only adjacent
  * reasoning deltas may be joined; steps and canvas actions stay exactly where
  * the worker emitted them.
@@ -856,6 +956,7 @@ function main() {
   checkLatestStatusIsSelectedFromTheFeed();
   checkActivityPartsAreValidated();
   checkDesignModelAllowlist();
+  checkThinkingLevelAllowlist();
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
@@ -865,6 +966,9 @@ function main() {
   checkCursorTargetsResolveAgainstThePlan();
   checkUnresolvableCursorTargetsDoNotMove();
   checkBuildPaceStaysWatchableAtBothEnds();
+  checkSmoothRevealAlwaysConverges();
+  checkSmoothRevealNeverWalksBackwards();
+  checkSmoothRevealPrefersWordBoundaries();
   console.log(
     "✅ Design plan validation, palette/shape enforcement, ID resolution, layout spacing, AI status messages, feed selection and run activity verified",
   );

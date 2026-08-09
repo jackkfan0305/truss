@@ -16,8 +16,10 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import type { AiTimelinePart } from "@/lib/ai-timeline"
+import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
 import { type AiStatusMessage, type AiTaskStatus } from "@/types/tasks"
 
@@ -123,13 +125,7 @@ function ActivityItem({
   if (part.type === "reasoning") {
     return (
       <li className={cn("text-xs", ENTRANCE)}>
-        <span className="flex items-center gap-1.5 font-medium text-copy-secondary">
-          <BrainCircuit aria-hidden className="size-3.5" />
-          Reasoning summary
-        </span>
-        <p className="mt-1 whitespace-pre-wrap wrap-anywhere leading-relaxed text-copy-muted">
-          {part.text}
-        </p>
+        <ThinkingDisclosure part={part} phase={phase} />
       </li>
     )
   }
@@ -161,6 +157,63 @@ function ActivityItem({
       <Circle aria-hidden className="mt-0.5 size-3 shrink-0" />
       <span>{part.text}</span>
     </li>
+  )
+}
+
+/**
+ * The model's own thinking, behind a disclosure (33-thinking-disclosure).
+ *
+ * Collapsed by default and on every run: this is the provider's reasoning
+ * summary, which is worth having but is not what the panel is *for*. The
+ * collapsed row is the status — a spinner and "Thinking" while deltas are still
+ * arriving — so the common case reads as one line rather than as a wall of text
+ * pushing the actions out of view.
+ *
+ * Rendered as Markdown because the provider writes Markdown: headings, lists
+ * and emphasis arrive in the summaries, and as plain text they show up as
+ * literal `**` and `-` noise.
+ */
+function ThinkingDisclosure({
+  part,
+  phase,
+}: {
+  part: AiTimelinePart
+  phase: AiRunTurn["phase"]
+}) {
+  // Deltas only arrive while the run is live; a finished run's text is final,
+  // so it is revealed whole rather than typed out to a reader who has already
+  // scrolled to it.
+  const isStreaming = phase === "starting" || phase === "running"
+  const text = useSmoothText(part.text, !isStreaming)
+
+  return (
+    <Accordion defaultValue={[]}>
+      <AccordionItem value={part.id} className="border-0">
+        <AccordionTrigger className="min-h-8 gap-2 py-0.5 text-xs hover:no-underline focus-visible:border-copy-primary focus-visible:ring-copy-primary/20">
+          <span className="flex min-w-0 items-center gap-1.5 font-medium text-copy-secondary">
+            {isStreaming ? (
+              <Loader2
+                aria-hidden
+                className="size-3.5 shrink-0 motion-safe:animate-spin"
+              />
+            ) : (
+              <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+            )}
+            {isStreaming ? "Thinking" : "Thought process"}
+          </span>
+        </AccordionTrigger>
+
+        <AccordionContent className="pb-1">
+          <div
+            className={cn(
+              "wrap-anywhere leading-relaxed text-copy-muted",
+              MARKDOWN_STYLES
+            )}
+            dangerouslySetInnerHTML={{ __html: renderChatMarkdown(text) }}
+          />
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   )
 }
 

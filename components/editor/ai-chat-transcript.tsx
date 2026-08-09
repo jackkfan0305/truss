@@ -12,7 +12,7 @@ import type {
 } from "@/hooks/use-design-run"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import type { ChatMessage } from "@/lib/ai-chat"
-import { renderChatMarkdown } from "@/lib/markdown"
+import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
 import type { AiStatusMessage } from "@/types/tasks"
 
@@ -31,6 +31,13 @@ interface AiChatTranscriptProps {
 }
 
 const FOLLOW_THRESHOLD_PX = 48
+/** Fraction of the remaining distance closed per frame, plus a floor so the
+ * tail of the ease still lands instead of crawling sub-pixel. */
+const FOLLOW_EASE = 0.2
+const FOLLOW_MIN_STEP_PX = 1
+
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
 /** Shared messages with caller-only run activity inserted after its prompt. */
 export function AiChatTranscript({
@@ -61,14 +68,60 @@ export function AiChatTranscript({
     )
   }, [])
 
-  /** Rides the bottom while a run streams. Smoothness is CSS, see `scroll-smooth`. */
-  const followToBottom = useCallback(() => {
-    const element = scrollRef.current
+  /*
+   * Rides the bottom while a run streams, on its own rAF ease rather than CSS
+   * `scroll-smooth`. A streaming run grows the content every few frames, and
+   * every growth re-issues the scroll — with `scroll-smooth` each of those
+   * restarts the browser's ease from a standstill, which reads as a stutter
+   * that never catches up and then snaps. One continuous loop that always
+   * chases the *current* bottom is smooth no matter how the content arrives.
+   */
+  const frameRef = useRef<number | null>(null)
 
-    if (element && shouldFollow.current) {
-      element.scrollTop = element.scrollHeight
+  const followToBottom = useCallback(() => {
+    if (!shouldFollow.current || frameRef.current !== null) return
+
+    const step = () => {
+      const element = scrollRef.current
+      frameRef.current = null
+
+      if (!element || !shouldFollow.current) return
+
+      const remaining =
+        element.scrollHeight - element.clientHeight - element.scrollTop
+
+      if (remaining < FOLLOW_MIN_STEP_PX) {
+        element.scrollTop = element.scrollHeight
+        return
+      }
+
+      element.scrollTop += Math.max(remaining * FOLLOW_EASE, FOLLOW_MIN_STEP_PX)
+      frameRef.current = requestAnimationFrame(step)
     }
+
+    if (prefersReducedMotion()) {
+      const element = scrollRef.current
+
+      if (element) element.scrollTop = element.scrollHeight
+      return
+    }
+
+    frameRef.current = requestAnimationFrame(step)
   }, [])
+
+  /*
+   * Clearing the ref matters as much as cancelling the frame: `followToBottom`
+   * treats a non-null ref as "a loop is already running", so a cancelled id
+   * left behind would block every later call. StrictMode's remount in dev hits
+   * this on the very first render and kills follow for the whole session.
+   */
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    },
+    []
+  )
   const turnsByPrompt = useMemo(
     () => new Map(turns.map((turn) => [turn.promptMessageId, turn])),
     [turns]
@@ -99,8 +152,8 @@ export function AiChatTranscript({
 
   /*
    * Follow is driven by what the reader *did*, not by where the viewport is.
-   * With `scroll-smooth` the browser fires `scroll` for every frame on the way
-   * down, and those frames read as "not at the bottom" — deciding from them
+   * The follow loop fires `scroll` for every frame on the way down, and those
+   * frames read as "not at the bottom" — deciding from them
    * would drop follow mid-run and strobe the jump button for the whole
    * animation. So scrolling up releases the follow, and arriving at the bottom
    * takes it back.
@@ -133,7 +186,12 @@ export function AiChatTranscript({
 
     shouldFollow.current = true
     setShowJump(false)
-    element.scrollTop = element.scrollHeight
+    // A one-shot jump has nothing re-targeting it, so the browser's own ease
+    // is the right tool here — unlike the streaming follow above.
+    element.scrollTo({
+      top: element.scrollHeight,
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    })
   }
 
   return (
@@ -145,7 +203,7 @@ export function AiChatTranscript({
         }}
         onTouchMove={syncFollowToPosition}
         onScroll={resumeFollowAtBottom}
-        className="h-full overflow-y-auto overscroll-contain scroll-smooth pr-1 motion-reduce:scroll-auto"
+        className="h-full overflow-y-auto overscroll-contain pr-1"
       >
         {messages.length === 0 && turns.length === 0 ? (
           emptyState
@@ -302,36 +360,7 @@ function ChatEntry({ message, isOwn }: { message: ChatMessage; isOwn: boolean })
   )
 }
 
-/**
- * Markdown output is plain tags with no classes on them, so it is styled from
- * the container. Arbitrary variants rather than a typography plugin: this is a
- * short chat message, and a prose preset would have to be half-overridden to
- * stop fighting the panel's palette.
- *
- * Exported because the spec preview renders the same `lib/markdown.ts` output
- * into the same panel palette. It overrides the heading steps for a document —
- * `cn` merges those, since a spec has real hierarchy and a chat message does not.
- */
-export const MARKDOWN_STYLES = [
-  "[&_p]:my-0 [&_p+p]:mt-2",
-  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-4",
-  "[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-4",
-  "[&_li]:my-0.5 [&_li::marker]:text-copy-faint",
-  "[&_h1]:mt-3 [&_h1]:mb-1 [&_h1]:text-sm [&_h1]:font-medium",
-  "[&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-medium",
-  "[&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-medium",
-  "[&_strong]:font-medium [&_strong]:text-copy-primary",
-  "[&_em]:italic",
-  "[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-copy-faint hover:[&_a]:decoration-copy-primary",
-  "[&_code]:rounded [&_code]:bg-elevated [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs",
-  "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-elevated [&_pre]:p-3",
-  "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
-  "[&_blockquote]:my-2 [&_blockquote]:border-l [&_blockquote]:border-surface-border [&_blockquote]:pl-3 [&_blockquote]:text-copy-muted",
-  "[&_hr]:my-3 [&_hr]:border-surface-border",
-  "[&_table]:my-2 [&_table]:block [&_table]:overflow-x-auto",
-  "[&_th]:border [&_th]:border-surface-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",
-  "[&_td]:border [&_td]:border-surface-border [&_td]:px-2 [&_td]:py-1",
-].join(" ")
+
 
 function RemoteRunStatus({ status }: { status: AiStatusMessage | null }) {
   return (

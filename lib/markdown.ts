@@ -57,3 +57,38 @@ markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 export function renderChatMarkdown(content: string): string {
   return markdown.render(content);
 }
+
+/**
+ * Markdown output is plain tags with no classes on them, so it is styled from
+ * the container. Arbitrary variants rather than a typography plugin: these are
+ * short panel surfaces, and a prose preset would have to be half-overridden to
+ * stop fighting the palette.
+ *
+ * Here rather than in a component because three surfaces render this module's
+ * output — the chat transcript, the spec preview and the run's thinking
+ * disclosure — and the transcript already imports the activity component, so
+ * hanging the styles off it would close an import cycle.
+ *
+ * The spec preview overrides the heading steps for a document; `cn` merges
+ * those, since a spec has real hierarchy and a chat message does not.
+ */
+export const MARKDOWN_STYLES = [
+  "[&_p]:my-0 [&_p+p]:mt-2",
+  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-4",
+  "[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-4",
+  "[&_li]:my-0.5 [&_li::marker]:text-copy-faint",
+  "[&_h1]:mt-3 [&_h1]:mb-1 [&_h1]:text-sm [&_h1]:font-medium",
+  "[&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-medium",
+  "[&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-medium",
+  "[&_strong]:font-medium [&_strong]:text-copy-primary",
+  "[&_em]:italic",
+  "[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-copy-faint hover:[&_a]:decoration-copy-primary",
+  "[&_code]:rounded [&_code]:bg-elevated [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs",
+  "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-elevated [&_pre]:p-3",
+  "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
+  "[&_blockquote]:my-2 [&_blockquote]:border-l [&_blockquote]:border-surface-border [&_blockquote]:pl-3 [&_blockquote]:text-copy-muted",
+  "[&_hr]:my-3 [&_hr]:border-surface-border",
+  "[&_table]:my-2 [&_table]:block [&_table]:overflow-x-auto",
+  "[&_th]:border [&_th]:border-surface-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",
+  "[&_td]:border [&_td]:border-surface-border [&_td]:px-2 [&_td]:py-1",
+].join(" ")

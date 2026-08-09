@@ -43,6 +43,14 @@ export function useProjectSpecs(projectId: string): ProjectSpecList {
 
   useEffect(() => {
     const controller = new AbortController()
+    /*
+     * A flag of its own rather than `controller.signal.aborted`. The two are
+     * equivalent today, because the only thing that ends this run is the
+     * cleanup calling `abort()` — but that ties "should I still write state" to
+     * one particular fetch. Any later `await` that is not that fetch would slip
+     * past a signal check and not past this.
+     */
+    let isStale = false
 
     void (async () => {
       try {
@@ -58,17 +66,20 @@ export function useProjectSpecs(projectId: string): ProjectSpecList {
 
         // A response that resolved before the abort landed still belongs to a
         // dead effect run; writing it would let an older list win the race.
-        if (controller.signal.aborted) return
+        if (isStale) return
 
         setList({ projectId, specs: body.specs ?? [], error: null })
       } catch (caught) {
-        if (controller.signal.aborted) return
+        if (isStale) return
 
         setList({ projectId, specs: [], error: getErrorMessage(caught) })
       }
     })()
 
-    return () => controller.abort()
+    return () => {
+      isStale = true
+      controller.abort()
+    }
   }, [projectId])
 
   return {
@@ -106,6 +117,8 @@ export function useSpecContent(
 
   useEffect(() => {
     const controller = new AbortController()
+    // Same reasoning as `useProjectSpecs` above.
+    let isStale = false
 
     void (async () => {
       try {
@@ -121,17 +134,20 @@ export function useSpecContent(
         // the body; read through fetch it is just text.
         const markdown = await response.text()
 
-        if (controller.signal.aborted) return
+        if (isStale) return
 
         setState({ specId, markdown, error: null })
       } catch (caught) {
-        if (controller.signal.aborted) return
+        if (isStale) return
 
         setState({ specId, markdown: null, error: getErrorMessage(caught) })
       }
     })()
 
-    return () => controller.abort()
+    return () => {
+      isStale = true
+      controller.abort()
+    }
   }, [projectId, specId])
 
   const isCurrent = state?.specId === specId

@@ -49,4 +49,6 @@ function Badge({
   })
 }
 
-export { Badge, badgeVariants }
+// `badgeVariants` stays private: nothing outside this file consumed it, and a
+// non-component export is what stops Fast Refresh preserving state here.
+export { Badge }

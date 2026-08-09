@@ -4,6 +4,7 @@ import { useViewport } from "@xyflow/react";
 import { Loader2 } from "lucide-react";
 
 import { useCollaborators } from "@/hooks/use-collaborators";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { AI_CURSOR_SWEEP_MS, AI_USER_ID } from "@/types/tasks";
 
 /**
@@ -32,6 +33,13 @@ import { AI_CURSOR_SWEEP_MS, AI_USER_ID } from "@/types/tasks";
 export function LiveCursors() {
   const collaborators = useCollaborators();
   const { x, y, zoom } = useViewport();
+  /*
+   * Read here rather than left to `motion-reduce:transition-none`: the sweep is
+   * an inline `transition`, and an inline declaration outranks any class, so
+   * the utility could never switch it off. The AI cursor jumps to each position
+   * instead of gliding when the reader has asked for less motion.
+   */
+  const prefersReducedMotion = useReducedMotion();
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
@@ -51,16 +59,16 @@ export function LiveCursors() {
           // Only the AI sweeps. A human cursor updates at pointer frequency, and
           // a transition would render it permanently behind where the person
           // actually is.
-          const isAi = id === AI_USER_ID;
+          const shouldSweep = id === AI_USER_ID && !prefersReducedMotion;
 
           return (
             <div
               key={connectionId}
-              className="absolute left-0 top-0 motion-reduce:transition-none"
+              className="absolute left-0 top-0"
               style={{
                 transform: `translate(${presence.cursor.x}px, ${presence.cursor.y}px)`,
                 transformOrigin: "0 0",
-                transition: isAi
+                transition: shouldSweep
                   ? `transform ${AI_CURSOR_SWEEP_MS}ms cubic-bezier(0.33, 1, 0.68, 1)`
                   : undefined,
               }}

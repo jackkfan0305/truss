@@ -28,9 +28,22 @@ export function useSmoothText(target: string, settled = false): string {
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
+    /*
+     * Every path returns this, including the ones that never schedule a frame.
+     * Whether a frame can still be pending on those paths is an argument about
+     * the *previous* cleanup having run; cancelling unconditionally is one line
+     * and needs no such argument.
+     */
+    const cancel = () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+
     // Nothing to animate toward: render already returns the whole string.
     if (settled) {
-      return;
+      return cancel;
     }
 
     // A shorter target is different text, not a rewind. Clamping the ref (never
@@ -41,7 +54,7 @@ export function useSmoothText(target: string, settled = false): string {
     }
 
     if (isFullyRevealed(revealedRef.current, target)) {
-      return;
+      return cancel;
     }
 
     const step = () => {
@@ -61,12 +74,7 @@ export function useSmoothText(target: string, settled = false): string {
 
     frameRef.current = requestAnimationFrame(step);
 
-    return () => {
-      if (frameRef.current !== null) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-    };
+    return cancel;
   }, [target, settled]);
 
   // `slice` clamps on its own, so an out-of-range cursor renders the whole

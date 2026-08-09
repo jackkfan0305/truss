@@ -9,31 +9,38 @@ import {
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
+import { selectAiChatMessages } from "@/lib/ai-chat";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
-  MIN_NODE_GAP,
   NODE_COLOR_NAMES,
-  applyDesignPlan,
+  applyDesignAction,
+  createCursorTargets,
   describeDesignAction,
   getPlanFocus,
   parseDesignPlan,
   type DesignContext,
+  type DesignPlan,
 } from "@/lib/design-plan";
+import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
-  NODE_DEFAULT_SIZES,
   NODE_SHAPES,
   type CanvasEdge,
   type CanvasNode,
 } from "@/types/canvas";
 import {
   AI_ACTIVITY_STREAM_ID,
+  AI_CHAT_FEED_ID,
+  AI_CURSOR_ARRIVAL_PAD_MS,
+  AI_CURSOR_SWEEP_MS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  getBuildStepMs,
   parseAiDesignModelId,
   type AiActivityPart,
   type AiActivityTerminalPart,
+  type AiChatMessage,
 } from "@/types/tasks";
 
 /**
@@ -138,49 +145,24 @@ const designPlanSchema = jsonSchema({
   required: ["summary", "actions"],
 });
 
-const SYSTEM_PROMPT = [
-  "You are a systems architect editing a shared diagram on a collaborative canvas.",
-  "Return a list of canvas actions that satisfies the user's request, and a one-sentence summary.",
-  "",
-  "Node shapes carry meaning — use them:",
-  "- rectangle: general component",
-  "- diamond: decision or gateway",
-  "- circle: event or endpoint",
-  "- pill: service or process",
-  "- cylinder: database or storage",
-  "- hexagon: external system or boundary",
-  "",
-  `Colors are limited to: ${NODE_COLOR_NAMES.join(", ")}. Use them semantically`,
-  "(for example teal for data stores, blue for services, orange for external systems),",
-  "not decoratively. Use neutral when nothing else applies.",
-  "",
-  "Layout rules:",
-  `- Position nodes on a grid with at least ${MIN_NODE_GAP} units of clear space between them.`,
-  "- Lay flows left to right, or top to bottom, consistently.",
-  `- Default sizes: ${Object.entries(NODE_DEFAULT_SIZES)
-    .map(([shape, size]) => `${shape} ${size.width}x${size.height}`)
-    .join(", ")}.`,
-  "- Never place a new node on top of an existing one.",
-  "",
-  "Prefer editing what is already on the canvas over rebuilding it.",
-  "Give every node a short label. Label edges only when the relationship is not obvious.",
-].join("\n");
-
-/** Enough canvas for the model to edit it, capped so a big diagram cannot blow the context. */
-const MAX_CONTEXT_ITEMS = 120;
-
 /**
- * Gemini's internal thinking effort. Kept low because a diagram edit is not a
- * maths olympiad and thinking tokens are billed. Thoughts are not requested in
- * the response; the browser receives curated progress summaries instead.
+ * Gemini's internal thinking effort.
  *
- * `thinkingLevel`, not the `thinkingBudget: 1024` that was here: this model is
- * a Gemini 3, which takes a level. Passing a numeric budget did not clamp
- * thinking — it made generation degenerate, burning ~41k output tokens over
- * ~167s to emit a single malformed action, which is what put runs past
- * `maxDuration` and left the sidebar waiting on a run that never landed.
+ * High, not the `low` this ran on: the work is not "emit some JSON", it is
+ * deciding what a system is made of and how it lays out — which components
+ * exist, what flows between them, and where each one goes without landing on
+ * something already there. At `low` the model reached for the generic shape of a
+ * diagram instead of the one that was asked for. Thinking tokens are billed, and
+ * this is what they are for.
+ *
+ * `thinkingLevel`, not a `thinkingBudget: 1024`: this model is a Gemini 3, which
+ * takes a level. Passing a numeric budget did not clamp thinking — it made
+ * generation degenerate, burning ~41k output tokens over ~167s to emit a single
+ * malformed action.
+ *
+ * Provider thoughts stay private; the activity stream carries curated updates.
  */
-const THINKING_LEVEL = "low";
+const THINKING_LEVEL = "high";
 
 /**
  * The run's live activity, as a stream the sidebar subscribes to.
@@ -272,7 +254,12 @@ export const designAgent = task({
   // design and adds a second copy of it. One shot, and a failure is reported to
   // the room rather than retried.
   retry: { maxAttempts: 1 },
-  maxDuration: 180,
+  // Room for the three phases that actually take time: a high-thinking
+  // generation, and a paced build that spends `AI_BUILD_BUDGET_MS` plus a cursor
+  // sweep per action on purpose. A run that overruns this is killed mid-build,
+  // which leaves a half-drawn canvas — the expensive failure, so the ceiling is
+  // generous rather than tight.
+  maxDuration: 300,
   run: async (payload: DesignAgentPayload, { ctx }) => {
     const { roomId, prompt } = payload;
     const runId = ctx.run.id;
@@ -293,6 +280,11 @@ export const designAgent = task({
 
     const activity = openActivityStream();
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
+    // Paced writes flush as they go, so a failure can leave part of the plan on
+    // the canvas. Both are read by the error path, so both are declared out
+    // here rather than inside the `try` that assigns them.
+    let applied = 0;
+    let planned = 0;
 
     await Promise.all([
       setAiPresence(roomId, { cursor: null, isThinking: true }),
@@ -307,7 +299,12 @@ export const designAgent = task({
     try {
       activity.emit({ type: "step", text: "Reading the canvas" });
 
-      const context = await readCanvas(roomId);
+      // In parallel: neither read depends on the other, and both are pure reads
+      // against the same room.
+      const [context, history] = await Promise.all([
+        readCanvas(roomId),
+        readChatHistory(roomId),
+      ]);
 
       activity.emit({
         type: "reasoning",
@@ -340,7 +337,7 @@ export const designAgent = task({
         model: createGoogleGenerativeAI({ apiKey: getGoogleApiKey() })(modelId),
         schema: designPlanSchema,
         system: SYSTEM_PROMPT,
-        prompt: `${describeCanvas(context)}\n\nRequest: ${prompt}`,
+        prompt: buildDesignPrompt({ context, history, prompt }),
         providerOptions: {
           google: {
             thinkingConfig: { thinkingLevel: THINKING_LEVEL },
@@ -351,6 +348,8 @@ export const designAgent = task({
       activity.emit({ type: "step", text: "Validating the proposed changes" });
 
       const plan = parseDesignPlan(object, context);
+
+      planned = plan.actions.length;
 
       logger.info("Design plan parsed", {
         roomId,
@@ -391,20 +390,7 @@ export const designAgent = task({
 
       activity.emit({ type: "step", text: "Applying to the canvas" });
 
-      // Announced before the write, not during it: the write is one atomic
-      // `mutateFlow`, and every action in the plan is already validated, so
-      // this is the list that is about to land rather than a guess.
-      for (const action of plan.actions) {
-        activity.emit({
-          type: "action",
-          text: action.type,
-          detail: describeDesignAction(action),
-        });
-      }
-
-      await mutateFlow<CanvasNode, CanvasEdge>({ client: getLiveblocks(), roomId }, (flow) =>
-        applyDesignPlan(flow, plan)
-      );
+      applied = await buildCanvas(roomId, plan, context, activity);
 
       await publishAiStatus(roomId, {
         kind: "design",
@@ -420,27 +406,29 @@ export const designAgent = task({
       );
 
       activityOutcome = "complete";
-      return { summary: plan.summary, applied: plan.actions.length };
+      return { summary: plan.summary, applied };
     } catch (error: unknown) {
-      // The canvas is left exactly as it was: the only write is the single
-      // `mutateFlow` above, and a failure before it writes nothing.
       logger.error("Design generation failed", {
         roomId,
+        applied,
         error: error instanceof Error ? error.message : String(error),
       });
+
+      // The build writes incrementally, so "the canvas is unchanged" stops
+      // being true the moment the first action flushes. Report what landed.
+      const failureText =
+        applied === 0
+          ? "Generation failed. The canvas is unchanged."
+          : `Generation failed partway. ${applied} of ${planned} changes were applied.`;
 
       await publishAiStatus(roomId, {
         kind: "design",
         status: "error",
         runId,
-        text: "Generation failed. The canvas is unchanged.",
+        text: failureText,
       });
 
-      await publishAiChatSummary(
-        roomId,
-        runId,
-        "Generation failed. The canvas is unchanged."
-      );
+      await publishAiChatSummary(roomId, runId, failureText);
 
       throw error;
     } finally {
@@ -452,6 +440,68 @@ export const designAgent = task({
     }
   },
 });
+
+/**
+ * Applies the plan at a watchable pace, with the AI cursor arriving before each
+ * change lands (32-live-canvas-building).
+ *
+ * One `mutateFlow`, not one per action. `Liveblocks.mutateStorage` fetches
+ * Storage once and then flushes buffered ops on a 200ms debounce *while the
+ * callback is still running*, and `mutateFlow` awaits its callback inside that —
+ * so sleeping between actions broadcasts them incrementally off a single fetch.
+ * A call per action would re-fetch the whole document every time, which is
+ * O(n²) transfer as the diagram grows, for the same thing on screen.
+ *
+ * Returns how many actions actually landed, which on the failure path is what
+ * tells the room how much of the plan is sitting on the canvas.
+ */
+async function buildCanvas(
+  roomId: string,
+  plan: DesignPlan,
+  context: DesignContext,
+  activity: { emit: (part: AiActivityPart | AiActivityTerminalPart) => void }
+): Promise<number> {
+  const stepMs = getBuildStepMs(plan.actions.length);
+  const cursor = createCursorTargets(context);
+  let applied = 0;
+
+  await mutateFlow<CanvasNode, CanvasEdge>(
+    { client: getLiveblocks(), roomId },
+    async (flow) => {
+      for (const action of plan.actions) {
+        const target = cursor.next(action);
+
+        if (target) {
+          // Not awaited: presence is commentary on a canvas write, and a slow
+          // or failed presence call must not stall the work itself. The sweep
+          // below is the wait that matters.
+          void setAiPresence(roomId, { cursor: target, isThinking: true });
+          await sleep(AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS);
+        }
+
+        applyDesignAction(flow, action);
+
+        // Emitted with the write rather than ahead of the whole batch, so the
+        // sidebar list and the canvas describe the same moment.
+        activity.emit({
+          type: "action",
+          text: action.type,
+          detail: describeDesignAction(action),
+        });
+
+        applied += 1;
+
+        await sleep(stepMs);
+      }
+    }
+  );
+
+  return applied;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Reads the diagram without changing it. `mutateFlow` is the read path as well
@@ -472,31 +522,31 @@ async function readCanvas(roomId: string): Promise<DesignContext> {
   return context;
 }
 
-/** The canvas as text the model can reason about and address by ID. */
-function describeCanvas({ nodes, edges }: DesignContext): string {
-  if (nodes.length === 0 && edges.length === 0) {
-    return "The canvas is empty.";
+/**
+ * The room's chat transcript, so a run can see the turns before it.
+ *
+ * Read from the shared feed rather than taken from the request payload: the feed
+ * is the authoritative record every client already renders, it includes what
+ * *other* collaborators asked for, and it cannot be forged by whoever posted the
+ * prompt. `selectAiChatMessages` is the same validator the sidebar reads it with.
+ *
+ * Never throws. A run that cannot fetch history is a run with less context, not
+ * a failed one — the canvas edit is still the work.
+ */
+async function readChatHistory(roomId: string): Promise<AiChatMessage[]> {
+  try {
+    const { data } = await getLiveblocks().getFeedMessages({
+      roomId,
+      feedId: AI_CHAT_FEED_ID,
+    });
+
+    return selectAiChatMessages(data);
+  } catch (error: unknown) {
+    logger.warn("Chat history unavailable; designing without it", {
+      roomId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return [];
   }
-
-  const nodeLines = nodes
-    .slice(0, MAX_CONTEXT_ITEMS)
-    .map(
-      (node) =>
-        `- ${node.id} | ${node.data.shape} | ${node.data.color} | "${node.data.label}" | at ${Math.round(node.position.x)},${Math.round(node.position.y)}`
-    );
-
-  const edgeLines = edges
-    .slice(0, MAX_CONTEXT_ITEMS)
-    .map(
-      (edge) =>
-        `- ${edge.id} | ${edge.source} -> ${edge.target}${edge.data?.label ? ` | "${edge.data.label}"` : ""}`
-    );
-
-  return [
-    "Current canvas nodes:",
-    nodeLines.join("\n") || "- none",
-    "",
-    "Current canvas edges:",
-    edgeLines.join("\n") || "- none",
-  ].join("\n");
 }

@@ -100,7 +100,7 @@ export interface DesignContext {
   edges: readonly CanvasEdge[];
 }
 
-interface Box extends NodeSize, XYPosition {}
+export interface Box extends NodeSize, XYPosition {}
 
 /**
  * Validates and normalizes a raw model response into a plan the canvas can
@@ -142,33 +142,102 @@ export function applyDesignPlan(
   plan: DesignPlan
 ): void {
   for (const action of plan.actions) {
-    switch (action.type) {
-      case "addNode":
-        flow.addNode(action.node);
-        break;
-      case "moveNode":
-        flow.updateNode(action.id, { position: action.position });
-        break;
-      case "resizeNode":
-        flow.updateNode(action.id, {
-          width: action.width,
-          height: action.height,
-        });
-        break;
-      case "updateNodeData":
-        flow.updateNodeData(action.id, action.data);
-        break;
-      case "deleteNode":
-        flow.removeNode(action.id);
-        break;
-      case "addEdge":
-        flow.addEdge(action.edge);
-        break;
-      case "deleteEdge":
-        flow.removeEdge(action.id);
-        break;
-    }
+    applyDesignAction(flow, action);
   }
+}
+
+/**
+ * One action, so the agent can pace the plan out over time and let the AI
+ * cursor arrive somewhere before the thing it is placing appears there.
+ *
+ * The unit of a *write*, not of a transaction: the caller decides whether these
+ * land inside one `mutateFlow` or many. Both are correct; the agent uses one,
+ * because Liveblocks flushes buffered ops on a debounce while the callback runs.
+ */
+export function applyDesignAction(
+  flow: MutableFlow<CanvasNode, CanvasEdge>,
+  action: DesignAction
+): void {
+  switch (action.type) {
+    case "addNode":
+      flow.addNode(action.node);
+      break;
+    case "moveNode":
+      flow.updateNode(action.id, { position: action.position });
+      break;
+    case "resizeNode":
+      flow.updateNode(action.id, {
+        width: action.width,
+        height: action.height,
+      });
+      break;
+    case "updateNodeData":
+      flow.updateNodeData(action.id, action.data);
+      break;
+    case "deleteNode":
+      flow.removeNode(action.id);
+      break;
+    case "addEdge":
+      flow.addEdge(action.edge);
+      break;
+    case "deleteEdge":
+      flow.removeEdge(action.id);
+      break;
+  }
+}
+
+/**
+ * Where the AI cursor should be standing when an action lands.
+ *
+ * Resolved against the canvas the run started from *plus* the nodes this plan
+ * has already placed, because most actions in a generated plan refer to nodes
+ * that did not exist when the run began.
+ *
+ * `null` means "no move": the cursor stays where it was. That is the honest
+ * answer for an action whose subject cannot be located, and it beats the
+ * alternative of sending the cursor to the origin, which reads as the AI
+ * wandering off to a corner of the canvas for no reason.
+ */
+export function createCursorTargets(context: DesignContext) {
+  const positions = new Map<string, XYPosition>(
+    context.nodes.map((node) => [node.id, node.position])
+  );
+  const edgeTargets = new Map<string, string>(
+    context.edges.map((edge) => [edge.id, edge.target])
+  );
+
+  return {
+    /** Call in plan order — later actions resolve against earlier placements. */
+    next(action: DesignAction): XYPosition | null {
+      switch (action.type) {
+        case "addNode":
+          positions.set(action.node.id, action.node.position);
+
+          return action.node.position;
+
+        case "moveNode":
+          positions.set(action.id, action.position);
+
+          return action.position;
+
+        case "addEdge":
+          edgeTargets.set(action.edge.id, action.edge.target);
+
+          // The target, not the source: the cursor travelling toward where the
+          // connection lands is what makes an edge read as being drawn.
+          return positions.get(action.edge.target) ?? null;
+
+        case "deleteEdge": {
+          const target = edgeTargets.get(action.id);
+
+          return target === undefined ? null : positions.get(target) ?? null;
+        }
+
+        default:
+          return positions.get(action.id) ?? null;
+      }
+    },
+  };
 }
 
 /** The first position of the first node the plan adds, for the AI cursor. */
@@ -600,7 +669,12 @@ function overlaps(a: Box, b: Box): boolean {
   );
 }
 
-function toBox(node: CanvasNode): Box {
+/**
+ * A node's occupied rectangle. Exported because the prompt builder describes the
+ * same rectangles to the model that the layout uses to avoid overlaps — if the
+ * two disagreed, the model would be reasoning about sizes the canvas does not have.
+ */
+export function toBox(node: CanvasNode): Box {
   const fallback = NODE_DEFAULT_SIZES[node.data.shape] ?? NODE_DEFAULT_SIZES.rectangle;
 
   return {

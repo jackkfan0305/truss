@@ -5,11 +5,17 @@ import {
   MAX_DESIGN_ACTIONS,
   MIN_NODE_GAP,
   NODE_COLOR_NAMES,
+  createCursorTargets,
   describeDesignAction,
   parseDesignPlan,
   type DesignAction,
   type DesignContext,
 } from "../lib/design-plan";
+import {
+  buildDesignPrompt,
+  describeCanvas,
+  formatChatHistory,
+} from "../lib/design-prompt";
 import {
   appendAiActivityTimelinePart,
   selectAiActivityTimeline,
@@ -20,12 +26,15 @@ import {
 } from "../lib/ai-run-turns";
 import { selectLatestAiStatus } from "../lib/ai-status";
 import {
+  AI_BUILD_BUDGET_MS,
   AI_DESIGN_MODELS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  getBuildStepMs,
   parseAiDesignModelId,
   isAiActivityTerminalPart,
   parseAiActivityPart,
   parseAiStatusMessage,
+  type AiChatMessage,
 } from "../types/tasks";
 import {
   CANVAS_EDGE_TYPE,
@@ -74,6 +83,144 @@ function addedEdges(actions: DesignAction[]) {
   return actions.flatMap((action) =>
     action.type === "addEdge" ? [action.edge] : []
   );
+}
+
+function chat(
+  role: "user" | "assistant",
+  content: string,
+  senderName = "Ada"
+): AiChatMessage {
+  return { role, content, senderId: "u1", senderName, sentAt: 0 };
+}
+
+/**
+ * The layout rule the model is given ("nothing you add may overlap") is only
+ * followable if every existing rectangle is described. A node listed with a
+ * position and no size is one the model has to guess the extent of.
+ */
+function checkCanvasDescriptionCarriesSizes() {
+  const described = describeCanvas({
+    nodes: [node("n1", 0, 0)],
+    edges: [edge("e1", "n1", "n1")],
+  });
+
+  assert.match(described, /n1 \|/);
+  assert.match(described, /at 0,0 \| 180x80/);
+
+  // A node whose size the canvas never measured still has to be described, or
+  // it reads as a zero-area point sitting at its origin.
+  const unmeasured = describeCanvas({
+    nodes: [{ ...node("n2", 40, 40), width: undefined, height: undefined }],
+    edges: [],
+  });
+
+  assert.match(unmeasured, /\| \d+x\d+/);
+  assert.equal(describeCanvas(EMPTY), "The canvas is empty.");
+}
+
+/**
+ * The sidebar writes the prompt to the feed *before* triggering, so the run's
+ * own request is normally the last line of the history it reads back.
+ */
+function checkHistoryDoesNotEchoTheCurrentPrompt() {
+  const messages = [
+    chat("user", "draw a checkout flow"),
+    chat("assistant", "Added 6 nodes.", "AI Architect"),
+    chat("user", "now add a refund path"),
+  ];
+
+  const history = formatChatHistory(messages, "now add a refund path");
+
+  assert.match(history, /draw a checkout flow/);
+  assert.match(history, /Added 6 nodes\./);
+  assert.equal(history.includes("now add a refund path"), false);
+
+  // A first turn has nothing behind it, and an empty section must not add a
+  // stray heading to the prompt.
+  assert.equal(formatChatHistory([chat("user", "hi")], "hi"), "");
+  assert.equal(formatChatHistory([], "hi"), "");
+
+  // Same text asked twice is still one prior turn, not zero.
+  assert.match(
+    formatChatHistory([chat("user", "again"), chat("user", "again")], "again"),
+    /again/
+  );
+
+  // The request is the last thing the model reads.
+  const built = buildDesignPrompt({
+    context: EMPTY,
+    history: messages,
+    prompt: "now add a refund path",
+  });
+
+  assert.ok(built.trimEnd().endsWith("Request: now add a refund path"));
+  assert.match(built, /Conversation so far/);
+}
+
+/**
+ * The cursor has to be standing on the thing that is about to appear, and most
+ * of a generated plan refers to nodes that did not exist when the run started —
+ * so targets must resolve against earlier actions in the same plan, not just
+ * against the canvas that was read at the beginning.
+ */
+function checkCursorTargetsResolveAgainstThePlan() {
+  const plan = parseDesignPlan(
+    {
+      summary: "",
+      actions: [
+        { type: "addNode", id: "gateway", label: "Gateway", x: 0, y: 0 },
+        { type: "addNode", id: "orders", label: "Orders", x: 400, y: 0 },
+        { type: "addEdge", source: "gateway", target: "orders" },
+      ],
+    },
+    EMPTY,
+  );
+
+  const cursor = createCursorTargets(EMPTY);
+  const targets = plan.actions.map((action) => cursor.next(action));
+
+  assert.equal(targets.length, 3);
+
+  const [gateway, orders, edge] = targets;
+
+  assert.ok(gateway && orders && edge);
+
+  // The edge sends the cursor to its *target* node, which this plan created two
+  // actions earlier — the case that fails if resolution ignores the plan.
+  assert.deepEqual(edge, orders);
+  assert.notDeepEqual(edge, gateway);
+}
+
+/** An unlocatable subject must not fling the cursor to the origin. */
+function checkUnresolvableCursorTargetsDoNotMove() {
+  const cursor = createCursorTargets(EMPTY);
+
+  assert.equal(cursor.next({ type: "deleteNode", id: "never-existed" }), null);
+  assert.equal(cursor.next({ type: "deleteEdge", id: "never-existed" }), null);
+}
+
+/**
+ * Pace is derived from the action count so a 60-action plan does not become
+ * half a minute of forced watching, and is floored so it never drops under
+ * Liveblocks' 200ms storage flush debounce — below that, actions coalesce into
+ * one broadcast and the per-action reveal stops existing.
+ */
+function checkBuildPaceStaysWatchableAtBothEnds() {
+  const small = getBuildStepMs(4);
+  const large = getBuildStepMs(MAX_DESIGN_ACTIONS);
+
+  assert.ok(large < small, "a bigger plan must move faster per action");
+  assert.ok(large >= 220, "pace must not fall under the 200ms flush debounce");
+
+  // The budget is what keeps the whole build watchable rather than endless.
+  assert.ok(
+    large * MAX_DESIGN_ACTIONS <= AI_BUILD_BUDGET_MS * 1.5,
+    "a full-size plan must stay near the build budget",
+  );
+
+  // Degenerate inputs still return something usable rather than Infinity.
+  assert.ok(Number.isFinite(getBuildStepMs(0)));
+  assert.ok(Number.isFinite(getBuildStepMs(-1)));
 }
 
 /** Junk in, empty plan out — never a throw, which would fail the whole run. */
@@ -713,6 +860,11 @@ function main() {
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
   checkEveryActionTypeDescribesItself();
+  checkCanvasDescriptionCarriesSizes();
+  checkHistoryDoesNotEchoTheCurrentPrompt();
+  checkCursorTargetsResolveAgainstThePlan();
+  checkUnresolvableCursorTargetsDoNotMove();
+  checkBuildPaceStaysWatchableAtBothEnds();
   console.log(
     "✅ Design plan validation, palette/shape enforcement, ID resolution, layout spacing, AI status messages, feed selection and run activity verified",
   );

@@ -6,8 +6,11 @@ import {
   type ChatFeedEntry,
 } from "../lib/ai-chat";
 import { parseAiChatRequest } from "../lib/ai-chat-requests";
+import { toPersistedAiActivity } from "../lib/ai-timeline";
 import { renderChatMarkdown } from "../lib/markdown";
 import {
+  AI_USER_ID,
+  AI_USER_NAME,
   MAX_CHAT_CONTENT_LENGTH,
   parseAiChatMessage,
   type AiChatMessage,
@@ -31,16 +34,111 @@ const VALID: AiChatMessage = {
   sentAt: 1_700_000_000_000,
 };
 
+const RUN_MESSAGE = {
+  role: "assistant",
+  senderId: AI_USER_ID,
+  senderName: AI_USER_NAME,
+  content: "",
+  sentAt: 1_700_000_000_000,
+  run: {
+    runId: "run_123",
+    promptMessageId: "chat-prompt",
+    phase: "running",
+    activity: [
+      { type: "reasoning", text: "Inspecting the graph" },
+      { type: "action", text: "addNode", detail: "API" },
+    ],
+  },
+} satisfies AiChatMessage;
+
+const ASSISTANT_MESSAGE: AiChatMessage = {
+  ...RUN_MESSAGE,
+  content: "The graph now includes an API.",
+};
+
+const LEGACY_ASSISTANT_MESSAGE: AiChatMessage = {
+  role: "assistant",
+  senderId: AI_USER_ID,
+  senderName: AI_USER_NAME,
+  content: "The graph now includes an API.",
+  sentAt: 1_700_000_000_000,
+};
+
 function entry(
   id: string,
   createdAt: number,
-  data: unknown = VALID
+  data: unknown = VALID,
+  updatedAt: number = createdAt,
 ): ChatFeedEntry {
-  return { id, createdAt, data };
+  return { id, createdAt, updatedAt, data };
 }
 
 function checkChatMessagesAreValidated() {
   assert.deepEqual(parseAiChatMessage(VALID), VALID, "a valid message survives");
+  assert.deepEqual(
+    parseAiChatMessage(RUN_MESSAGE),
+    RUN_MESSAGE,
+    "a running assistant message can use its work log as content",
+  );
+  assert.equal(
+    parseAiChatMessage({ ...VALID, content: "", run: RUN_MESSAGE.run }),
+    null,
+    "an empty human message is not made valid by run metadata",
+  );
+  assert.equal(
+    parseAiChatMessage({ ...RUN_MESSAGE, content: "  " }),
+    null,
+    "a whitespace-only running message is still unreadable",
+  );
+  assert.deepEqual(
+    parseAiChatMessage({
+      ...VALID,
+      senderAvatar: "https://img.clerk.com/user.jpg",
+    }),
+    { ...VALID, senderAvatar: "https://img.clerk.com/user.jpg" },
+    "a Clerk avatar snapshot survives",
+  );
+  assert.deepEqual(
+    parseAiChatMessage({
+      ...VALID,
+      senderAvatar: "https://example.com/user.jpg",
+    }),
+    VALID,
+    "an untrusted avatar URL is dropped",
+  );
+  assert.deepEqual(
+    parseAiChatMessage({ ...VALID, run: RUN_MESSAGE.run }),
+    VALID,
+    "run metadata on a human message is dropped",
+  );
+
+  for (const [what, run] of [
+    ["an unknown phase", { ...RUN_MESSAGE.run, phase: "pending" }],
+    ["an empty run ID", { ...RUN_MESSAGE.run, runId: "" }],
+    ["an empty prompt message ID", { ...RUN_MESSAGE.run, promptMessageId: "" }],
+    ["malformed activity", { ...RUN_MESSAGE.run, activity: [{ type: "wat" }] }],
+  ] as const) {
+    assert.deepEqual(
+      parseAiChatMessage({ ...ASSISTANT_MESSAGE, run }),
+      LEGACY_ASSISTANT_MESSAGE,
+      `${what} is dropped without hiding legacy assistant content`,
+    );
+  }
+
+  const tooMuchActivity = {
+    ...RUN_MESSAGE.run,
+    activity: Array.from({ length: 201 }, (_, index) => ({
+      type: "step" as const,
+      text: `Step ${index}`,
+    })),
+  };
+
+  assert.equal(
+    parseAiChatMessage({ ...RUN_MESSAGE, run: tooMuchActivity })?.run?.activity
+      .length,
+    200,
+    "durable activity is capped at the shared timeline limit",
+  );
 
   const rejected: [string, unknown][] = [
     ["null", null],
@@ -108,16 +206,33 @@ function checkTranscriptIsOrderedAndFiltered() {
   assert.deepEqual(selectAiChatMessages([]), [], "an empty feed reads as empty");
 
   // Oldest first, regardless of the order the hook handed them over in.
-  const shuffled = [entry("c", 300), entry("a", 100), entry("b", 200)];
+  const shuffled = [
+    entry("c", 300, VALID, 3_003),
+    entry("a", 100, VALID, 1_001),
+    entry("b", 200, VALID, 2_002),
+  ];
 
   assert.deepEqual(
     selectAiChatMessages(shuffled).map((message) => message.id),
     ["a", "b", "c"],
-    "messages are ordered by the server's createdAt"
+    "messages are ordered by the server's createdAt",
+  );
+  assert.deepEqual(
+    selectAiChatMessages(shuffled).map(({ id, sentAt, updatedAt }) => ({
+      id,
+      sentAt,
+      updatedAt,
+    })),
+    [
+      { id: "a", sentAt: VALID.sentAt, updatedAt: 1_001 },
+      { id: "b", sentAt: VALID.sentAt, updatedAt: 2_002 },
+      { id: "c", sentAt: VALID.sentAt, updatedAt: 3_003 },
+    ],
+    "server timestamps are copied without affecting createdAt ordering",
   );
 
   const longHistory = Array.from({ length: 25 }, (_, index) =>
-    entry(`message-${index}`, 25 - index)
+    entry(`message-${index}`, 25 - index),
   );
 
   assert.equal(
@@ -156,6 +271,20 @@ function checkTranscriptIsOrderedAndFiltered() {
   assert.equal(original[0].id, "b", "the caller's array is not sorted in place");
 
   console.log("✅ the transcript is ordered and filtered");
+}
+
+function checkTimelineCanBePersistedWithoutTransientIds() {
+  assert.deepEqual(
+    toPersistedAiActivity([
+      { id: "activity-0", type: "reasoning", text: "Inspecting the graph" },
+      { id: "activity-1", type: "action", text: "addNode", detail: "API" },
+    ]),
+    [
+      { type: "reasoning", text: "Inspecting the graph" },
+      { type: "action", text: "addNode", detail: "API" },
+    ],
+    "persisted activity excludes timeline-only IDs",
+  );
 }
 
 function checkMessageIdsCanAnchorInlineRuns() {
@@ -235,6 +364,7 @@ function checkMarkdownRendersChatFormatting() {
   checkChatMessagesAreValidated();
   checkChatRequestsAreValidated();
 checkTranscriptIsOrderedAndFiltered();
+checkTimelineCanBePersistedWithoutTransientIds();
 checkMessageIdsCanAnchorInlineRuns();
 checkMarkdownCannotInjectHtml();
 checkMarkdownRendersChatFormatting();

@@ -11,10 +11,12 @@ import { parseAiChatMessage, type AiChatMessage } from "@/types/tasks";
 /** A feed message, plus the ID the list needs as a React key. */
 export interface ChatFeedEntry extends FeedEntry {
   id: string;
+  updatedAt: number;
 }
 
 export interface ChatMessage extends AiChatMessage {
   id: string;
+  updatedAt: number;
 }
 
 /**
@@ -47,6 +49,8 @@ export function selectAiChatMessages(
     .flatMap((entry) => {
       const parsed = parseAiChatMessage(entry.data);
 
-      return parsed ? [{ ...parsed, id: entry.id }] : [];
+      return parsed
+        ? [{ ...parsed, id: entry.id, updatedAt: entry.updatedAt }]
+        : [];
     });
 }

@@ -722,3 +722,109 @@ Update this file whenever the current phase, active feature, or implementation s
 - Verified by streaming fake activity into the real components on a throwaway
   route (deleted): scrollTop traced 0→16→46→83→126→148→…→281 and held at the
   bottom — continuous, no jump.
+
+## Layout the model can actually reason about
+
+- The prompt listed default node sizes but never said an x,y is the *top-left*
+  corner, and never mentioned that an edge label renders as a pill centred on
+  the edge midpoint. So a model spacing two nodes by the minimum gap produced a
+  labelled edge whose label was drawn across one of them.
+- `EDGE_LABEL_CLEARANCE` (`types/canvas.ts`, 160x24) is the label's footprint,
+  measured off `CanvasEdgeRenderer`'s own pill styling. The prompt budgets it
+  between any two nodes joined by a labelled edge, on top of `MIN_NODE_GAP`.
+- The auto-placement fallback had the same bug — 260x180 steps left 80 units
+  between columns, less than a label. Now 380x240, asserted in
+  `scripts/verify-design-agent.ts` along with the prompt stating every default
+  size and both clearances.
+- Not done: no edge-aware layout pass. The validator still only pushes nodes
+  down on overlap and knows nothing about the edges the same plan adds, so a
+  long label on a short edge can still collide. A real router (dagre/elk) is the
+  upgrade path if that shows up in practice.
+
+## The composer stayed locked ~30s after the canvas was finished
+
+- Symptom: the agent places every block, the canvas is visibly done, and the
+  chat keeps spinning for another half minute.
+- Root cause is client-side, not the agent. `DesignRunObserver.settleIfReady`
+  required *both* the activity stream's terminal marker *and* `useRealtimeRun`'s
+  `onComplete`, and read the phase off the run record. The run record is the
+  slow one: measured on three consecutive dev runs of 12.1s, 56.4s and 96s, the
+  Trigger.dev run row reached a terminal status 30s, 27s and 28s *after* `run()`
+  returned — a near-constant tail independent of run length, so the wait was the
+  same on a six-action edit as on a thirty-action build.
+- The fast signal was already there and being thrown away: the worker emits
+  `{ type: "terminal", phase }` in its `finally` with the outcome decided, and
+  `handleActivity` discarded `phase` and used the marker only as a flag.
+- Fix: `resolveAiRunPhase` (`lib/ai-run-turns.ts`) makes the marker both the
+  fast path and the authority. The run record stays as the fallback for a run
+  hard-killed before its `finally` — that case has no marker and nothing else to
+  settle on, and a permanently locked composer is the worse failure. The 1.5s
+  grace now only covers a marker being a moment behind the record, which after
+  this measurement is close to impossible in practice.
+- Asserted in `scripts/verify-design-agent.ts`
+  (`checkRunSettlesOnTheStreamMarkerNotTheRunRecord`). Confirmed it fails on the
+  old both-signals gate before it passes on the new one.
+- Not done: `buildCanvas` still `await sleep(stepMs)`s after the *last* action,
+  so 220–900ms of the pacing budget is spent with nothing left to reveal. Small
+  next to the 30s above, and left alone rather than bundled into this fix.
+
+## Collaborator identity in the chat transcript
+
+- A collaborator's prompt now renders with their Clerk profile picture and their
+  name in a row *above* the bubble, not beside it. Every entry in the panel —
+  yours, theirs, the assistant's — shares one left edge (the old `ml-6` indent on
+  human messages is gone), so identity never costs the message its alignment.
+  `ChatAvatar` is a bare 1.75rem circle matching the navbar's `UserButton`, with
+  no presence ring: nothing overlaps it here. Identity is drawn **only for other
+  collaborators** — you already know which messages are yours, so "You" and
+  "Truss" stay `sr-only` and neither carries an avatar.
+- The avatar is **snapshotted onto the message**, not looked up at render time:
+  `app/api/ai/chat/route.ts` writes `senderAvatar: user.imageUrl` alongside the
+  name it already wrote. A presence lookup would have been less code but shows
+  nothing for anyone who has since disconnected, which is most of a transcript.
+- `senderAvatar` is optional on `AiChatMessage` and pinned by
+  `parseAiChatMessage` to `https://img.clerk.com/` — the single host
+  `next.config.ts` allows through the image optimizer. Anything else is dropped
+  and the entry falls back to `getInitials`; the *message* still parses, because
+  a bad picture must never cost a reader the text. Messages written before this
+  field existed parse unchanged. Asserted in `scripts/verify-ai-chat.ts`
+  (`checkSenderAvatarsAreHostPinned`).
+- **Existing transcripts have no snapshot at all** — confirmed by reading the
+  live `ai-chat` feed with the Liveblocks node client: zero messages carried
+  `senderAvatar`, because every one of them predates the field. So the transcript
+  also falls back to **live presence**: `useCollaborators()` is keyed by the same
+  Clerk ID a message is stamped with, so anyone currently in the room gets a face
+  on their old messages too. A sender who has left still reads as initials;
+  backfilling that would mean a Clerk fetch per unknown ID.
+- This is the identity slice of `docs/superpowers/plans/2026-08-09-shared-ai-run-activity.md`
+  only. The durable run snapshot, `arrangeAiChatMessages`, and the extraction of
+  `ChatEntry` into its own file are still open in that plan.
+
+## Persisted run work logs
+
+- A finished run's work log — the model's reasoning summaries and every canvas
+  call it made — is now stored **as JSON on the assistant message that run
+  wrote** (`AiChatRun` on `AiChatMessage.run`). It survives a reload and reaches
+  collaborators who never had the stream open; before this, activity lived only
+  in the initiator's `AiRunTurn` and died with the tab.
+- **Why the message and not Postgres.** The message is already the durable record
+  of the run, already replicated to everyone in the room, and a work log is only
+  ever read back whole with its message. A table earns its place when something
+  needs to query *across* runs; noted in `types/tasks.ts` so the next reader knows
+  it was a choice.
+- The worker records into the same `appendAiActivityTimelinePart` the sidebar
+  builds its live timeline with, so a reload shows what the run showed — reasoning
+  deltas merged into one block, same 200-part ceiling. Recording happens *before*
+  the transport write in `emit`, so a stream that has gone away cannot also cost
+  the run its log. Ids are positional and stripped on the way out
+  (`toStorableActivity`), rebuilt on the way in (`selectAiActivityTimeline`).
+- **An oversized log gives way to the summary, never the reverse.** An oversized
+  feed write fails the *whole* message, so `fitRunToBudget` drops reasoning first
+  (the bulk, the least load-bearing) and then the log entirely, at a 96KB ceiling.
+  Asserted in `scripts/verify-ai-chat.ts`.
+- A user message carrying a `run` is a client claiming a run it never performed;
+  `parseAiChatMessage` only reads the field on assistant messages.
+- The transcript deduplicates: a *settled* local turn whose run is on the feed
+  defers to the persisted copy. Only settled ones — the worker writes the message
+  before it emits the stream's terminal marker, so dropping a live turn there
+  would unmount the observer that settles the run and lock the composer for good.

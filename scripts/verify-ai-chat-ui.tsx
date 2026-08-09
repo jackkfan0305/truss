@@ -11,7 +11,9 @@ import {
   AiRunActivity,
   type AiRunActivityState,
 } from "../components/editor/ai-run-activity";
+import { AiChatTranscript } from "../components/editor/ai-chat-transcript";
 import { ChatEntry } from "../components/editor/chat-entry";
+import type { DesignRunObserverProps } from "../components/editor/design-run-observer";
 import type { ChatMessage } from "../lib/ai-chat";
 
 const collaboratorMessage: ChatMessage = {
@@ -101,8 +103,49 @@ function checkIncompleteRunKeepsItsPartialWork() {
   assert.ok(html.includes("Reading the canvas"), "partial activity remains inspectable");
 }
 
+/**
+ * A successful REST prompt write can be delayed in the Liveblocks feed. The
+ * private Trigger subscription must still mount exactly once so it can settle
+ * and unlock the initiating composer, even with no prompt row to map over.
+ */
+function checkRunObserverDoesNotDependOnVisibleMessages() {
+  function ObserverProbe({ subscription }: DesignRunObserverProps) {
+    return <span data-observed-run={subscription.runId}>observer mounted</span>;
+  }
+
+  const renderTranscript = (messages: ChatMessage[]) =>
+    renderEntry(
+      <AiChatTranscript
+        messages={messages}
+        selfId="user_ada"
+        turns={[]}
+        status={null}
+        isRoomActive={false}
+        emptyState={<p>No messages yet</p>}
+        subscription={{ runId: "run-delayed-feed", token: "token" }}
+        onRunSettled={() => undefined}
+        hasOlderMessages={false}
+        isFetchingOlder={false}
+        onFetchOlder={() => undefined}
+        ObserverComponent={ObserverProbe}
+      />,
+    );
+
+  for (const messages of [[], [collaboratorMessage]]) {
+    const html = renderTranscript(messages);
+    const mounts = html.match(/data-observed-run="run-delayed-feed"/g) ?? [];
+
+    assert.equal(
+      mounts.length,
+      1,
+      "the subscription observer mounts once without its prompt in the transcript",
+    );
+  }
+}
+
 checkCollaboratorIdentityIsVisible();
 checkLegacyCollaboratorUsesInitials();
 checkOwnPromptStaysQuiet();
 checkIncompleteRunKeepsItsPartialWork();
+checkRunObserverDoesNotDependOnVisibleMessages();
 console.log("✅ ai-chat collaborator markup checks passed");

@@ -8,6 +8,7 @@ import {
   resolveAiChatRunPhase,
   selectAiChatMessages,
   shouldShowLocalAiRunActivity,
+  shouldShowRemoteRunStatus,
   type ChatFeedEntry,
   type ChatMessage,
 } from "../lib/ai-chat";
@@ -467,6 +468,69 @@ function checkLocalStartFailuresRemainVisibleBesideDurableRuns() {
   );
 }
 
+/** A visible current run row already carries richer progress than the coarse status. */
+function checkRemoteStatusDoesNotDuplicateVisibleRunProgress() {
+  const running: ChatMessage = {
+    ...RUN_MESSAGE,
+    id: "chat-run_123",
+    updatedAt: 1_000,
+  };
+  const designStatus = {
+    kind: "design" as const,
+    status: "processing" as const,
+    runId: RUN_MESSAGE.run.runId,
+    text: "Designing…",
+  };
+  const input = {
+    isRoomActive: true,
+    hasLocalActiveTurn: false,
+    messages: [running],
+    status: designStatus,
+    now: 2_000,
+  };
+
+  assert.equal(
+    shouldShowRemoteRunStatus(input),
+    false,
+    "matching visible running work suppresses the duplicate collaborator line",
+  );
+  assert.equal(
+    shouldShowRemoteRunStatus({
+      ...input,
+      status: { ...designStatus, runId: "run-other" },
+    }),
+    true,
+    "an unrelated room run keeps its status visible",
+  );
+  assert.equal(
+    shouldShowRemoteRunStatus({ ...input, now: 316_001 }),
+    true,
+    "stale running history does not hide current room status",
+  );
+  assert.equal(
+    shouldShowRemoteRunStatus({
+      ...input,
+      messages: [
+        {
+          ...running,
+          content: "Done.",
+          run: { ...RUN_MESSAGE.run, phase: "complete" },
+        },
+      ],
+    }),
+    true,
+    "terminal history does not hide current room status",
+  );
+  assert.equal(
+    shouldShowRemoteRunStatus({
+      ...input,
+      status: { ...designStatus, kind: "spec" },
+    }),
+    true,
+    "a design work row cannot hide unrelated spec progress",
+  );
+}
+
 interface FakeTimer {
   callback: () => void;
   delay: number;
@@ -668,6 +732,7 @@ async function main() {
   checkTranscriptIsOrderedAndFiltered();
   checkPromptLinkedRunsAreArrangedAndExpire();
   checkLocalStartFailuresRemainVisibleBesideDurableRuns();
+  checkRemoteStatusDoesNotDuplicateVisibleRunProgress();
   checkStaleTimerReevaluatesUntilItSettles();
   checkTimelineCanBePersistedWithoutTransientIds();
   checkMessageIdsCanAnchorInlineRuns();

@@ -44,6 +44,34 @@ Update this file whenever the current phase, active feature, or implementation s
     harness reports `NEEDS_SETUP`, and no two authenticated collaborator
     sessions were supplied. Do not read the automated checks as proof that the
     two-client, reload, console, bottom-follow, or pagination scenario passed.
+  - Final integration review fixes are complete. The design route now reads the
+    installed Liveblocks 3.23 `getFeedMessages({ roomId, feedId })` server API
+    through a narrow injectable boundary and triggers only when the exact
+    `promptMessageId` parses as a user message in the authorized room, belongs
+    to `access.userId`, and exactly matches the normalized request prompt. The
+    worker removes the current prompt ID and `chat-${runId}` by exact ID after
+    `publisher.start()`. The initiating observer mounts once from the
+    subscription even before its prompt is visible, and a matching non-stale
+    durable running row suppresses only its duplicate coarse collaborator line.
+  - Final-review RED evidence was observed before production changes:
+    `verify-design-api` failed with `Cannot find module
+    '../lib/design-run-server'`; `verify-design-agent` failed because
+    `selectDesignChatHistory` was not a function; `verify-ai-chat-ui` rendered
+    zero observer probes where one was required; and `verify-ai-chat` failed
+    because `shouldShowRemoteRunStatus` was not a function.
+  - Final-review GREEN evidence: all five focused verifiers exit 0 with their
+    success lines, including `Design API request parsing and prompt anchor
+    verified`; focused ESLint and `npx tsc --noEmit` exit 0; `npm run build`
+    compiles, type-checks, and generates all 12 static pages. The build retains
+    the pre-existing multiple-lockfile workspace-root warning and Node 26
+    `localStorage` experimental warnings.
+  - Latest changed-scope React Doctor, run with an isolated npm cache, completes
+    at 78/100 with six warnings rather than a clean score. The only reported
+    changed-feature file is the pre-existing `DesignRunObserver` callback that
+    bridges terminal stream state to parent settlement; the other five warnings
+    are unrelated files. No live two-client QA was run, so collaborator growth,
+    reload reconstruction, console, bottom-follow, and pagination remain
+    explicitly unverified.
 - `33-thinking-disclosure` complete. The model's reasoning is now behind a disclosure that is collapsed on every run: the closed row is the status — a spinner and "Thinking" while deltas arrive, a brain icon and "Thought process" once they stop — so a run reads as one line instead of a wall of text pushing the actions out of view. The text renders through `lib/markdown.ts` because the provider writes Markdown; as plain text its headings and lists showed up as literal `**` and `-`. Reasoning also stops arriving in paragraph-sized jumps: deltas are the *target* and `useSmoothText` reveals toward it on the frame clock at a rate proportional to the backlog, so a burst is consumed quickly and a trickle stays gentle without the text ever falling permanently behind. `MARKDOWN_STYLES` moved from `ai-chat-transcript.tsx` to `lib/markdown.ts` — the transcript imports the activity component, so hanging the styles off it would have closed an import cycle.
   - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover the reveal converging rather than stranding its tail, staying monotonic and clamped when a target shrinks, and stopping on word boundaries without letting an unbroken 400-character token land in one jump. Mutations disabling boundary snapping, and rounding the per-frame step down instead of up, each fail their check.
   - Correction worth keeping: the convergence guarantee is the step being rounded *up*, not `MIN_CHARS_PER_FRAME`, which is only a speed knob. The first version of the check credited the floor and passed against a mutation that removed it.

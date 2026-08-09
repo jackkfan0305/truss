@@ -17,7 +17,9 @@ import {
   buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
+  selectDesignChatHistory,
 } from "../lib/design-prompt";
+import type { ChatMessage } from "../lib/ai-chat";
 import {
   appendAiActivityTimelinePart,
   selectAiActivityTimeline,
@@ -32,6 +34,7 @@ import {
   AI_BUILD_BUDGET_MS,
   AI_DESIGN_MODELS,
   AI_THINKING_LEVELS,
+  AI_USER_ID,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
   getBuildStepMs,
@@ -127,42 +130,75 @@ function checkCanvasDescriptionCarriesSizes() {
 }
 
 /**
- * The sidebar writes the prompt to the feed *before* triggering, so the run's
- * own request is normally the last line of the history it reads back.
+ * `publisher.start()` runs before history is read, so the feed already contains
+ * both the current user prompt and an empty `chat-${runId}` assistant row. The
+ * worker must exclude those exact IDs, not guess from content or array tail.
  */
-function checkHistoryDoesNotEchoTheCurrentPrompt() {
-  const messages = [
-    chat("user", "draw a checkout flow"),
-    chat("assistant", "Added 6 nodes.", "AI Architect"),
-    chat("user", "now add a refund path"),
+function checkHistoryExcludesTheCurrentRunByExactIds() {
+  const message = (
+    id: string,
+    role: "user" | "assistant",
+    content: string,
+    senderName = "Ada",
+  ): ChatMessage => ({
+    ...chat(role, content, senderName),
+    id,
+    updatedAt: 1_700_000_000_000,
+  });
+  const prompt = "now add a refund path";
+  const promptMessageId = "chat-current-prompt";
+  const runId = "run_current";
+  const messages: ChatMessage[] = [
+    message("chat-prior-prompt", "user", "draw a checkout flow"),
+    message("chat-prior-run", "assistant", "Added 6 nodes.", "AI Architect"),
+    message(promptMessageId, "user", prompt),
+    {
+      ...message(`chat-${runId}`, "assistant", "", "AI Architect"),
+      senderId: AI_USER_ID,
+      run: {
+        runId,
+        promptMessageId,
+        phase: "running",
+        activity: [],
+      },
+    },
   ];
+  const history = selectDesignChatHistory(messages, promptMessageId, runId);
+  const built = buildDesignPrompt({ context: EMPTY, history, prompt });
 
-  const history = formatChatHistory(messages, "now add a refund path");
+  assert.deepEqual(
+    history.map((item) => item.id),
+    ["chat-prior-prompt", "chat-prior-run"],
+    "only the exact prompt and deterministic current run row are removed",
+  );
+  assert.match(built, /draw a checkout flow/);
+  assert.match(built, /Added 6 nodes\./);
+  assert.equal(
+    built.split(prompt).length - 1,
+    1,
+    "the current prompt appears only in the explicit Request section",
+  );
+  assert.doesNotMatch(
+    built,
+    /AI Architect:\s*(?:\n|$)/,
+    "the deterministic empty assistant row never becomes a history line",
+  );
+  assert.ok(built.trimEnd().endsWith(`Request: ${prompt}`));
 
-  assert.match(history, /draw a checkout flow/);
-  assert.match(history, /Added 6 nodes\./);
-  assert.equal(history.includes("now add a refund path"), false);
-
-  // A first turn has nothing behind it, and an empty section must not add a
-  // stray heading to the prompt.
-  assert.equal(formatChatHistory([chat("user", "hi")], "hi"), "");
-  assert.equal(formatChatHistory([], "hi"), "");
-
-  // Same text asked twice is still one prior turn, not zero.
-  assert.match(
-    formatChatHistory([chat("user", "again"), chat("user", "again")], "again"),
-    /again/
+  // Exact IDs matter when a collaborator repeats the same request. Removing by
+  // content would erase this legitimate earlier turn.
+  const repeated = selectDesignChatHistory(
+    [
+      message("chat-earlier-identical", "user", prompt),
+      message(promptMessageId, "user", prompt),
+      message(`chat-${runId}`, "assistant", "", "AI Architect"),
+    ],
+    promptMessageId,
+    runId,
   );
 
-  // The request is the last thing the model reads.
-  const built = buildDesignPrompt({
-    context: EMPTY,
-    history: messages,
-    prompt: "now add a refund path",
-  });
-
-  assert.ok(built.trimEnd().endsWith("Request: now add a refund path"));
-  assert.match(built, /Conversation so far/);
+  assert.equal(formatChatHistory(repeated).includes(prompt), true);
+  assert.equal(formatChatHistory([]), "");
 }
 
 /**
@@ -1106,7 +1142,7 @@ function main() {
   checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();
   checkCanvasDescriptionCarriesSizes();
-  checkHistoryDoesNotEchoTheCurrentPrompt();
+  checkHistoryExcludesTheCurrentRunByExactIds();
   checkCursorTargetsResolveAgainstThePlan();
   checkUnresolvableCursorTargetsDoNotMove();
   checkBuildPaceStaysWatchableAtBothEnds();

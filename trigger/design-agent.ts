@@ -8,7 +8,7 @@ import {
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
-import { selectAiChatMessages } from "@/lib/ai-chat";
+import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
 import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
 import {
   DESIGN_ACTION_TYPES,
@@ -22,7 +22,11 @@ import {
   type DesignContext,
   type DesignPlan,
 } from "@/lib/design-plan";
-import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
+import {
+  SYSTEM_PROMPT,
+  buildDesignPrompt,
+  selectDesignChatHistory,
+} from "@/lib/design-prompt";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
@@ -42,7 +46,6 @@ import {
   parseAiThinkingLevel,
   type AiActivityPart,
   type AiActivityTerminalPart,
-  type AiChatMessage,
   type AiThinkingLevel,
 } from "@/types/tasks";
 
@@ -344,7 +347,7 @@ export const designAgent = task({
       // against the same room.
       const [context, history] = await Promise.all([
         readCanvas(roomId),
-        readChatHistory(roomId),
+        readChatHistory(roomId, promptMessageId, runId),
       ]);
 
       activity.emit({
@@ -621,14 +624,22 @@ async function readCanvas(roomId: string): Promise<DesignContext> {
  * Never throws. A run that cannot fetch history is a run with less context, not
  * a failed one — the canvas edit is still the work.
  */
-async function readChatHistory(roomId: string): Promise<AiChatMessage[]> {
+async function readChatHistory(
+  roomId: string,
+  promptMessageId: string,
+  runId: string,
+): Promise<ChatMessage[]> {
   try {
     const { data } = await getLiveblocks().getFeedMessages({
       roomId,
       feedId: AI_CHAT_FEED_ID,
     });
 
-    return selectAiChatMessages(data);
+    return selectDesignChatHistory(
+      selectAiChatMessages(data),
+      promptMessageId,
+      runId,
+    );
   } catch (error: unknown) {
     logger.warn("Chat history unavailable; designing without it", {
       roomId,

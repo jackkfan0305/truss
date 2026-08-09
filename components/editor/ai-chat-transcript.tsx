@@ -1,6 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react"
 import { ArrowDown, Loader2 } from "lucide-react"
 
 import {
@@ -8,7 +15,10 @@ import {
   type AiRunActivityState,
 } from "@/components/editor/ai-run-activity"
 import { ChatEntry } from "@/components/editor/chat-entry"
-import { DesignRunObserver } from "@/components/editor/design-run-observer"
+import {
+  DesignRunObserver,
+  type DesignRunObserverProps,
+} from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
 import type {
   DesignRunSettlement,
@@ -20,6 +30,7 @@ import {
   arrangeAiChatMessages,
   resolveAiChatRunPhase,
   shouldShowLocalAiRunActivity,
+  shouldShowRemoteRunStatus,
   type ChatMessage,
 } from "@/lib/ai-chat"
 import { selectAiActivityTimeline } from "@/lib/ai-timeline"
@@ -37,6 +48,7 @@ interface AiChatTranscriptProps {
   hasOlderMessages: boolean
   isFetchingOlder: boolean
   onFetchOlder: () => void
+  ObserverComponent?: ComponentType<DesignRunObserverProps>
 }
 
 const FOLLOW_THRESHOLD_PX = 48
@@ -61,6 +73,7 @@ export function AiChatTranscript({
   hasOlderMessages,
   isFetchingOlder,
   onFetchOlder,
+  ObserverComponent = DesignRunObserver,
 }: AiChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldFollow = useRef(true)
@@ -258,18 +271,27 @@ export function AiChatTranscript({
                   isOwn={message.senderId === selfId}
                   turn={turn}
                   hasPersistedRun={persistedRunPromptIds.has(message.id)}
-                  subscription={subscription}
-                  onRunSettled={onRunSettled}
                 />
               )
             })}
 
-            {isRoomActive && !hasLocalActiveTurn ? (
-              <RemoteRunStatus status={status} />
-            ) : null}
+            <RemoteRunStatus
+              isRoomActive={isRoomActive}
+              hasLocalActiveTurn={hasLocalActiveTurn}
+              messages={messages}
+              status={status}
+            />
           </ol>
         )}
       </div>
+
+      {subscription ? (
+        <ObserverComponent
+          key={subscription.runId}
+          subscription={subscription}
+          onSettled={onRunSettled}
+        />
+      ) : null}
 
       {showJump ? (
         <Button
@@ -292,18 +314,12 @@ function MessageWithRun({
   isOwn,
   turn,
   hasPersistedRun,
-  subscription,
-  onRunSettled,
 }: {
   message: ChatMessage
   isOwn: boolean
   turn?: AiRunTurn
   hasPersistedRun: boolean
-  subscription: RunSubscription | null
-  onRunSettled: (settlement: DesignRunSettlement) => void
 }) {
-  const isObservedRun =
-    Boolean(turn?.runId) && turn?.runId === subscription?.runId
   const showLocalActivity = Boolean(
     turn && shouldShowLocalAiRunActivity(turn, hasPersistedRun)
   )
@@ -319,13 +335,6 @@ function MessageWithRun({
         <li>
           <AiRunActivity state={toAiRunActivityState(turn)} />
         </li>
-      ) : null}
-      {turn && subscription && isObservedRun ? (
-        <DesignRunObserver
-          key={subscription.runId}
-          subscription={subscription}
-          onSettled={onRunSettled}
-        />
       ) : null}
     </>
   )
@@ -375,7 +384,51 @@ function PersistedAiRunActivity({ message }: { message: ChatMessage }) {
 
 
 
-function RemoteRunStatus({ status }: { status: AiStatusMessage | null }) {
+function RemoteRunStatus({
+  isRoomActive,
+  hasLocalActiveTurn,
+  messages,
+  status,
+}: {
+  isRoomActive: boolean
+  hasLocalActiveTurn: boolean
+  messages: ChatMessage[]
+  status: AiStatusMessage | null
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  const matchingUpdatedAt = messages.find(
+    (message) =>
+      status?.kind === "design" &&
+      message.run?.phase === "running" &&
+      message.run.runId === status.runId
+  )?.updatedAt
+
+  useEffect(() => {
+    if (matchingUpdatedAt === undefined) return
+
+    return armAiChatRunStaleTimer(
+      matchingUpdatedAt,
+      {
+        now: () => Date.now(),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (timer) => window.clearTimeout(timer),
+      },
+      () => setNow(Date.now())
+    )
+  }, [matchingUpdatedAt])
+
+  if (
+    !shouldShowRemoteRunStatus({
+      isRoomActive,
+      hasLocalActiveTurn,
+      messages,
+      status,
+      now,
+    })
+  ) {
+    return null
+  }
+
   return (
     <li
       role="status"

@@ -5,6 +5,7 @@ import {
   toBox,
   type DesignContext,
 } from "@/lib/design-plan";
+import type { ChatMessage } from "@/lib/ai-chat";
 import { EDGE_LABEL_CLEARANCE, NODE_DEFAULT_SIZES } from "@/types/canvas";
 import { AI_USER_NAME, type AiChatMessage } from "@/types/tasks";
 
@@ -98,7 +99,7 @@ export function buildDesignPrompt(input: {
 }): string {
   return [
     describeCanvas(input.context),
-    formatChatHistory(input.history, input.prompt),
+    formatChatHistory(input.history),
     `Request: ${input.prompt}`,
   ]
     .filter((section) => section.length > 0)
@@ -140,37 +141,45 @@ export function describeCanvas({ nodes, edges }: DesignContext): string {
 /**
  * Prior turns as a transcript, oldest first.
  *
- * The sidebar writes the user's message to the shared feed *before* triggering
- * the run, so the prompt being answered is normally already the last line on it.
- * It is dropped here rather than repeated: it arrives again as `Request:`, and a
- * model shown the same sentence twice reads the echo as emphasis.
+ * `selectDesignChatHistory` removes the current prompt and deterministic run row
+ * by ID before formatting. Keeping that boundary separate avoids content-based
+ * guesses that would erase a legitimate earlier repeated request.
  *
  * Senders are named because the feed is shared — several collaborators can be
  * asking for different things, and "who wanted that" is part of the context.
  */
-export function formatChatHistory(
-  messages: readonly AiChatMessage[],
-  currentPrompt: string
-): string {
-  const last = messages.at(-1);
-  const prior =
-    last && last.role === "user" && last.content.trim() === currentPrompt.trim()
-      ? messages.slice(0, -1)
-      : messages;
-
-  if (prior.length === 0) {
+export function formatChatHistory(messages: readonly AiChatMessage[]): string {
+  if (messages.length === 0) {
     return "";
   }
 
   return [
     "Conversation so far (oldest first):",
-    ...prior
+    ...messages
       .slice(-MAX_HISTORY_MESSAGES)
       .map(
         (message) =>
           `- ${message.role === "assistant" ? AI_USER_NAME : message.senderName}: ${message.content}`
       ),
   ].join("\n");
+}
+
+/**
+ * Removes the two rows that belong to the run being generated. IDs, not prompt
+ * text or feed position, distinguish the current request from a legitimate
+ * earlier collaborator turn with identical content.
+ */
+export function selectDesignChatHistory(
+  messages: readonly ChatMessage[],
+  promptMessageId: string,
+  runId: string,
+): ChatMessage[] {
+  const runMessageId = `chat-${runId}`;
+
+  return messages.filter(
+    (message) =>
+      message.id !== promptMessageId && message.id !== runMessageId,
+  );
 }
 
 /** Names the gap when the canvas is bigger than what was listed, or nothing. */

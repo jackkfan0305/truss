@@ -15,7 +15,7 @@ import {
 import type { designAgent } from "@/trigger/design-agent"
 import { AI_ACTIVITY_STREAM_ID, isAiActivityTerminalPart } from "@/types/tasks"
 
-interface DesignRunObserverProps {
+export interface DesignRunObserverProps {
   subscription: RunSubscription
   onSettled: (settlement: DesignRunSettlement) => void
 }

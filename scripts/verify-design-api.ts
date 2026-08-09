@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 
+import { startVerifiedDesignRun } from "../lib/design-run-server";
 import { parseDesignRequest, parseRunId } from "../lib/design-requests";
 import {
+  AI_CHAT_FEED_ID,
   AI_DESIGN_MODELS,
+  AI_USER_ID,
+  AI_USER_NAME,
   AI_THINKING_LEVELS,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
+  type AiChatMessage,
 } from "../types/tasks";
 
 const valid = {
@@ -147,7 +152,139 @@ function checkRunIdParsing() {
   }
 }
 
-checkDesignRequestParsing();
-checkRunIdParsing();
+interface PromptAnchorCase {
+  name: string;
+  messages: Array<{
+    id: string;
+    createdAt: number;
+    updatedAt: number;
+    data: unknown;
+  }>;
+  shouldTrigger: boolean;
+}
 
-console.log("✅ Design API request parsing verified");
+/**
+ * The prompt ID becomes trusted worker-authored run metadata, so the route-side
+ * helper must prove the exact authenticated human message before spending a
+ * Trigger run. Every denied fixture also asserts that the trigger callback was
+ * never reached.
+ */
+async function checkPromptAnchorBeforeTriggering() {
+  const promptMessage: AiChatMessage = {
+    role: "user",
+    senderId: "user_ada",
+    senderName: "Ada Lovelace",
+    content: valid.prompt,
+    sentAt: 1_700_000_000_000,
+  };
+  const assistantMessage: AiChatMessage = {
+    role: "assistant",
+    senderId: AI_USER_ID,
+    senderName: AI_USER_NAME,
+    content: "I updated the canvas.",
+    sentAt: 1_700_000_000_001,
+  };
+  const runMessage: AiChatMessage = {
+    ...assistantMessage,
+    content: "",
+    run: {
+      runId: "run_existing",
+      promptMessageId: valid.promptMessageId,
+      phase: "running",
+      activity: [],
+    },
+  };
+  const feedEntry = (id: string, data: unknown) => ({
+    id,
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    data,
+  });
+  const cases: PromptAnchorCase[] = [
+    {
+      name: "the authenticated user's exact normalized prompt",
+      messages: [feedEntry(valid.promptMessageId, promptMessage)],
+      shouldTrigger: true,
+    },
+    {
+      name: "an invented message ID",
+      messages: [feedEntry("chat-somewhere-else", promptMessage)],
+      shouldTrigger: false,
+    },
+    {
+      name: "a legacy assistant row",
+      messages: [feedEntry(valid.promptMessageId, assistantMessage)],
+      shouldTrigger: false,
+    },
+    {
+      name: "an assistant run row",
+      messages: [feedEntry(valid.promptMessageId, runMessage)],
+      shouldTrigger: false,
+    },
+    {
+      name: "another collaborator's prompt",
+      messages: [
+        feedEntry(valid.promptMessageId, {
+          ...promptMessage,
+          senderId: "user_grace",
+        }),
+      ],
+      shouldTrigger: false,
+    },
+    {
+      name: "a prompt whose content differs",
+      messages: [
+        feedEntry(valid.promptMessageId, {
+          ...promptMessage,
+          content: "Design a different system",
+        }),
+      ],
+      shouldTrigger: false,
+    },
+  ];
+
+  for (const testCase of cases) {
+    let triggerCount = 0;
+    const reads: Array<{ roomId: string; feedId: string }> = [];
+    const result = await startVerifiedDesignRun(
+      parsedValid,
+      "user_ada",
+      {
+        readFeedMessages: async (params) => {
+          reads.push(params);
+          return { data: testCase.messages };
+        },
+        trigger: async () => {
+          triggerCount += 1;
+          return { id: "run_verified" };
+        },
+      },
+    );
+
+    assert.deepEqual(
+      reads,
+      [{ roomId: valid.roomId, feedId: AI_CHAT_FEED_ID }],
+      `${testCase.name}: reads only the authorized room feed`,
+    );
+    assert.equal(
+      triggerCount,
+      testCase.shouldTrigger ? 1 : 0,
+      `${testCase.name}: trigger boundary`,
+    );
+    assert.equal(
+      result,
+      testCase.shouldTrigger ? "run_verified" : null,
+      `${testCase.name}: result`,
+    );
+  }
+}
+
+async function main() {
+  checkDesignRequestParsing();
+  checkRunIdParsing();
+  await checkPromptAnchorBeforeTriggering();
+
+  console.log("✅ Design API request parsing and prompt anchor verified");
+}
+
+void main();

@@ -3,6 +3,7 @@ import {
   parseAiChatMessage,
   type AiChatMessage,
   type AiChatRunPhase,
+  type AiStatusMessage,
 } from "@/types/tasks";
 
 /**
@@ -105,6 +106,40 @@ export function shouldShowLocalAiRunActivity(
   return (
     !hasPersistedRun || (turn.phase === "error" && turn.runId === null)
   );
+}
+
+interface RemoteRunStatusInput {
+  isRoomActive: boolean;
+  hasLocalActiveTurn: boolean;
+  messages: readonly ChatMessage[];
+  status: AiStatusMessage | null;
+  now: number;
+}
+
+/** Avoids repeating a coarse status when the matching durable run is visible. */
+export function shouldShowRemoteRunStatus({
+  isRoomActive,
+  hasLocalActiveTurn,
+  messages,
+  status,
+  now,
+}: RemoteRunStatusInput): boolean {
+  if (!isRoomActive || hasLocalActiveTurn) {
+    return false;
+  }
+
+  if (!status || status.kind !== "design") {
+    return true;
+  }
+
+  const hasMatchingVisibleRun = messages.some(
+    (message) =>
+      message.run?.runId === status.runId &&
+      resolveAiChatRunPhase(message.run.phase, message.updatedAt, now) ===
+        "running",
+  );
+
+  return !hasMatchingVisibleRun;
 }
 
 /**

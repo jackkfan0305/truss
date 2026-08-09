@@ -74,9 +74,14 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 
-  // This room only. Owner and collaborator both edit; read-only sharing is not
-  // part of the access model in architecture-context.md.
-  session.allow(roomId, session.FULL_ACCESS);
+  // Humans can edit room state but only read feeds. Chat/status identities are
+  // authored by authenticated server routes and workers.
+  session.allow(roomId, [
+    "room:write",
+    "storage:write",
+    "comments:write",
+    "feeds:read",
+  ]);
 
   const { status, body } = await session.authorize();
 

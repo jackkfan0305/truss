@@ -947,17 +947,94 @@ function checkRunTurnsRemainAnchoredForTheSession() {
 }
 
 /** The worker must tee live activity into the deterministic assistant message. */
+function assertWorkerPersistsLiveActivity(source: string): void {
+  const publisherOptions = extractPublisherOptions(source);
+
+  assert.match(publisherOptions, /\broomId\s*(?:,|:)/);
+  assert.match(publisherOptions, /\brunId\s*(?:,|:)/);
+  assert.match(publisherOptions, /\bpromptMessageId\s*(?:,|:|$)/);
+  assert.match(
+    source,
+    /openActivityStream\(\s*publisher\.emit\s*\)/,
+    "the run publisher receives every stream activity emission"
+  );
+
+  const activityStream = extractFunction(source, "openActivityStream");
+  assert.match(
+    activityStream,
+    /if\s*\(\s*part\.type\s*!==\s*["']terminal["']\s*\)\s*{\s*onActivity\(part\);\s*}/,
+    "only non-terminal activity parts reach the durable publisher"
+  );
+  assert.equal(
+    activityStream.match(/onActivity\(part\)/g)?.length,
+    1,
+    "the durable publisher has one guarded activity callback"
+  );
+
+  assert.doesNotMatch(source, /publishAiChatSummary\(/);
+  assert.match(source, /finish\("complete"/);
+  assert.match(source, /finish\("error"/);
+}
+
+function extractPublisherOptions(source: string): string {
+  const publisher = source.match(
+    /const\s+publisher\s*=\s*createAiRunChatPublisher\(\s*{([\s\S]*?)}\s*\);/
+  );
+
+  if (publisher === null) {
+    assert.fail("the worker must construct a named run publisher");
+  }
+
+  return publisher[1];
+}
+
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+
+  if (start === -1) {
+    assert.fail(`could not find ${name}`);
+  }
+
+  const openingBrace = source.indexOf("{", start);
+
+  if (openingBrace === -1) {
+    assert.fail(`${name} has no function body`);
+  }
+
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  assert.fail(`${name} has an unclosed function body`);
+}
+
 function checkWorkerPersistsLiveActivity(): void {
   const source = readFileSync(
     new URL("../trigger/design-agent.ts", import.meta.url),
     "utf8"
   );
+  const insufficientSource = `
+    const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
+    const activity = openActivityStream(() => undefined);
+    function openActivityStream(onActivity: (part: AiActivityPart) => void) {
+      onActivity(part);
+    }
+    await publisher.finish("complete", "Done.");
+    await publisher.finish("error", "Failed.");
+  `;
 
-  assert.match(source, /createAiRunChatPublisher/);
-  assert.match(source, /promptMessageId/);
-  assert.doesNotMatch(source, /publishAiChatSummary\(/);
-  assert.match(source, /finish\("complete"/);
-  assert.match(source, /finish\("error"/);
+  assertWorkerPersistsLiveActivity(source);
+  assert.throws(() => assertWorkerPersistsLiveActivity(insufficientSource));
 }
 
 /**

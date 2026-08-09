@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { UserButton } from "@clerk/nextjs"
 import { Plus } from "lucide-react"
 
 import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
@@ -26,6 +27,8 @@ interface EditorShellProps {
   activeProject?: ProjectAccess
 }
 
+type OpenSidebar = "projects" | "ai" | null
+
 /**
  * Owns the sidebar open/close state for the editor workspace and the project
  * dialog state. The chrome components stay presentational — see the
@@ -36,11 +39,12 @@ export function EditorShell({
   sharedProjects,
   activeProject,
 }: EditorShellProps) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false)
+  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(null)
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
+  const isSidebarOpen = openSidebar === "projects"
+  const isAiSidebarOpen = openSidebar === "ai"
 
   return (
     // No-op without an active project, so the editor home never joins a room.
@@ -50,35 +54,37 @@ export function EditorShell({
         navbar but is driven from inside the canvas (21-canvas-autosave).
       */}
       <CanvasSaveProvider>
-        <div className="flex flex-1 flex-col">
-        <EditorNavbar
-          isSidebarOpen={isSidebarOpen}
-          onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
-          projectName={activeProject?.name}
-          onShare={activeProject ? () => setIsShareOpen(true) : undefined}
-          onOpenTemplates={
-            activeProject ? () => setIsTemplatesOpen(true) : undefined
-          }
-          isAiSidebarOpen={isAiSidebarOpen}
-          onToggleAiSidebar={
-            activeProject
-              ? () => setIsAiSidebarOpen((open) => !open)
-              : undefined
-          }
-          // Room-scoped, so it is only mounted where a room exists — the editor
-          // home renders the navbar without it, exactly as before.
-          presence={activeProject ? <PresenceAvatars /> : undefined}
-          saveStatus={activeProject ? <SaveStatusButton /> : undefined}
-        />
-
-        {/*
-          `relative` scopes ProjectSidebar's absolute overlay to the work area,
-          so opening it slides over the canvas instead of reflowing it.
-        */}
         <div className="relative flex flex-1 overflow-hidden">
+          <EditorNavbar
+            isSidebarOpen={isSidebarOpen}
+            onToggleSidebar={() =>
+              setOpenSidebar((current) =>
+                current === "projects" ? null : "projects"
+              )
+            }
+            projectName={activeProject?.name}
+            onShare={activeProject ? () => setIsShareOpen(true) : undefined}
+            onOpenTemplates={
+              activeProject ? () => setIsTemplatesOpen(true) : undefined
+            }
+            isAiSidebarOpen={isAiSidebarOpen}
+            onToggleAiSidebar={
+              activeProject
+                ? () =>
+                    setOpenSidebar((current) =>
+                      current === "ai" ? null : "ai"
+                    )
+                : undefined
+            }
+            // Room-scoped, so it is only mounted where a room exists — the editor
+            // home renders the navbar without it, exactly as before.
+            presence={activeProject ? <PresenceAvatars /> : undefined}
+            saveStatus={activeProject ? <SaveStatusButton /> : undefined}
+            profile={<UserButton />}
+          />
+
           <ProjectSidebar
             isOpen={isSidebarOpen}
-            onClose={() => setIsSidebarOpen(false)}
             ownedProjects={ownedProjects}
             sharedProjects={sharedProjects}
             onCreateProject={actions.openCreate}
@@ -89,14 +95,12 @@ export function EditorShell({
 
           {/*
             Small screens only: the sidebar covers most of the viewport there,
-            so it needs a scrim and a tap-out. On desktop it sits beside the
-            canvas and stays open while you work.
+            so it needs a scrim. The floating toggle remains the only close
+            control; on desktop the panel sits beside the canvas.
           */}
           {isSidebarOpen ? (
-            <button
-              type="button"
-              aria-label="Close projects sidebar"
-              onClick={() => setIsSidebarOpen(false)}
+            <div
+              aria-hidden="true"
               className="absolute inset-0 z-30 bg-black/60 md:hidden"
             />
           ) : null}
@@ -112,10 +116,7 @@ export function EditorShell({
                 />
               </main>
 
-              <AiSidebar
-                isOpen={isAiSidebarOpen}
-                onClose={() => setIsAiSidebarOpen(false)}
-              />
+              <AiSidebar isOpen={isAiSidebarOpen} />
             </>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">
@@ -134,17 +135,15 @@ export function EditorShell({
               </div>
             </main>
           )}
-        </div>
+          <ProjectDialogs actions={actions} />
 
-        <ProjectDialogs actions={actions} />
-
-        {activeProject ? (
-          <ShareDialog
-            project={activeProject}
-            open={isShareOpen}
-            onOpenChange={setIsShareOpen}
-          />
-        ) : null}
+          {activeProject ? (
+            <ShareDialog
+              project={activeProject}
+              open={isShareOpen}
+              onOpenChange={setIsShareOpen}
+            />
+          ) : null}
         </div>
       </CanvasSaveProvider>
     </CanvasRoom>

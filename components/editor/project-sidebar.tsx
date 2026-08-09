@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { FolderOpen, Pencil, Plus, Trash2, Users, X } from "lucide-react"
+import { FolderOpen, Pencil, Plus, Trash2, Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -10,7 +10,6 @@ import type { ProjectSummary } from "@/types/project"
 
 interface ProjectSidebarProps {
   isOpen: boolean
-  onClose: () => void
   ownedProjects: ProjectSummary[]
   sharedProjects: ProjectSummary[]
   onCreateProject: () => void
@@ -23,7 +22,6 @@ interface ProjectSidebarProps {
 
 export function ProjectSidebar({
   isOpen,
-  onClose,
   ownedProjects,
   sharedProjects,
   onCreateProject,
@@ -33,33 +31,22 @@ export function ProjectSidebar({
   className,
 }: ProjectSidebarProps) {
   return (
-    // Overlay, not a flex child — opening it must not reflow the canvas. Inset
-    // on all four sides rather than docked flush, so the canvas stays visible
-    // around it and it reads as a panel floating over the workspace.
+    // Overlay, not a flex child — opening it must not reflow the canvas.
     <aside
+      id="projects-sidebar"
       aria-label="Projects"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-3 left-3 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 rounded-2xl border border-surface-border bg-surface/80 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
-        // Closed, it clears its own inset *and* its shadow — `-translate-x-full`
-        // alone would leave both bleeding down the left edge.
+        "absolute inset-y-0 left-0 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-surface/80 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
         isOpen ? "translate-x-0" : "-translate-x-[calc(100%+2rem)]",
         className
       )}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex h-9 shrink-0 items-center pr-10">
         <h2 className="text-sm font-medium text-copy-primary">Projects</h2>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          aria-label="Close projects sidebar"
-        >
-          <X className="h-4 w-4 text-copy-muted" />
-        </Button>
       </div>
 
-      <Tabs defaultValue="mine" className="min-h-0 flex-1">
+      <Tabs defaultValue="mine" className="min-h-0 flex-1 max-sm:pt-8">
         <TabsList className="w-full">
           <TabsTrigger value="mine">My Projects</TabsTrigger>
           <TabsTrigger value="shared">Shared</TabsTrigger>

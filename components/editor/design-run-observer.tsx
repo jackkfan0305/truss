@@ -9,7 +9,7 @@ import type {
   DesignRunSettlement,
   RunSubscription,
 } from "@/hooks/use-design-run"
-import type { AiRunTurn } from "@/lib/ai-run-turns"
+import { resolveAiRunPhase, type AiRunTurn } from "@/lib/ai-run-turns"
 import {
   appendAiActivityTimelinePart,
   type AiTimelinePart,
@@ -28,11 +28,6 @@ interface DesignRunObserverProps {
   onSettled: (settlement: DesignRunSettlement) => void
 }
 
-interface CompletedRun {
-  run: RealtimeRun<typeof designAgent>
-  error?: Error
-}
-
 const TERMINAL_GRACE_MS = 1_500
 
 /** One keyed observer with a locally controlled, lossless activity accumulator. */
@@ -45,20 +40,24 @@ export function DesignRunObserver({
   const [activity, setActivity] = useState<AiTimelinePart[]>([])
   const activityRef = useRef<AiTimelinePart[]>([])
   const sourceIndexRef = useRef(0)
-  const receivedTerminalRef = useRef(false)
-  const completedRunRef = useRef<CompletedRun | null>(null)
+  const terminalPhaseRef = useRef<"complete" | "error" | null>(null)
+  const runOutcomeRef = useRef<"complete" | "error" | null>(null)
+  const didGraceElapseRef = useRef(false)
   const didSettleRef = useRef(false)
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const settleIfReady = useCallback(() => {
-    const completed = completedRunRef.current
+    if (didSettleRef.current) {
+      return
+    }
 
-    if (
-      didSettleRef.current ||
-      !receivedTerminalRef.current ||
-      !completed ||
-      completed.run.id !== subscription.runId
-    ) {
+    const phase = resolveAiRunPhase({
+      terminalPhase: terminalPhaseRef.current,
+      runOutcome: runOutcomeRef.current,
+      didGraceElapse: didGraceElapseRef.current,
+    })
+
+    if (!phase) {
       return
     }
 
@@ -67,12 +66,13 @@ export function DesignRunObserver({
       clearTimeout(fallbackTimerRef.current)
       fallbackTimerRef.current = null
     }
-    const didFail =
-      Boolean(completed.error) || completed.run.status !== "COMPLETED"
 
     onSettled({
-      runId: completed.run.id,
-      phase: didFail ? "error" : "complete",
+      // The observer is keyed by run id, so its subscription is the only run it
+      // can be describing — including on the terminal-marker path, which settles
+      // before there is a run record to read an id off.
+      runId: subscription.runId,
+      phase,
       activity: activityRef.current,
     })
   }, [onSettled, subscription.runId])
@@ -80,7 +80,7 @@ export function DesignRunObserver({
   const handleActivity = useCallback(
     (rawPart: unknown) => {
       if (isAiActivityTerminalPart(rawPart)) {
-        receivedTerminalRef.current = true
+        terminalPhaseRef.current = rawPart.phase
         settleIfReady()
         return
       }
@@ -100,21 +100,28 @@ export function DesignRunObserver({
 
   const handleComplete = useCallback(
     (run: RealtimeRun<typeof designAgent>, runError?: Error) => {
-      completedRunRef.current = { run, error: runError }
-      settleIfReady()
+      if (run.id !== subscription.runId) {
+        return
+      }
 
-      // Normally the worker closes the activity stream before the run becomes
-      // terminal. Transport failure or a hard kill can omit that marker, so a
-      // short grace period prevents a permanently locked composer without
-      // truncating a healthy stream's final tail.
-      if (!receivedTerminalRef.current && !didSettleRef.current) {
+      runOutcomeRef.current =
+        runError || run.status !== "COMPLETED" ? "error" : "complete"
+
+      // A healthy run settles off its terminal marker long before this fires —
+      // the run record lags the worker by ~30s. So reaching here without a
+      // marker means the run died without running its `finally`, and the grace
+      // period only guards against the marker being a moment behind.
+      if (!didSettleRef.current && fallbackTimerRef.current === null) {
         fallbackTimerRef.current = setTimeout(() => {
-          receivedTerminalRef.current = true
+          fallbackTimerRef.current = null
+          didGraceElapseRef.current = true
           settleIfReady()
         }, TERMINAL_GRACE_MS)
       }
+
+      settleIfReady()
     },
-    [settleIfReady]
+    [settleIfReady, subscription.runId]
   )
 
   // `onData` is the authoritative accumulator. The installed hook's `parts`
@@ -136,9 +143,12 @@ export function DesignRunObserver({
     onComplete: handleComplete,
   })
 
+  // A dead stream will never deliver a terminal marker, so waiting out the
+  // grace period for one is pointless — hand the run record the decision the
+  // moment it arrives (or immediately, if it already has).
   useEffect(() => {
     if (activityError) {
-      receivedTerminalRef.current = true
+      didGraceElapseRef.current = true
       settleIfReady()
     }
   }, [activityError, settleIfReady])

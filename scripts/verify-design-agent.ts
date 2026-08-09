@@ -12,6 +12,7 @@ import {
   type DesignContext,
 } from "../lib/design-plan";
 import {
+  SYSTEM_PROMPT,
   buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
@@ -22,6 +23,7 @@ import {
 } from "../lib/ai-timeline";
 import {
   reduceAiRunTurns,
+  resolveAiRunPhase,
   type AiRunTurn,
 } from "../lib/ai-run-turns";
 import { selectLatestAiStatus } from "../lib/ai-status";
@@ -45,7 +47,9 @@ import {
   CANVAS_NODE_TYPE,
   DEFAULT_NODE_COLOR,
   DEFAULT_NODE_SHAPE,
+  EDGE_LABEL_CLEARANCE,
   NODE_COLORS,
+  NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
   type CanvasEdge,
@@ -547,6 +551,52 @@ function checkGeneratedNodesNeverOverlap() {
   }
 }
 
+/**
+ * An edge label is centred between the two nodes it connects, so the fallback
+ * layout has to leave it somewhere to sit — otherwise the label is drawn across
+ * a node and hides the thing it describes.
+ */
+function checkAutoLayoutLeavesRoomForEdgeLabels() {
+  const plan = parseDesignPlan(
+    { actions: Array.from({ length: 8 }, () => ({ type: "addNode" })) },
+    EMPTY
+  );
+  const boxes = addedNodes(plan.actions).map((added) => ({
+    x: added.position.x,
+    y: added.position.y,
+    width: added.width ?? 0,
+    height: added.height ?? 0,
+  }));
+
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const fits =
+        a.x + a.width + EDGE_LABEL_CLEARANCE.width <= b.x ||
+        b.x + b.width + EDGE_LABEL_CLEARANCE.width <= a.x ||
+        a.y + a.height + EDGE_LABEL_CLEARANCE.height <= b.y ||
+        b.y + b.height + EDGE_LABEL_CLEARANCE.height <= a.y;
+
+      assert.ok(fits, `no room for an edge label between nodes ${i} and ${j}`);
+    }
+  }
+}
+
+/** The model cannot avoid an overlap it was never told the dimensions of. */
+function checkPromptStatesSizesAndLabelClearance() {
+  for (const [shape, size] of Object.entries(NODE_DEFAULT_SIZES)) {
+    assert.ok(
+      SYSTEM_PROMPT.includes(`${shape} ${size.width}x${size.height}`),
+      `the prompt states the default size for ${shape}`
+    );
+  }
+
+  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.width)));
+  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.height)));
+  assert.ok(SYSTEM_PROMPT.includes(String(MIN_NODE_GAP)));
+}
+
 /** One response can only ever spend one bounded write on the canvas. */
 function checkActionCountIsCapped() {
   const plan = parseDesignPlan(
@@ -897,6 +947,66 @@ function checkRunTurnsRemainAnchoredForTheSession() {
 }
 
 /**
+ * A finished run releases the composer on the stream's terminal marker alone.
+ *
+ * The regression this guards is invisible in types and silent in the UI: the run
+ * record reaches a terminal status ~30s after the worker returns, so a gate that
+ * also required it left the composer spinning for half a minute after the last
+ * node had landed on the canvas.
+ */
+function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
+  assert.equal(
+    resolveAiRunPhase({
+      terminalPhase: "complete",
+      runOutcome: null,
+      didGraceElapse: false,
+    }),
+    "complete",
+    "the terminal marker settles a run without waiting for the run record",
+  );
+
+  assert.equal(
+    resolveAiRunPhase({
+      terminalPhase: "error",
+      runOutcome: "complete",
+      didGraceElapse: true,
+    }),
+    "error",
+    "the worker's own outcome wins over the run record",
+  );
+
+  assert.equal(
+    resolveAiRunPhase({
+      terminalPhase: null,
+      runOutcome: null,
+      didGraceElapse: false,
+    }),
+    null,
+    "a run with neither signal keeps streaming",
+  );
+
+  assert.equal(
+    resolveAiRunPhase({
+      terminalPhase: null,
+      runOutcome: "complete",
+      didGraceElapse: false,
+    }),
+    null,
+    "a healthy stream's final tail is not truncated by the run record",
+  );
+
+  assert.equal(
+    resolveAiRunPhase({
+      terminalPhase: null,
+      runOutcome: "error",
+      didGraceElapse: true,
+    }),
+    "error",
+    "a run killed before its finally still releases the composer",
+  );
+}
+
+/**
  * Every action type describes itself. A `default` branch means a new action type
  * silently renders as its raw ID, which reads as a bug in the agent rather than
  * a gap in this function — so all seven are asserted.
@@ -951,6 +1061,8 @@ function main() {
   checkDeletingANodeDeletesItsEdges();
   checkEdgesCanBeDeletedByEndpoints();
   checkGeneratedNodesNeverOverlap();
+  checkAutoLayoutLeavesRoomForEdgeLabels();
+  checkPromptStatesSizesAndLabelClearance();
   checkActionCountIsCapped();
   checkStatusMessagesAreValidated();
   checkLatestStatusIsSelectedFromTheFeed();
@@ -960,6 +1072,7 @@ function main() {
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
+  checkRunSettlesOnTheStreamMarkerNotTheRunRecord();
   checkEveryActionTypeDescribesItself();
   checkCanvasDescriptionCarriesSizes();
   checkHistoryDoesNotEchoTheCurrentPrompt();

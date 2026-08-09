@@ -53,3 +53,5 @@ next-env.d.ts
 /.claude/skills/*
 !/.agents/skills/react-doctor/
 !/.claude/skills/react-doctor/
+
+.trigger

@@ -12,6 +12,7 @@
     "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.39",
     "@base-ui/react": "^1.6.0",
     "@clerk/nextjs": "^7.6.1",
     "@clerk/ui": "^1.26.0",
@@ -22,22 +23,28 @@
     "@liveblocks/react-ui": "^3.23.0",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "@trigger.dev/react-hooks": "^4.5.10",
+    "@trigger.dev/sdk": "^4.5.10",
     "@vercel/blob": "^2.6.1",
     "@xyflow/react": "^12.11.2",
+    "ai": "^7.0.58",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "lucide-react": "^1.27.0",
+    "markdown-it": "^15.0.0",
     "next": "16.2.12",
     "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "shadcn": "^4.15.0",
     "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@trigger.dev/build": "^4.5.10",
     "@types/node": "^20.19.43",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",

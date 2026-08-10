@@ -110,7 +110,10 @@ function checkIncompleteRunKeepsItsPartialWork() {
     id: "chat-run",
     runId: "run-123",
     phase: "incomplete",
-    activity: [{ id: "activity-0", type: "step", text: "Reading the canvas" }],
+    activity: [
+      { id: "activity-0", type: "step", text: "Reading the canvas" },
+      { id: "activity-1", type: "action", text: "addNode", detail: "Add Cache" },
+    ],
   };
   const html = renderEntry(<AiRunActivity state={incomplete} />);
 
@@ -118,7 +121,88 @@ function checkIncompleteRunKeepsItsPartialWork() {
     html.includes("Work stopped before completion"),
     "an incomplete run states that it stopped",
   );
-  assert.ok(html.includes("Reading the canvas"), "partial activity remains inspectable");
+  assert.ok(
+    html.includes("Add Cache"),
+    "the canvas work a stopped run did manage remains inspectable",
+  );
+
+  // Steps are the live line above the composer now (38-live-step-status).
+  // Listing them here too would print the same verbs twice, and they are the
+  // least useful part of a log read after the fact.
+  assert.equal(
+    html.includes("Reading the canvas"),
+    false,
+    "step verbs are status, not ledger, and do not appear in the work log",
+  );
+}
+
+/**
+ * Only the newest part of a live run may claim to be in progress.
+ *
+ * Every reasoning disclosure used to decide this from the run phase alone, so a
+ * run that thought four times showed four spinners all saying "Thinking" —
+ * three of them finished minutes earlier. The regression is invisible in a
+ * static diff and obvious to anyone watching the panel.
+ */
+function checkOnlyTheNewestThoughtIsStillThinking() {
+  const running: AiRunActivityState = {
+    id: "chat-run",
+    runId: "run-123",
+    phase: "running",
+    activity: [
+      { id: "activity-0", type: "reasoning", text: "First thought" },
+      { id: "activity-1", type: "reasoning", text: "Second thought" },
+    ],
+  };
+  const html = renderEntry(<AiRunActivity state={running} />);
+
+  assert.equal(
+    html.match(/Thinking/g)?.length,
+    1,
+    "exactly one part of a live run is thinking",
+  );
+  assert.equal(
+    html.match(/Thought process/g)?.length,
+    1,
+    "and the one before it has settled",
+  );
+
+  // A step arriving after a thought settles it, even though the step itself is
+  // not rendered — which is why the streaming part is chosen against the
+  // unfiltered activity rather than the list on screen.
+  const afterStep = renderEntry(
+    <AiRunActivity
+      state={{
+        ...running,
+        activity: [
+          { id: "activity-0", type: "reasoning", text: "First thought" },
+          { id: "activity-1", type: "step", text: "Applying to the canvas" },
+        ],
+      }}
+    />,
+  );
+
+  assert.equal(
+    afterStep.includes("Thinking"),
+    false,
+    "a thought the model has moved on from is not still thinking",
+  );
+}
+
+/** A turn that only answered has nothing to show once steps are out of the log. */
+function checkACompletedTurnWithNoWorkRendersNothing() {
+  const answered: AiRunActivityState = {
+    id: "chat-run",
+    runId: "run-123",
+    phase: "complete",
+    activity: [{ id: "activity-0", type: "step", text: "Reading the canvas" }],
+  };
+
+  assert.equal(
+    renderEntry(<AiRunActivity state={answered} />),
+    "",
+    "an empty work log renders no disclosure rather than an empty one",
+  );
 }
 
 /**
@@ -203,6 +287,11 @@ function checkSpecCopyFailureExposesSelectableMarkdown() {
     "the fallback explains the manual action",
   );
   assert.ok(html.includes("<textarea"), "the fallback exposes a selectable control");
+  assert.equal(
+    html.includes("autofocus"),
+    false,
+    "the fallback does not steal focus when the clipboard request fails",
+  );
   assert.ok(
     html.includes("# Queue\n\nRetry failed jobs with backoff."),
     "the selectable control contains the exact Markdown source",
@@ -261,6 +350,8 @@ checkLegacyCollaboratorUsesInitials();
 checkLegacyCollaboratorUsesLivePresenceAvatar();
 checkOwnPromptStaysQuiet();
 checkIncompleteRunKeepsItsPartialWork();
+checkOnlyTheNewestThoughtIsStillThinking();
+checkACompletedTurnWithNoWorkRendersNothing();
 checkRunObserverDoesNotDependOnVisibleMessages();
 checkSpecPreviewCopiesMarkdownSource();
 checkSpecCopyFailureExposesSelectableMarkdown();

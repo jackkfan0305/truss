@@ -53,10 +53,10 @@ export const FALLBACK_CLOSING = "Done.";
 /**
  * Runs model calls until one returns no tool call, or the cap is reached.
  *
- * Tools are executed here rather than inside the model call because
- * `triggerAndWait` checkpoints the run — see `trigger/orchestrator.ts`. Each
- * call's result is appended as a tool message and the loop goes round again, so
- * the model reads what happened before it writes the closing message.
+ * Tools are executed here rather than by the SDK because their writes must stay
+ * sequential. Each call's result is appended as a tool message and the loop
+ * goes round again, so the model reads what happened before it writes the
+ * closing message.
  *
  * `messages` is mutated in place by design: the caller owns the transcript for
  * the turn and there is exactly one loop over it, so copying the array on every
@@ -165,6 +165,48 @@ export function describeSpecOutcome(
   }
 
   return { ok: true, fileName: result.output.fileName };
+}
+
+/**
+ * Reuses the room snapshot already paid for by the router once, then refreshes
+ * before every later tool. Tool execution is deliberately sequential, so this
+ * small closure is enough to prevent a second design or following spec from
+ * seeing the canvas as it existed before the first tool wrote to it.
+ */
+export function createSequentialReadsProvider<T>(
+  initial: T,
+  refresh: () => Promise<T>,
+): () => Promise<T> {
+  let hasProvidedInitial = false;
+
+  return async () => {
+    if (!hasProvidedInitial) {
+      hasProvidedInitial = true;
+      return initial;
+    }
+
+    return refresh();
+  };
+}
+
+/**
+ * The ID the `written + 1`th spec of a turn is stored under.
+ *
+ * A `ProjectSpec` ID is the ID of the run that produced it. Inline that run is
+ * the orchestrator's own, so the first spec of a turn keeps exactly the ID it
+ * had when `generate-spec` owned a run of its own — and the blob pathname and
+ * the row stay keyed on something no other run can produce.
+ *
+ * A turn can call `writeSpec` more than once, though, and it could not when each
+ * call was its own run. A second document reusing the first's ID would overwrite
+ * its blob and upsert its row: two specs asked for, one kept, silently. Later
+ * writes are suffixed so each is its own document.
+ *
+ * Only successful writes count, so a retried call after a failure reuses the ID
+ * it failed on rather than leaving a gap.
+ */
+export function specIdForTurn(runId: string, written: number): string {
+  return written === 0 ? runId : `${runId}-${written + 1}`;
 }
 
 /** Wraps a JSON value as the tool result for one call. */

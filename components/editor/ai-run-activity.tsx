@@ -5,7 +5,6 @@ import {
   BrainCircuit,
   Check,
   Circle,
-  CircleDashed,
   CircleStop,
   CircleX,
   Loader2,
@@ -38,26 +37,54 @@ interface AiRunActivityProps {
 export function AiRunActivity({ state }: AiRunActivityProps) {
   const isRunning = state.phase === "starting" || state.phase === "running"
   const isStopped = state.phase === "error" || state.phase === "incomplete"
-  // Artifacts are attached beneath the message by `SpecAttachmentList`, so the
-  // work log neither counts nor renders them — a document is not a step.
-  const activity = state.activity.filter((part) => part.type !== "artifact")
-  const latestStep = activity.findLast((part) => part.type === "step")
+  // Two kinds of part are deliberately not in the log. Artifacts are attached
+  // beneath the message by `SpecAttachmentList` — a document is the result of a
+  // turn, not a step inside it. Steps are the live status line above the
+  // composer now (38-live-step-status), so listing them here as well would
+  // print the same six verbs twice, and they are the least interesting thing in
+  // the log once the run is over: what the model thought and what it changed
+  // are worth reading afterwards, "Reading the canvas" is not.
+  const activity = state.activity.filter(
+    (part) => part.type !== "artifact" && part.type !== "step"
+  )
+  // Still read from the *unfiltered* activity: the steps are gone from the list
+  // but they are still the best label for a run in flight.
+  const latestStep = state.activity.findLast((part) => part.type === "step")
   const headline =
     state.phase === "incomplete"
       ? "Work stopped before completion"
-      : latestStep?.text ??
-        (isRunning
-          ? "Starting…"
-          : state.phase === "error"
-            ? "Generation stopped"
-            : "Work complete")
+      : isRunning
+        ? latestStep?.text ?? "Starting…"
+        : state.phase === "error"
+          ? "Generation stopped"
+          : "Work complete"
   const stepCount = activity.length
+  /*
+   * Which part, if any, is still being written.
+   *
+   * Only the newest part of a run can be streaming, and only while the run is
+   * live. Every `ThinkingDisclosure` used to decide this from the run phase
+   * alone, so a run with four reasoning parts showed four spinners all claiming
+   * to be thinking — three of them long finished. Compared against the
+   * *unfiltered* activity so that a step arriving after a reasoning part still
+   * settles it, even though that step is not rendered here.
+   */
+  const streamingPartId = isRunning ? state.activity.at(-1)?.id ?? null : null
+
   // Whether the log starts open is a mount-time decision: a live run shows its
-  // work, a finished one from history stays folded. Recomputing it as the phase
-  // advances would not reopen or collapse anything — an uncontrolled Accordion
-  // reads its default once — it would only make Base UI warn that the default
-  // moved. A reader who opened or closed the log keeps their choice.
+  // work, a finished one from history stays folded. This hook must remain above
+  // every early return so a turn changing from live to complete keeps a stable
+  // hook order.
   const [defaultOpen] = useState(() => (isRunning || isStopped ? [state.id] : []))
+
+  // A turn that answered in words and did nothing else has an empty log once
+  // steps are out of it. Rendering the disclosure anyway would be a control
+  // that opens onto "Waiting for the first activity event…" forever. A stopped
+  // run keeps its header — that a run failed is worth showing even with nothing
+  // under it.
+  if (activity.length === 0 && state.phase === "complete") {
+    return null
+  }
 
   return (
     <div data-run-id={state.runId ?? undefined}>
@@ -70,11 +97,10 @@ export function AiRunActivity({ state }: AiRunActivityProps) {
             <span className="flex min-w-0 items-center gap-2.5">
               <RunStateIcon phase={state.phase} />
               <span className="min-w-0 text-left">
-                <span
-                  role="status"
-                  aria-live="polite"
-                  className="block truncate text-xs font-medium text-copy-primary"
-                >
+                {/* No `role="status"`: the live region is the step line above
+                    the composer now, and two of them announcing the same verb
+                    reads it twice to a screen reader. */}
+                <span className="block truncate text-xs font-medium text-copy-primary">
                   {headline}
                 </span>
                 {/* The model used to be named here, from a constant. It is a
@@ -98,6 +124,7 @@ export function AiRunActivity({ state }: AiRunActivityProps) {
                     key={part.id}
                     part={part}
                     phase={state.phase}
+                    isStreaming={part.id === streamingPartId}
                   />
                 ))}
               </ol>
@@ -137,14 +164,16 @@ function RunStateIcon({ phase }: { phase: AiRunActivityState["phase"] }) {
 function ActivityItem({
   part,
   phase,
+  isStreaming,
 }: {
   part: AiTimelinePart
   phase: AiRunActivityState["phase"]
+  isStreaming: boolean
 }) {
   if (part.type === "reasoning") {
     return (
       <li className={cn("text-xs", ENTRANCE)}>
-        <ThinkingDisclosure part={part} phase={phase} />
+        <ThinkingDisclosure part={part} isStreaming={isStreaming} />
       </li>
     )
   }
@@ -194,15 +223,16 @@ function ActivityItem({
  */
 function ThinkingDisclosure({
   part,
-  phase,
+  isStreaming,
 }: {
   part: AiTimelinePart
-  phase: AiRunActivityState["phase"]
+  isStreaming: boolean
 }) {
-  // Deltas only arrive while the run is live; a finished run's text is final,
-  // so it is revealed whole rather than typed out to a reader who has already
-  // scrolled to it.
-  const isStreaming = phase === "starting" || phase === "running"
+  // Deltas only arrive while the run is live *and* this is the part they are
+  // arriving into — see `streamingPartId`. A part that is finished, whether
+  // because the run ended or because the model moved on to something else, is
+  // revealed whole rather than typed out to a reader who has already scrolled
+  // to it.
   const text = useSmoothText(part.text, !isStreaming)
 
   return (
@@ -247,20 +277,24 @@ function ThinkingDisclosure({
 const ENTRANCE =
   "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-200"
 
+/**
+ * A canvas operation that is in the log has already happened.
+ *
+ * This used to spin a dashed circle on every action until the whole run
+ * finished, from when the build was one atomic write and the list was announced
+ * ahead of it. The build is paced now and `design-agent` emits each action
+ * *after* `applyDesignAction`, so an action appears at the moment it lands — a
+ * dozen of them spinning was a dozen claims that nothing had happened yet,
+ * beside a canvas visibly filling up.
+ */
 function ActionStateIcon({ phase }: { phase: AiRunActivityState["phase"] }) {
-  return phase === "complete" ? (
-    <Check aria-hidden className="size-3 shrink-0" />
-  ) : phase === "incomplete" ? (
+  // The run's own outcome still colours the ones it managed to apply: a stopped
+  // run leaves a partial diagram, and the log should not read as a clean pass.
+  return phase === "incomplete" ? (
     <CircleStop aria-hidden className="size-3 shrink-0" />
   ) : phase === "error" ? (
     <CircleX aria-hidden className="size-3 shrink-0" />
   ) : (
-    <CircleDashed
-      aria-hidden
-      className={cn(
-        "size-3 shrink-0",
-        phase === "running" && "motion-safe:animate-spin"
-      )}
-    />
+    <Check aria-hidden className="size-3 shrink-0" />
   )
 }

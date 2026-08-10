@@ -323,6 +323,41 @@
 }
 
 /*
+ * The running agent's current step, swept left to right (38-live-step-status).
+ *
+ * A moving gradient read through `background-clip: text` — one text node, no
+ * overlay element, no JS. The light band is what says "still working", which is
+ * why this replaced a spinner beside the label rather than joining one.
+ *
+ * ponytail: animates `background-position`, so it repaints the line every frame
+ * instead of staying on the compositor. That is fine for one short label and is
+ * exactly why this class is not offered for anything larger — a block of text
+ * wants the transform-and-mask version instead.
+ */
+@keyframes agent-step-sweep {
+    from {
+        background-position: 100% 0;
+    }
+    to {
+        background-position: -100% 0;
+    }
+}
+
+.agent-step-sweep {
+    background-image: linear-gradient(
+        90deg,
+        var(--text-muted) 30%,
+        var(--text-primary) 50%,
+        var(--text-muted) 70%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: agent-step-sweep 1.8s linear infinite;
+}
+
+/*
  * Arrival is decoration: the node and the edge are already in shared state, so
  * skipping the motion loses nothing but the flourish.
  */
@@ -334,6 +369,17 @@
 
     .canvas-edge-draw {
         stroke-dasharray: none;
+    }
+
+    /*
+     * The sweep *is* the liveness cue here, so this cannot just drop the
+     * animation and leave transparent text: the gradient goes too, and the
+     * label falls back to solid secondary copy.
+     */
+    .agent-step-sweep {
+        animation: none;
+        background-image: none;
+        color: var(--text-secondary);
     }
 }
 

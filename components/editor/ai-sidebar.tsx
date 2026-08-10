@@ -18,6 +18,7 @@ import { useAiChat } from "@/hooks/use-ai-chat"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { useAgentRun } from "@/hooks/use-agent-run"
+import { selectLiveRunStep } from "@/lib/ai-run-turns"
 import { cn } from "@/lib/utils"
 import {
   AI_DESIGN_MODELS,
@@ -69,6 +70,16 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   } = useAiChat()
   const { start, isRunning, turns, subscription, settle } = useAgentRun(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
+  /*
+   * This client's own run when there is one, and the room's shared status when
+   * the run belongs to somebody else. Local first because it is finer grained
+   * and arrives sooner — the feed is one line per phase, the local stream is
+   * every step. `isGenerating` is presence, never the feed: a killed run leaves
+   * a `processing` message on the feed forever, and a status line driven by
+   * that would sweep for the rest of the session.
+   */
+  const liveStep =
+    selectLiveRunStep(turns) ?? (isGenerating ? status?.text ?? "Working" : null)
 
   const submit = async (text: string) => {
     if (isComposerDisabled) return
@@ -128,6 +139,8 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
       {/* No bar behind the composer: no top border, no fill. The box hangs
           on the panel and the transcript scrolls up to meet it. */}
       <div className="p-3">
+        <LiveStepLine step={liveStep} />
+
         {error ? (
           <p
             role="alert"
@@ -221,6 +234,34 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
         </form>
       </div>
     </aside>
+  )
+}
+
+/**
+ * What the agent is doing, directly above the box you are locked out of.
+ *
+ * The verbs used to live inside the per-turn work log, which meant the answer
+ * to "why can't I type?" was behind a disclosure, several messages up, and
+ * scrolled away the moment the transcript grew. Here it sits against the
+ * composer's top edge and moves with it.
+ *
+ * No spinner beside it: the sweep across the text is the liveness cue, and an
+ * icon would be a second one saying the same thing. Reserving the row height
+ * whether or not there is a step would leave a permanent gap above the
+ * composer, so it unmounts — the composer moves 20px, once, at the start and
+ * end of a run.
+ */
+function LiveStepLine({ step }: { step: string | null }) {
+  if (!step) return null
+
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="mb-2 truncate px-1 text-xs font-medium agent-step-sweep"
+    >
+      {step}
+    </p>
   )
 }
 

@@ -233,10 +233,12 @@ function CopyAction({ markdown }: { markdown: string }) {
   )
 }
 
+function selectTextareaContents(element: HTMLTextAreaElement) {
+  element.select()
+}
+
 /** The denied-clipboard fallback exposes the exact source it asks users to copy. */
 export function ManualSpecCopyFallback({ markdown }: { markdown: string }) {
-  const selectAll = (element: HTMLTextAreaElement) => element.select()
-
   return (
     <label className="min-w-0 flex-1 space-y-1.5 text-xs text-copy-muted">
       <span className="flex items-center gap-1.5">
@@ -245,12 +247,11 @@ export function ManualSpecCopyFallback({ markdown }: { markdown: string }) {
       </span>
       <textarea
         aria-label="Spec Markdown to copy manually"
-        autoFocus
         readOnly
         rows={3}
         value={markdown}
-        onClick={(event) => selectAll(event.currentTarget)}
-        onFocus={(event) => selectAll(event.currentTarget)}
+        onClick={(event) => selectTextareaContents(event.currentTarget)}
+        onFocus={(event) => selectTextareaContents(event.currentTarget)}
         className="block w-full resize-y rounded-lg border border-surface-border bg-page px-2.5 py-2 font-mono text-xs leading-relaxed text-copy-primary outline-none focus-visible:border-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/20"
       />
     </label>

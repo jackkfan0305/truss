@@ -18,11 +18,10 @@ import {
  * shared, durable work log is the Liveblocks chat row, which is why nothing here
  * is allowed to fail a run.
  *
- * A `triggerAndWait` checkpoint can suspend the orchestrator and resume it
- * elsewhere, which this connection does not survive. That is tolerable and not
- * worked around: the browser settles its composer from the run's own completion
- * plus a grace window (`DesignRunObserver`), and the durable row is repaired by
- * the next full snapshot.
+ * The orchestrator's tools now run in the same process, so this connection stays
+ * alive for the whole turn. The browser still settles its composer from the
+ * run's own completion plus a grace window, and the durable row remains the
+ * authoritative shared record.
  */
 export function openActivityStream(onActivity: (part: AiActivityPart) => void) {
   let controller!: ReadableStreamDefaultController<

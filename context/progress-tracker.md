@@ -8,20 +8,133 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `38-live-step-status` complete. The AI panel says what it is doing in one
+  place, and the work log is what it thought and what it changed.
+  - **One thing thinks at a time.** `ThinkingDisclosure` decided "am I
+    streaming?" from the run phase alone, so *every* reasoning part in a live
+    run rendered a spinner and the word "Thinking" — a run that thought four
+    times showed four, three of them finished minutes earlier. Only the newest
+    part of a live run streams now, chosen by ID against the **unfiltered**
+    activity so a step arriving after a thought settles it even though steps are
+    no longer rendered.
+  - Canvas actions stopped spinning too, for the same reason and a different
+    cause: `ActionStateIcon` showed a dashed spinner until the whole run ended,
+    which dates from when the build was one atomic write announced ahead of
+    itself. The build is paced now and `design-agent` emits each action *after*
+    `applyDesignAction`, so an entry in the log is a change already on the
+    canvas. A dozen spinners were a dozen claims that nothing had happened yet,
+    beside a canvas visibly filling up.
+  - **Step verbs moved out of the log and above the composer.** They are status,
+    and the answer to "why can't I type?" was behind a disclosure, several
+    messages up, that scrolled away as the transcript grew. `selectLiveRunStep`
+    picks the newest step of the newest live turn; a triggered run with no step
+    yet still announces itself ("Starting"), because that silence is exactly the
+    cold-start window the line exists to explain.
+  - It falls back to the room's status feed when the live turn belongs to
+    somebody else, so a collaborator watching a run is not staring at a locked
+    panel with no explanation. Liveness is still read from **presence**, never
+    the feed — a killed run leaves `processing` on the feed forever and the line
+    would sweep for the rest of the session.
+  - The sweep is `background-clip: text` over a moving gradient
+    (`.agent-step-sweep` in `globals.css`), no JS and no spinner beside it: the
+    motion *is* the liveness cue. Under `prefers-reduced-motion` it drops the
+    gradient as well as the animation — animation alone would leave transparent
+    text. It animates `background-position`, which repaints rather than staying
+    on the compositor; fine for one short label and commented as not for more.
+  - `role="status"` moved with the verbs. The log headline was also a live
+    region, and both announcing the same verb read it twice.
+  - **A completed turn with an empty log renders nothing** rather than a
+    disclosure that opens onto "Waiting for the first activity event…". A turn
+    that only answered in words has no steps left to show. A *stopped* run keeps
+    its header — that it failed is worth showing with nothing under it.
+  - **`moveNode` is no longer logged.** A layout pass emits one per node and
+    they are the bulk of a large plan, all naming coordinates a reader cannot
+    picture, crowding out the adds, deletes and connections that are what
+    actually changed. The move still happens and still counts toward `applied`.
+  - Three new contract checks, each confirmed RED under mutation: exactly one
+    part of a live run is thinking (and a step settles the one before it), step
+    verbs do not appear in the log, and a finished turn leaves no status line
+    behind. `checkIncompleteRunKeepsItsPartialWork` was rewritten — its fixture
+    proved "partial work survives" with a *step*, which is no longer what a
+    ledger is made of; it now proves it with a canvas action and asserts the
+    step's absence.
+  - Full verify suite, `tsc --noEmit`, focused ESLint and `npm run build` pass.
+  - **Unverified in a browser.** Nobody has watched the sweep, seen the line
+    appear and disappear around a real run, or checked that the composer moving
+    20px at each end reads as acceptable rather than as a jump. Canvas `action`
+    parts were deliberately *kept* in the log — they are a record of what
+    changed, not status — which may be more than "just the thinking processes"
+    asked for.
+
+- `PR #8 review-and-merge` in progress.
+  - Confirmed review fixes now cover a real manual-copy fallback for denied
+    Clipboard API writes, one canonical project/room ID schema, spec payload
+    project/room equality, global prompt idempotency, idempotent `TaskRun`
+    persistence, and a durable 10-per-minute per-user AI request limit.
+  - The rate limit was exercised against PostgreSQL with 15 concurrent requests:
+    exactly 10 acquired a slot, and a request after the rolling window reset was
+    accepted. Route checks prove authorization, prompt verification, quota,
+    Trigger failure and persistence failure all stop at the intended boundary.
+  - Review, full verification, CI observation and merge remain pending.
+
+- `37-inline-spec-writer` complete. `writeSpec` runs in the orchestrator's
+  process, so no part of a turn suspends the run any more.
+  - **Measured first, from a real trace** (`run_06fupqhkktjc8pc516ir685s01`, a
+    "generate a spec" turn): 2m35s wall against 3.9s of billed compute. 29.1s of
+    it was the orchestrator's own `create_attempt`, 30.8s was `generate-spec`'s,
+    26.2s was the spec actually being written, and the ~66s tail after the child
+    finished was this run being restored from the checkpoint `triggerAndWait`
+    forced. About 30s of model work inside ~125s of machine lifecycle.
+  - `trigger/generate-spec.ts` now exports `runSpec`, mirroring `runDesign`: a
+    plain async function holding the whole spec, with `generateSpec` left as a
+    thin task wrapper for dashboard replays and direct triggers. It takes the
+    caller's already-read `{ context, history }`, dropping two more Liveblocks
+    round-trips and the duplicate canvas read.
+  - `metadata` calls moved **out** of `runSpec` into the wrapper. Inline,
+    `metadata.set` writes onto whichever run is executing — the orchestrator's —
+    and would label a whole routed turn `kind: "spec"`. Nothing in the app reads
+    run metadata; `publishAiStatus` still carries all four phases to the room,
+    which is what the UI follows.
+  - **A `ProjectSpec` ID is still the ID of the run that produced it**, and
+    inline that is the orchestrator's own — so the first spec of a turn keeps
+    exactly the ID it had before. But a turn can now call `writeSpec` twice,
+    which a per-run child could not, and `saveSpec` overwrites its blob and
+    upserts its row by design. `specIdForTurn` suffixes later writes so two specs
+    asked for are two documents kept rather than one silently destroying the
+    other.
+  - The empty-canvas `AbortTaskRunError` is now caught in `runTool`. Thrown out
+    of an inline call it would abort the whole turn; as a tool result the model
+    explains there is nothing to write about yet — the same shape the `Result`
+    from `triggerAndWait` used to give it.
+  - `publisher.flush()` before the spec is gone: it existed because a scheduled
+    400ms debounce does not fire while a run is suspended, and nothing suspends.
+  - The manual (execute-less) tool loop **stays**, but for the other reason. The
+    checkpoint argument is dead; the serialization one is not — automatic tool
+    execution would run a model's parallel tool calls in parallel, and two
+    designs on one canvas stack their nodes.
+  - `verify-orchestrator` gains two checks, both confirmed RED under mutation:
+    three specs in a turn must be three distinct IDs, and the orchestrator source
+    may not contain a `tasks.triggerAndWait` call. The second matches the call
+    form rather than the bare word, so it does not fail on the comment that
+    explains why the wait is gone.
+  - Full verify suite, `tsc --noEmit`, focused ESLint and `npm run build` pass.
+  - **Unverified: the improvement itself.** No traced run yet exists for either
+    inline path — the `503bb35` design change has never been traced either, and
+    all three runs in the dashboard predate it. The prediction is that a spec
+    turn loses the ~31s child boot and the ~66s restore; that needs one real
+    `trigger dev` run to confirm, and prod numbers will differ from dev's anyway.
+
 - `35-orchestrator-backend` complete. Chat is routed, not hard-wired. A new
   `orchestrator` Trigger task is the only task the API triggers: it reads the
   canvas and the room's `ai-chat` history, then decides per message whether to
   answer in words, edit the canvas via `design-agent`, or write a spec via
   `generate-spec`. Spec generation is reachable from chat for the first time.
-  - **The loop is manual on purpose.** `triggerAndWait` checkpoints the parent
-    run, which an open `streamText` connection to the provider cannot survive,
-    so the two tools are declared **without `execute`**. Each model call runs to
-    completion and returns either text or a tool call; the wait happens in
-    `runOrchestratorLoop`, outside the stream, and the result is fed back as a
-    tool-result message. Nothing is in flight when the run checkpoints. Tools run
-    one at a time, never batched: two concurrent `design-agent` runs read the
-    same pre-state and stack their nodes, and a spec written during a design
-    documents a half-drawn diagram.
+  - **The loop is manual on purpose.** The two tools are declared **without
+    `execute`**, so `runOrchestratorLoop` runs them one at a time and feeds each
+    result back to the model. Two concurrent designs can read the same pre-state
+    and stack their nodes, while a spec concurrent with a design documents a
+    half-drawn diagram. The old checkpoint reason is gone now that both tools
+    run inline; the serialization invariant remains.
   - **`designCanvas` is called, not triggered.** The subagent hop was the
     turn's biggest non-model cost: a real dev run took 3.5 minutes wall for 6.8s
     of billed orchestrator compute, and the trace put 27.3s of that in the child's
@@ -30,8 +143,8 @@ Update this file whenever the current phase, active feature, or implementation s
     `trigger/design-agent.ts` now exports `runDesign`, a plain async function
     holding the whole design; the `designAgent` task is a thin wrapper around it
     for dashboard replays and direct triggers, and the orchestrator calls it in
-    its own process. `writeSpec` still goes through `triggerAndWait` — it is far
-    rarer, and the same treatment is available if it starts to matter.
+    its own process. `writeSpec` got the same treatment in `37` and no longer
+    goes through `triggerAndWait` either.
   - **One prompt, one assistant message.** This is now structural rather than a
     flag. `runDesign` owns the canvas and the AI presence and *nothing else*: it
     never constructs a publisher and never closes the activity stream, so there
@@ -41,23 +154,19 @@ Update this file whenever the current phase, active feature, or implementation s
     replay of the child's non-reasoning activity. The design's reasoning now
     survives into the settled snapshot when it fits the 96KB budget, because
     `capRunSnapshot` already drops reasoning first when it does not.
-  - `runDesign` takes the caller's already-read `{ context, history }` rather
-    than re-reading. The orchestrator read both seconds earlier in the same
-    process, so this drops two Liveblocks round-trips and the duplicate
-    "Reading the canvas" step. Absent — a direct trigger — it reads them itself.
-  - The orchestrator's `maxDuration` went 180 → 600. It is CPU time and excludes
-    `triggerAndWait`, but the inlined design's generation *and* its paced build
-    now count: those sleeps are plain timers, not `wait.for`.
+  - The first tool takes the caller's already-read `{ context, history }`. Every
+    later tool refreshes the canvas first, so a second design or following spec
+    observes prior writes, including a partial design that threw. History stays
+    fixed to the conversation before this turn. Direct task triggers read both.
+  - The orchestrator's `maxDuration` went 180 → 600. Every inline model call and
+    the paced build now count: those sleeps are plain timers, not `wait.for`.
   - Text deltas and reasoning deltas land in different places, and the
     distinction is load-bearing: reasoning becomes `reasoning` activity parts
     inside the collapsed work log, while text grows the message's own `content`
     through the new `publisher.appendContent`. Routing the answer through the
     activity list would print it twice.
-  - `publisher.flush()` is called before `triggerAndWait`: a scheduled 400ms
-    debounce does not fire while a run is suspended, so without it the step
-    announcing a subagent lands only after that subagent finished. Only the spec
-    path needs it now — nothing suspends around an inlined `runDesign`, so its
-    debounce fires normally during the design's own awaits.
+  - No tool boundary needs `publisher.flush()` now: neither inline call suspends
+    the worker, so the normal debounce fires during their awaits.
   - The spec preview has a Copy button beside Download. It puts the **Markdown
     source** on the clipboard, not the dialog's rendered HTML — the document is
     Markdown everywhere else it exists, so a paste should reproduce it. It only
@@ -68,8 +177,9 @@ Update this file whenever the current phase, active feature, or implementation s
     not the `writeText`: a component that unmounts inside the two-second
     feedback window — the spec preview closes on Escape, routinely — would leave
     a timeout holding a setter for a component that is gone. A denied write (an
-    insecure origin, a refused permission) is a `"error"` status the button
-    renders as "Press Ctrl+C", never a silent no-op or an unhandled rejection.
+    insecure origin, a refused permission) exposes the exact Markdown in a
+    read-only textarea that selects on user focus/click, never a silent no-op,
+    unhandled rejection, or forced focus jump.
   - Routes collapsed four to two. `/api/ai/design`, `/api/ai/design/token`,
     `/api/ai/spec` and `/api/ai/spec/token` are gone; `/api/ai/orchestrate` and
     `/api/ai/orchestrate/token` replace them, keeping the design route's order
@@ -100,11 +210,9 @@ Update this file whenever the current phase, active feature, or implementation s
   - **Routing behaviour is unverified.** Whether "is this a bottleneck?" answers
     in words and "add a cache" edits the canvas is a property of the model plus
     the prompt, and no contract check can establish it. It needs a real
-    `trigger dev` run against a real Liveblocks room with a Google API key.
-    Neither can the checkpoint behaviour be asserted locally: the activity
-    stream is expected to die across a `triggerAndWait` suspension, and the
-    claim that the composer still settles rests on `DesignRunObserver`'s
-    completion-plus-grace path rather than on an observed run.
+    `trigger dev` run against a real Liveblocks room with a Google API key. The
+    inline activity stream and composer settlement likewise need observation in
+    that end-to-end run; there is no checkpoint boundary left in the turn.
 
 - `36-spec-attachment` complete. A generated spec is now part of the
   conversation that asked for it, and the AI panel is one surface.

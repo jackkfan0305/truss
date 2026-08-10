@@ -13,7 +13,11 @@ import {
   type ActivityEmitter,
 } from "@/lib/ai-activity-stream";
 import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
-import { readCanvas, readChatHistory } from "@/lib/canvas-read";
+import {
+  readCanvas,
+  readChatHistory,
+  type RoomReads,
+} from "@/lib/canvas-read";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -53,8 +57,8 @@ import {
  * the route validates the two agree before triggering the orchestrator.
  *
  * `prompt` is the orchestrator's own self-contained design brief, not the raw
- * user message: `runDesign` does not see the conversation the way the
- * orchestrator does, so "add that too" is resolved before it arrives.
+ * user message. `runDesign` receives the conversation for grounding, but the
+ * brief still resolves references such as "add that too" before it arrives.
  */
 export interface DesignAgentPayload {
   prompt: string;
@@ -74,12 +78,6 @@ export interface DesignAgentPayload {
   thinkingLevel?: string;
 }
 
-/** The two reads a design run opens with, when the caller already has them. */
-export interface DesignRoomReads {
-  context: DesignContext;
-  history: readonly AiChatMessage[];
-}
-
 export interface DesignRunOptions {
   /** The run that owns the chat row this work is narrated into. */
   runId: string;
@@ -92,7 +90,7 @@ export interface DesignRunOptions {
    * them down saves two Liveblocks round-trips per turn. Absent when the task is
    * triggered directly, and then they are read here.
    */
-  reads?: DesignRoomReads;
+  reads?: RoomReads;
   /**
    * Settles the caller's chat row on a design failure, before the error is
    * rethrown. The orchestrator does not pass one: a failed design has to reach
@@ -580,11 +578,20 @@ async function buildCanvas(
 
         // Emitted with the write rather than ahead of the whole batch, so the
         // sidebar list and the canvas describe the same moment.
-        activity.emit({
-          type: "action",
-          text: action.type,
-          detail: describeDesignAction(action),
-        });
+        //
+        // Except a move. A layout pass emits one per node and they are the bulk
+        // of a large plan, all saying a node is now at some coordinates the
+        // reader cannot picture and would not check — while crowding out the
+        // adds, deletes and connections, which are what actually changed about
+        // the system. The move still happens and still counts toward `applied`;
+        // it is only not worth a line in a log that is kept forever.
+        if (action.type !== "moveNode") {
+          activity.emit({
+            type: "action",
+            text: action.type,
+            detail: describeDesignAction(action),
+          });
+        }
 
         applied += 1;
 

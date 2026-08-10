@@ -53,10 +53,8 @@ export interface AiRunChatPublisher {
   /**
    * Writes the pending snapshot now instead of on the debounce.
    *
-   * The orchestrator needs this before a `triggerAndWait`: that call can
-   * checkpoint the run, and a scheduled `setTimeout` does not fire while it is
-   * suspended — so without an explicit flush the step announcing the subagent
-   * lands only after the subagent has already finished.
+   * Useful at any boundary that needs the pending debounced snapshot to be
+   * durable before continuing. Normal inline orchestration does not need it.
    */
   flush: () => Promise<void>;
   finish: (

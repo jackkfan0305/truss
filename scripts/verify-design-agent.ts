@@ -25,6 +25,7 @@ import {
 } from "../lib/ai-timeline";
 import {
   reduceAiRunTurns,
+  selectLiveRunStep,
   resolveAiRunPhase,
   type AiRunTurn,
 } from "../lib/ai-run-turns";
@@ -983,6 +984,61 @@ function checkRunTurnsRemainAnchoredForTheSession() {
 }
 
 /**
+ * The status line above the composer (38-live-step-status).
+ *
+ * It answers "why can't I type?", so the failure that matters is it outliving
+ * the run: a sweeping label over an enabled composer, or over a turn that ended
+ * ten minutes ago. Settled turns must not produce one at all.
+ */
+function checkTheLiveStepFollowsOnlyALiveTurn() {
+  const settled: AiRunTurn = {
+    promptMessageId: "chat-1",
+    runId: "run-1",
+    phase: "complete",
+    activity: [{ id: "activity-0", type: "step", text: "Applying to the canvas" }],
+    startedAt: 100,
+    completedAt: 200,
+  };
+
+  assert.equal(
+    selectLiveRunStep([settled]),
+    null,
+    "a finished turn leaves no status line behind"
+  );
+  assert.equal(selectLiveRunStep([]), null);
+
+  const live: AiRunTurn = {
+    promptMessageId: "chat-2",
+    runId: "run-2",
+    phase: "running",
+    activity: [
+      { id: "activity-0", type: "step", text: "Reading the canvas" },
+      { id: "activity-1", type: "reasoning", text: "…" },
+      { id: "activity-2", type: "step", text: "Designing" },
+    ],
+    startedAt: 300,
+  };
+
+  assert.equal(
+    selectLiveRunStep([settled, live]),
+    "Designing",
+    "the newest step of the live turn wins, not the newest part"
+  );
+
+  // A run exists the moment it is triggered, before the worker has said
+  // anything. Rendering nothing there would leave the composer locked with no
+  // explanation for the seconds a cold start takes — which is exactly the
+  // window this line exists for.
+  assert.equal(
+    selectLiveRunStep([
+      { ...live, activity: [], phase: "starting" },
+    ]),
+    "Starting",
+    "a triggered run with no step yet still announces itself"
+  );
+}
+
+/**
  * A finished run releases the composer on the stream's terminal marker alone.
  *
  * The run record can lag behind the worker, so it remains a fallback instead
@@ -1238,6 +1294,7 @@ function main() {
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
+  checkTheLiveStepFollowsOnlyALiveTurn();
   checkRunSettlesOnTheStreamMarkerNotTheRunRecord();
   checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();

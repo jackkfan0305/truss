@@ -1,5 +1,5 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { logger, schemaTask, tasks } from "@trigger.dev/sdk";
+import { logger, schemaTask } from "@trigger.dev/sdk";
 import { streamText, tool, type ModelMessage, type ToolResultPart } from "ai";
 import { z } from "zod";
 
@@ -8,12 +8,18 @@ import {
   createAiRunChatPublisher,
   type AiRunChatPublisher,
 } from "@/lib/ai-run-chat";
-import { readCanvas, readChatHistory } from "@/lib/canvas-read";
+import {
+  readCanvas,
+  readChatHistory,
+  type RoomReads,
+} from "@/lib/canvas-read";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import {
   describeDesignOutcome,
   describeSpecOutcome,
+  createSequentialReadsProvider,
   runOrchestratorLoop,
+  specIdForTurn,
   toToolResult,
   type OrchestratorModelTurn,
   type OrchestratorToolCall,
@@ -28,8 +34,8 @@ import {
   orchestratorPayloadSchema,
   type OrchestratorPayload,
 } from "@/lib/orchestrate-requests";
-import { runDesign, type DesignRoomReads } from "@/trigger/design-agent";
-import type { generateSpec } from "@/trigger/generate-spec";
+import { runDesign } from "@/trigger/design-agent";
+import { runSpec } from "@/trigger/generate-spec";
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
   type AiActivityTerminalPart,
@@ -54,32 +60,30 @@ const ORCHESTRATOR_THINKING_LEVEL = "low";
  * work done. It owns the turn's durable chat row either way, so one prompt
  * produces exactly one assistant message with the subagent's work nested inside.
  *
+ * ## Why the work runs in this process
+ *
+ * Both tools used to be child runs reached through `triggerAndWait`. That hop
+ * cost about 30s to queue and boot the child machine and about 60s to restore
+ * this run from the checkpoint the wait forced, and none of it was model time —
+ * on one measured spec turn, 90 seconds of 2m35s. `designCanvas` calls
+ * `runDesign` and `writeSpec` calls `runSpec`, both here, both with the canvas
+ * and transcript this run already read.
+ *
  * ## Why a manual loop rather than automatic tool execution
  *
- * `writeSpec` still goes through `triggerAndWait`, which checkpoints the parent:
- * the run transitions to `WAITING`, releases its concurrency slot, and resumes
- * afterwards, potentially on a different machine. An open `streamText` HTTP
- * connection to the provider cannot survive that, so a tool with an `execute`
- * that waits on a child run would die mid-stream.
+ * Nothing checkpoints any more, so the original reason — an open `streamText`
+ * connection cannot survive a run being suspended and resumed elsewhere — no
+ * longer applies. The loop stays for the second reason, which is unchanged: it
+ * runs tool calls **one at a time, in order**. A user essentially never wants a
+ * spec written *while* the canvas is being modified, and both concurrent
+ * combinations are unsafe — two designs read the same pre-state and place their
+ * nodes on top of each other, and a spec written during a design documents a
+ * diagram that is still being drawn. Automatic execution would run a model's
+ * parallel tool calls in parallel.
  *
- * Tools are therefore declared **without `execute`**. Each model call runs to
- * completion and returns either final text or a tool call; the work happens in
- * `runOrchestratorLoop`, outside the stream, and the result is fed back as a
- * tool-result message on the next iteration. Nothing is in flight when the run
- * checkpoints.
- *
- * `designCanvas` is the exception, and calls `runDesign` in this process — the
- * hop was costing about a minute a turn in boot and checkpoint time with no
- * model call in it. The loop shape is unchanged; only where the design runs is.
- *
- * ## Why sequential rather than batched
- *
- * `batchTriggerAndWait` is the supported fan-out primitive, and sequential waits
- * that could be batched are normally a defect. Not here: a user essentially never
- * wants a spec written *while* the canvas is being modified, and both concurrent
- * combinations are unsafe — two design runs read the same pre-state and place
- * their nodes on top of each other, and a spec written during a design documents
- * a diagram that is still being drawn.
+ * So tools are declared **without `execute`**: each model call returns either
+ * final text or a tool call, the work happens in `runOrchestratorLoop` outside
+ * the stream, and the result is fed back as a tool-result message.
  */
 export const orchestrator = schemaTask({
   id: "orchestrator",
@@ -87,12 +91,13 @@ export const orchestrator = schemaTask({
   // Same reasoning as `design-agent`: the loop can cause canvas writes, and a
   // second attempt would regenerate and duplicate them.
   retry: { maxAttempts: 1 },
-  // `maxDuration` is compared against CPU time and explicitly excludes time
-  // spent in `triggerAndWait` — so it covers the model calls, and now the whole
-  // inlined design as well: its generation *and* its paced build, whose sleeps
-  // are plain timers rather than `wait.for` and so are counted. Sized as the
-  // design agent's own 300s plus the routing and closing calls, with slack; a
-  // run killed here dies mid-build and leaves a half-drawn canvas.
+  // `maxDuration` is compared against CPU time. It used to exclude the
+  // subagents, which ran as child runs; now every part of a turn is in this
+  // process — the routing and closing calls, the design's generation *and* its
+  // paced build (plain timers, not `wait.for`, so they count), and the spec's
+  // several thousand tokens of prose. Sized as the design agent's own 300s plus
+  // the spec's 300s, which is the worst case a single turn can reach; a run
+  // killed here dies mid-build and leaves a half-drawn canvas.
   maxDuration: 600,
   run: async (payload, { ctx }) => {
     const { roomId, prompt, promptMessageId } = payload;
@@ -124,6 +129,19 @@ export const orchestrator = schemaTask({
         },
       ];
 
+      // How many specs this turn has written, so a second one does not overwrite
+      // the first — see `specIdForTurn`. A box rather than a counter passed by
+      // value because `runTool` is called once per tool call and has to carry
+      // the count across them.
+      const specsWritten = { count: 0 };
+      const getReads = createSequentialReadsProvider(
+        { context, history },
+        async (): Promise<RoomReads> => ({
+          context: await readCanvas(roomId),
+          history,
+        }),
+      );
+
       const result = await runOrchestratorLoop(messages, {
         callModel: (turnMessages) =>
           callModel(turnMessages, publisher, activity),
@@ -131,9 +149,9 @@ export const orchestrator = schemaTask({
           runTool(call, {
             payload,
             runId,
-            publisher,
             activity,
-            reads: { context, history },
+            getReads,
+            specsWritten,
           }),
       });
 
@@ -173,7 +191,7 @@ const designToolInputSchema = z.object({
     .trim()
     .min(1)
     .describe(
-      "A self-contained design brief. The design agent cannot see this conversation or the canvas, so say what to build or change in full."
+      "A self-contained design brief grounded in the supplied canvas and conversation. Say what to build or change explicitly."
     ),
 });
 
@@ -268,27 +286,24 @@ async function callModel(
 interface ToolRunContext {
   payload: OrchestratorPayload;
   runId: string;
-  publisher: AiRunChatPublisher;
   activity: ActivityEmitter;
-  /** This turn's canvas and transcript, so `runDesign` need not re-read them. */
-  reads: DesignRoomReads;
+  /** Initial room reads once, then a fresh canvas snapshot for each later tool. */
+  getReads: () => Promise<RoomReads>;
+  /** Mutable: how many specs this turn has written so far. */
+  specsWritten: { count: number };
 }
 
 /**
  * Runs one tool call and turns it into a tool result the model can read.
  *
- * The two branches fail the same way by different means, and either way a
- * failure is a value the model explains rather than a throw that ends the turn.
- * `designCanvas` runs inline, so its failure is caught here. `writeSpec` still
- * goes through `triggerAndWait`, which answers with a `Result` rather than the
- * child's output — hence the `ok` check, and no `.unwrap()`.
- *
- * `generate-spec` is triggered by ID with a type-only import, matching the
- * convention the routes use, so the worker bundles stay separate.
+ * Both branches run in this process and fail the same way: a thrown error is
+ * caught and returned as a value the model explains, never a throw that ends the
+ * turn. A user who asked for a cache and did not get one is owed a sentence
+ * saying so.
  */
 async function runTool(
   call: OrchestratorToolCall,
-  { payload, runId, publisher, activity, reads }: ToolRunContext
+  { payload, runId, activity, getReads, specsWritten }: ToolRunContext
 ): Promise<ToolResultPart> {
   if (call.toolName === DESIGN_TOOL_NAME) {
     // Re-validated at this boundary, not trusted: the model chose these
@@ -309,9 +324,11 @@ async function runTool(
     // checkpoint and restore of this run, none of it model time — see the
     // `runDesign` comment. Inline, the design emits straight into this turn's
     // one activity stream, so there is no second publisher writing a competing
-    // snapshot and nothing to replay afterwards. The canvas and history read at
-    // the top of this run are handed over rather than fetched again.
+    // snapshot and nothing to replay afterwards. The first tool reuses the room
+    // read at the top of this run; later tools refresh the canvas so they observe
+    // any preceding design, including a partial build that threw.
     try {
+      const reads = await getReads();
       const output = await runDesign(
         {
           prompt: input.data.instruction,
@@ -325,9 +342,6 @@ async function runTool(
 
       return toToolResult(call, describeDesignOutcome({ ok: true, output }));
     } catch (error: unknown) {
-      // A failed design is a tool result the model explains, never a failed
-      // turn: the user asked for a cache, did not get one, and is owed a
-      // sentence saying so.
       logger.warn("Design failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -339,32 +353,57 @@ async function runTool(
   if (call.toolName === SPEC_TOOL_NAME) {
     const input = specToolInputSchema.safeParse(call.input);
 
+    if (!input.success) {
+      return toToolResult(call, {
+        ok: false,
+        error: "The spec focus was invalid.",
+      });
+    }
+
     activity.emit({ type: "step", text: "Writing the spec" });
-    await publisher.flush();
 
-    const run = await tasks.triggerAndWait<typeof generateSpec>("generate-spec", {
-      projectId: payload.roomId,
-      roomId: payload.roomId,
-      promptMessageId: payload.promptMessageId,
-      chatRunId: runId,
-      ...(input.success && input.data.focus ? { focus: input.data.focus } : {}),
-    });
+    // Called, not triggered — the same change as `designCanvas`, and worth more
+    // here: `triggerAndWait` was the only thing left suspending this run, so a
+    // spec turn paid a child boot *and* a restore of this one. There is no
+    // `publisher.flush()` before it any more either; that existed because a
+    // scheduled debounce does not fire while a run is suspended, and nothing
+    // suspends now.
+    try {
+      const reads = await getReads();
+      const output = await runSpec(
+        {
+          projectId: payload.roomId,
+          roomId: payload.roomId,
+          promptMessageId: payload.promptMessageId,
+          chatRunId: runId,
+          ...(input.data.focus ? { focus: input.data.focus } : {}),
+        },
+        { runId, specId: specIdForTurn(runId, specsWritten.count), reads }
+      );
 
-    if (run.ok) {
+      specsWritten.count += 1;
+
       // The artifact part rides the same durable snapshot as the work log, so
       // the document is reachable from the transcript rather than only from the
       // run's output. `text` is the file name and `detail` the spec ID — see the
       // `artifact` case in `types/tasks.ts`.
       activity.emit({
         type: "artifact",
-        text: run.output.fileName,
-        detail: run.output.specId,
+        text: output.fileName,
+        detail: output.specId,
       });
-    } else {
-      logger.warn("Spec subagent failed", { error: run.error });
-    }
 
-    return toToolResult(call, describeSpecOutcome(run));
+      return toToolResult(call, describeSpecOutcome({ ok: true, output }));
+    } catch (error: unknown) {
+      // Includes the `AbortTaskRunError` an empty canvas raises. Thrown out of
+      // here it would abort the whole turn; as a tool result the model can say
+      // there is nothing to write about yet.
+      logger.warn("Spec failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      return toToolResult(call, describeSpecOutcome({ ok: false, error }));
+    }
   }
 
   return toToolResult(call, {

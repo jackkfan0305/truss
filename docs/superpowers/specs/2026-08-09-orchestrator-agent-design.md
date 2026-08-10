@@ -1,5 +1,11 @@
 # Orchestrator Agent Design
 
+> Historical implementation proposal. The shipped design subsequently moved
+> both tools inline and raised the orchestrator limit to 600 seconds; see
+> `context/architecture-context.md` and `context/progress-tracker.md` for the
+> current architecture. Timing and `triggerAndWait` details below describe the
+> original plan, not the present runtime.
+
 ## Goal
 
 Replace the single hard-wired design agent with an orchestrator that reads every

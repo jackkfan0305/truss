@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { ModelMessage, ToolResultPart } from "ai";
 
 import { createAiRunChatPublisher, resolveAiChatRunId } from "../lib/ai-run-chat";
 import {
   FALLBACK_CLOSING,
+  createSequentialReadsProvider,
   describeDesignOutcome,
   describeSpecOutcome,
   runOrchestratorLoop,
+  specIdForTurn,
   toToolResult,
   type OrchestratorModelTurn,
   type OrchestratorToolCall,
@@ -102,6 +105,11 @@ function checkThePromptNamesEveryRoute() {
   assert.match(
     ORCHESTRATOR_SYSTEM_PROMPT,
     /self-contained design brief that you write/,
+  );
+  assert.doesNotMatch(
+    ORCHESTRATOR_SYSTEM_PROMPT,
+    /cannot see (?:this conversation|the canvas)/,
+    "the routing prompt must describe the context the inline design runner receives",
   );
 }
 
@@ -346,9 +354,88 @@ async function checkStreamedTextGrowsTheMessageInPlace() {
   );
 }
 
+/**
+ * Two specs in one turn must be two documents.
+ *
+ * `saveSpec` overwrites its blob and upserts its row on purpose — that is what
+ * makes a retried attempt idempotent. It also means a second spec reusing the
+ * first's ID destroys it, and the turn would report two written while the
+ * project holds one. That could not happen while each call was its own run, so
+ * it is new with the inline path and invisible without a check.
+ */
+function checkEachSpecOfATurnGetsItsOwnId() {
+  const runId = "run_abc123";
+
+  assert.equal(
+    specIdForTurn(runId, 0),
+    runId,
+    "the first spec of a turn is stored under the run that produced it",
+  );
+
+  const ids = [0, 1, 2].map((written) => specIdForTurn(runId, written));
+
+  assert.equal(
+    new Set(ids).size,
+    ids.length,
+    "a turn that writes three specs must produce three distinct documents",
+  );
+}
+
+/** The initial room read is reusable once; later tools must observe prior writes. */
+async function checkLaterToolsRefreshTheirCanvasRead() {
+  let refreshes = 0;
+  const getReads = createSequentialReadsProvider(
+    { context: { nodes: ["initial"] }, history: ["prompt"] },
+    async () => {
+      refreshes += 1;
+      return {
+        context: { nodes: [`fresh-${refreshes}`] },
+        history: ["prompt"],
+      };
+    },
+  );
+
+  assert.deepEqual((await getReads()).context.nodes, ["initial"]);
+  assert.deepEqual((await getReads()).context.nodes, ["fresh-1"]);
+  assert.deepEqual((await getReads()).context.nodes, ["fresh-2"]);
+  assert.equal(refreshes, 2, "every tool after the first obtains a new snapshot");
+}
+
+/**
+ * The whole point of the inline path: nothing in a turn may suspend the run.
+ *
+ * A `triggerAndWait` reintroduced here costs a child boot plus a restore of this
+ * run — about 90 seconds on the measured spec turn — and it is a one-line change
+ * that would read as perfectly normal in review.
+ */
+function checkNothingInATurnSuspendsTheRun() {
+  const source = readFileSync(
+    new URL("../trigger/orchestrator.ts", import.meta.url),
+    "utf8",
+  );
+
+  // The call form, not the bare word: the task comment explains at length why
+  // `triggerAndWait` is gone, and a check that cannot tell prose from code
+  // would fail on its own documentation.
+  assert.doesNotMatch(
+    source,
+    /\btasks\s*\.\s*(?:batch)?[tT]riggerAndWait/,
+    "tools run in this process; waiting on a child run checkpoints the turn",
+  );
+  assert.match(
+    source,
+    /await runSpec\(/,
+    "the spec is written by calling runSpec, not by triggering generate-spec",
+  );
+  assert.match(source, /await runDesign\(/);
+}
+
 async function main() {
   checkThePromptNamesEveryRoute();
   checkThePromptCarriesTheRoom();
+  checkEachSpecOfATurnGetsItsOwnId();
+  await checkLaterToolsRefreshTheirCanvasRead();
+  checkNothingInATurnSuspendsTheRun();
   await checkTheLoopStopsWhenTheModelStops();
   await checkTheLoopStopsAtTheStepCap();
   await checkAnAnswerSurvivesALaterSilentStep();

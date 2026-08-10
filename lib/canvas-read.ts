@@ -16,6 +16,10 @@ import type { CanvasEdge, CanvasNode } from "@/types/canvas";
  * orchestrator, the design agent and the spec writer all open a turn the same
  * way, and a per-task copy is three places to forget the failure rule.
  */
+export interface RoomReads {
+  context: DesignContext;
+  history: readonly ChatMessage[];
+}
 
 /**
  * Reads the diagram without changing it. `mutateFlow` is the read path as well

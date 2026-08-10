@@ -1,3 +1,5 @@
+import { idempotencyKeys } from "@trigger.dev/sdk";
+
 import type { OrchestrateRequest } from "@/lib/orchestrate-requests";
 import {
   AI_CHAT_FEED_ID,
@@ -26,8 +28,20 @@ export interface VerifiedAgentRunDependencies {
     roomId: string;
     feedId: string;
   }) => Promise<{ data: AiChatFeedReadEntry[] }>;
-  trigger: (payload: AgentTriggerPayload) => Promise<{ id: string }>;
+  /** Atomically consumes one durable request slot after the prompt is trusted. */
+  consumeRequestSlot: (userId: string) => Promise<boolean>;
+  trigger: (
+    payload: AgentTriggerPayload,
+    options: {
+      idempotencyKey: Awaited<ReturnType<typeof idempotencyKeys.create>>;
+    },
+  ) => Promise<{ id: string }>;
 }
+
+export type AgentRunStartResult =
+  | { status: "started"; runId: string }
+  | { status: "unverified" }
+  | { status: "rate_limited" };
 
 /**
  * Promotes a browser-supplied prompt ID into trusted worker metadata only after
@@ -38,7 +52,7 @@ export async function startVerifiedAgentRun(
   request: OrchestrateRequest,
   authenticatedUserId: string,
   dependencies: VerifiedAgentRunDependencies,
-): Promise<string | null> {
+): Promise<AgentRunStartResult> {
   const { data } = await dependencies.readFeedMessages({
     roomId: request.roomId,
     feedId: AI_CHAT_FEED_ID,
@@ -52,16 +66,36 @@ export async function startVerifiedAgentRun(
     promptMessage.senderId !== authenticatedUserId ||
     promptMessage.content !== request.prompt
   ) {
-    return null;
+    return { status: "unverified" };
   }
 
-  const handle = await dependencies.trigger({
-    prompt: request.prompt,
-    promptMessageId: request.promptMessageId,
-    roomId: request.roomId,
-    modelId: request.modelId,
-    thinkingLevel: request.thinkingLevel,
-  });
+  if (!(await dependencies.consumeRequestSlot(authenticatedUserId))) {
+    return { status: "rate_limited" };
+  }
 
-  return handle.id;
+  // The prompt row is the durable unit of user intent. A browser retry or a
+  // concurrent replay receives the original Trigger handle instead of spending
+  // another model run or applying the same canvas mutation twice.
+  const idempotencyKey = await idempotencyKeys.create(
+    [
+      "orchestrator",
+      authenticatedUserId,
+      request.roomId,
+      request.promptMessageId,
+    ],
+    { scope: "global" },
+  );
+
+  const handle = await dependencies.trigger(
+    {
+      prompt: request.prompt,
+      promptMessageId: request.promptMessageId,
+      roomId: request.roomId,
+      modelId: request.modelId,
+      thinkingLevel: request.thinkingLevel,
+    },
+    { idempotencyKey },
+  );
+
+  return { status: "started", runId: handle.id };
 }

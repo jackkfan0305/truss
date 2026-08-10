@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { startVerifiedAgentRun } from "../lib/agent-run-server";
+import { handleOrchestratePost } from "../lib/orchestrate-route-handler";
 import {
   parseOrchestrateRequest,
   parseRunId,
@@ -248,6 +249,8 @@ async function checkPromptAnchorBeforeTriggering() {
 
   for (const testCase of cases) {
     let triggerCount = 0;
+    let rateLimitCount = 0;
+    const idempotencyKeys: string[] = [];
     const reads: Array<{ roomId: string; feedId: string }> = [];
     const result = await startVerifiedAgentRun(
       parsedValid,
@@ -257,8 +260,13 @@ async function checkPromptAnchorBeforeTriggering() {
           reads.push(params);
           return { data: testCase.messages };
         },
-        trigger: async () => {
+        consumeRequestSlot: async () => {
+          rateLimitCount += 1;
+          return true;
+        },
+        trigger: async (_payload, options) => {
           triggerCount += 1;
+          idempotencyKeys.push(String(options.idempotencyKey));
           return { id: "run_verified" };
         },
       },
@@ -270,22 +278,149 @@ async function checkPromptAnchorBeforeTriggering() {
       `${testCase.name}: reads only the authorized room feed`,
     );
     assert.equal(
+      rateLimitCount,
+      testCase.shouldTrigger ? 1 : 0,
+      `${testCase.name}: only a verified prompt consumes quota`,
+    );
+    assert.equal(
       triggerCount,
       testCase.shouldTrigger ? 1 : 0,
       `${testCase.name}: trigger boundary`,
     );
-    assert.equal(
+    assert.deepEqual(
       result,
-      testCase.shouldTrigger ? "run_verified" : null,
+      testCase.shouldTrigger
+        ? { status: "started", runId: "run_verified" }
+        : { status: "unverified" },
       `${testCase.name}: result`,
     );
+    assert.equal(
+      idempotencyKeys[0]?.length ?? 0,
+      testCase.shouldTrigger ? 64 : 0,
+      `${testCase.name}: a global hashed idempotency key reaches Trigger`,
+    );
   }
+
+  const denied = await startVerifiedAgentRun(parsedValid, "user_ada", {
+    readFeedMessages: async () => ({
+      data: [feedEntry(valid.promptMessageId, promptMessage)],
+    }),
+    consumeRequestSlot: async () => false,
+    trigger: async () => {
+      throw new Error("rate-limited requests must not trigger");
+    },
+  });
+
+  assert.deepEqual(denied, { status: "rate_limited" });
+
+  const replayKeys: string[] = [];
+  const replayDependencies = {
+    readFeedMessages: async () => ({
+      data: [feedEntry(valid.promptMessageId, promptMessage)],
+    }),
+    consumeRequestSlot: async () => true,
+    trigger: async (
+      _payload: unknown,
+      options: { idempotencyKey: unknown },
+    ) => {
+      replayKeys.push(String(options.idempotencyKey));
+      return { id: "run_original" };
+    },
+  };
+
+  await startVerifiedAgentRun(parsedValid, "user_ada", replayDependencies);
+  await startVerifiedAgentRun(parsedValid, "user_ada", replayDependencies);
+  assert.equal(
+    replayKeys[0],
+    replayKeys[1],
+    "the same verified prompt always addresses the same global Trigger run",
+  );
+}
+
+function request(body: unknown): Request {
+  return new Request("http://localhost/api/ai/orchestrate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** The public route must stop before every paid or persistent boundary on denial. */
+async function checkRouteAuthorizationAndFailureBoundaries() {
+  let starts = 0;
+  let records = 0;
+  const baseDependencies = {
+    authorizeProject: async () => ({ ok: true as const, userId: "user_ada" }),
+    startAgentRun: async () => {
+      starts += 1;
+      return { status: "started" as const, runId: "run_verified" };
+    },
+    recordTaskRun: async () => {
+      records += 1;
+    },
+  };
+
+  const denied = await handleOrchestratePost(request(valid), {
+    ...baseDependencies,
+    authorizeProject: async () => ({
+      ok: false as const,
+      response: Response.json({ error: "Forbidden" }, { status: 403 }),
+    }),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(starts, 0, "authorization denial prevents Trigger work");
+  assert.equal(records, 0, "authorization denial prevents TaskRun writes");
+
+  const unverified = await handleOrchestratePost(request(valid), {
+    ...baseDependencies,
+    startAgentRun: async () => ({ status: "unverified" as const }),
+  });
+  assert.equal(unverified.status, 400);
+  assert.equal(records, 0, "an unverified prompt is never recorded");
+
+  const rateLimited = await handleOrchestratePost(request(valid), {
+    ...baseDependencies,
+    startAgentRun: async () => ({ status: "rate_limited" as const }),
+  });
+  assert.equal(rateLimited.status, 429);
+  assert.equal(rateLimited.headers.get("retry-after"), "60");
+  assert.equal(records, 0, "a rate-limited request is never recorded");
+
+  const originalConsoleError = console.error;
+  console.error = () => undefined;
+
+  try {
+    const triggerFailure = await handleOrchestratePost(request(valid), {
+      ...baseDependencies,
+      startAgentRun: async () => {
+        throw new Error("Trigger unavailable");
+      },
+    });
+    assert.equal(triggerFailure.status, 502);
+    assert.equal(records, 0, "a failed trigger has no run to record");
+
+    const recordFailure = await handleOrchestratePost(request(valid), {
+      ...baseDependencies,
+      recordTaskRun: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+    assert.equal(recordFailure.status, 502);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  const success = await handleOrchestratePost(request(valid), baseDependencies);
+  assert.equal(success.status, 202);
+  assert.deepEqual(await success.json(), { runId: "run_verified" });
+  assert.equal(records, 1, "one successful run is recorded once");
 }
 
 async function main() {
   checkOrchestrateRequestParsing();
   checkRunIdParsing();
   await checkPromptAnchorBeforeTriggering();
+  await checkRouteAuthorizationAndFailureBoundaries();
 
   console.log("✅ Orchestrate API request parsing and prompt anchor verified");
 }

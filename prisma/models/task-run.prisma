@@ -18,3 +18,12 @@ model TaskRun {
 
   @@index([userId, projectId])
 }
+
+/// One rolling request window per Clerk user. Updated through one conditional
+/// PostgreSQL upsert so parallel serverless requests cannot race past the cap.
+model AiRequestRateLimit {
+  userId          String   @id
+  windowStartedAt DateTime
+  requestCount    Int
+  updatedAt       DateTime
+}

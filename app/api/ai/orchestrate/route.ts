@@ -1,11 +1,11 @@
 import { tasks } from "@trigger.dev/sdk";
 
+import { consumeAiRequestSlot } from "@/lib/ai-request-rate-limit";
 import { startVerifiedAgentRun } from "@/lib/agent-run-server";
 import { getLiveblocks } from "@/lib/liveblocks";
-import { parseOrchestrateRequest } from "@/lib/orchestrate-requests";
+import { handleOrchestratePost } from "@/lib/orchestrate-route-handler";
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
-import { jsonError, readJsonBody } from "@/lib/project-requests";
 import type { orchestrator } from "@/trigger/orchestrator";
 
 /**
@@ -21,79 +21,26 @@ import type { orchestrator } from "@/trigger/orchestrator";
  * collaborator edits the canvas, so a collaborator may ask for work on it.
  */
 export async function POST(request: Request): Promise<Response> {
-  // Parsed before authorizing, unlike the project routes: the project to
-  // authorize against is in the body, not the path. Parsing is pure and has no
-  // side effects, so nothing is spent on an unauthorized caller.
-  const orchestrateRequest = parseOrchestrateRequest(await readJsonBody(request));
-
-  if (!orchestrateRequest) {
-    return jsonError(
-      "A prompt and a matching projectId and roomId are required",
-      400
-    );
-  }
-
-  const access = await authorizeProject(orchestrateRequest.projectId, {
-    requireOwner: false,
-  });
-
-  if (!access.ok) {
-    return access.response;
-  }
-
-  let runId: string;
-
-  try {
-    const verifiedRunId = await startVerifiedAgentRun(
-      orchestrateRequest,
-      access.userId,
-      {
+  return handleOrchestratePost(request, {
+    authorizeProject,
+    startAgentRun: (orchestrateRequest, userId) =>
+      startVerifiedAgentRun(orchestrateRequest, userId, {
         readFeedMessages: (params) => getLiveblocks().getFeedMessages(params),
-        // Type-only import plus trigger-by-ID: importing the task instance
-        // would pull the Trigger.dev worker bundle into the Next.js bundle.
-        trigger: (payload) =>
-          tasks.trigger<typeof orchestrator>("orchestrator", payload),
-      },
-    );
-
-    if (!verifiedRunId) {
-      return jsonError("The prompt message could not be verified", 400);
-    }
-
-    runId = verifiedRunId;
-  } catch (error: unknown) {
-    console.error(
-      `Orchestrator trigger failed for ${orchestrateRequest.projectId}`,
-      error
-    );
-    return jsonError("Could not start the agent", 502);
-  }
-
-  // Recorded after triggering, because the run ID does not exist before it. A
-  // failure here leaves a run with no ownership record, so the token route will
-  // refuse it — the safe direction: no token is issued for a run nobody can be
-  // shown to own.
-  //
-  // Handled rather than left to bubble: an unhandled throw here is an opaque 500
-  // with nothing in the log, and the run is *already going* — the caller needs to
-  // be told the difference between "nothing happened" and "it is running but you
-  // cannot watch it".
-  try {
-    await prisma.taskRun.create({
-      data: {
-        runId,
-        projectId: orchestrateRequest.projectId,
-        userId: access.userId,
-      },
-    });
-  } catch (error: unknown) {
-    console.error(`Task run record failed for ${runId}`, error);
-
-    return jsonError(
-      "The agent started, but this run could not be tracked. The canvas will still update.",
-      502
-    );
-  }
-
-  return Response.json({ runId }, { status: 202 });
+        consumeRequestSlot: consumeAiRequestSlot,
+        // Type-only task import keeps the worker bundle out of Next. The global
+        // key is built only after the prompt is verified and quota is available.
+        trigger: (payload, options) =>
+          tasks.trigger<typeof orchestrator>("orchestrator", payload, options),
+      }),
+    // An idempotent replay returns the original run ID. Upsert makes recording
+    // that same ownership fact idempotent too instead of turning a safe retry
+    // into a 502 on the unique runId constraint.
+    recordTaskRun: async ({ runId, projectId, userId }) => {
+      await prisma.taskRun.upsert({
+        where: { runId },
+        create: { runId, projectId, userId },
+        update: {},
+      });
+    },
+  });
 }

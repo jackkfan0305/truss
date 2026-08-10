@@ -108,6 +108,10 @@ Update this file whenever the current phase, active feature, or implementation s
     survives both the 200-part bound and the byte budget. Focused ESLint,
     `tsc --noEmit` and the production build pass, and the whole `scripts/verify-*`
     suite exits 0.
+  - The end-to-end path **is** now partly proven against a live room: a fresh
+    `chat-${runId}` row is created, updated repeatedly, and settles carrying an
+    `artifact` part, read back from the feed API. What that does not cover is
+    the browser.
   - **Unverified in a browser.** No signed-in pass has rendered the card, opened
     the preview, or downloaded through it, and the panel's new single-surface
     layout has not been seen at any width. React Doctor's one new finding —
@@ -125,6 +129,19 @@ Update this file whenever the current phase, active feature, or implementation s
 - `27-ai-sidechat-redesign` complete: the AI panel is monochrome and rebuilt around shadcn primitives, visibly identifies `gemini-3.6-flash`, and renders each local run as a Cursor-style work turn directly after its prompt. Activity keeps true stream order, distinguishes pending canvas operations from completed ones, survives run completion for the mounted session, follows new output until the reader scrolls up, offers a Jump to latest control, and paginates older room messages.
 
 ## Completed
+
+- **Liveblocks feed upsert fix** — `upsertAiChatMessageWithClient` branched on
+  `404`/`409`, but the live v2 API reports a missing message, a duplicate
+  message ID *and* a POST into a missing feed all as `500 Internal Room Error`.
+  Only "feed already exists" answers honestly (409). So the ladder rethrew on
+  the first write of every run and no assistant row was ever created — the
+  symptom was `AI run chat update failed for room …` with an empty `Error:` and
+  a turn that left no trace in the transcript. The ladder now walks
+  update → create → create-feed → create → update, remembering failures instead
+  of branching on a status, and throws the *first* error only when it runs out
+  of rungs. `401`/`403`/`429` still short-circuit. Verified against the live
+  room: first write, steady-state updates and the terminal artifact write all
+  land, and the stored row round-trips with its full `run` payload.
 
 - `36-spec-attachment` — specs live in the transcript. A new `artifact` activity
   part carries `{ specId, fileName }` on the durable run, the card renders

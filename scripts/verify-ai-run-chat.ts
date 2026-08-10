@@ -373,29 +373,55 @@ function createFakeFeedClient(
   return { client, calls };
 }
 
+/**
+ * The server upsert's recovery ladder, against the statuses Liveblocks *actually*
+ * returns rather than the ones a REST API would be expected to.
+ *
+ * Measured against the live v2 API: a PATCH of a missing message, a POST of a
+ * duplicate message ID, and a POST into a missing feed all come back as
+ * `500 Internal Room Error`. Only "this feed already exists" answers honestly,
+ * with a 409.
+ *
+ * That is why these fixtures are almost all 500s. A previous version of this
+ * check used 404 and 409 — the statuses the ladder was written against — and
+ * passed while the real thing rethrew on the first write of every run, leaving
+ * the assistant row uncreated and the whole turn unrecorded. Fixtures that
+ * describe a nicer API than the one being called are worse than no fixtures.
+ */
 async function checkServerUpsertRecoveryPaths(): Promise<void> {
   const cases: readonly [string, readonly (number | null)[], FeedOperation[]][] = [
     ["updates an existing message", [null], ["update"]],
-    ["creates a missing message", [404, null], ["update", "create-message"]],
+    [
+      "creates the message when the update reports the opaque 500",
+      [500, null],
+      ["update", "create-message"],
+    ],
     [
       "creates a missing feed before its message",
-      [404, 404, null, null],
+      [500, 500, null, null],
       ["update", "create-message", "create-feed", "create-message"],
     ],
     [
-      "retries update when another worker creates the deterministic message",
-      [404, 409, null],
-      ["update", "create-message", "update"],
-    ],
-    [
-      "continues after another worker creates the missing feed",
-      [404, 404, 409, null],
+      "carries on when the feed turns out to already exist",
+      [500, 500, 409, null],
       ["update", "create-message", "create-feed", "create-message"],
     ],
     [
-      "retries update when the post-feed create races",
-      [404, 404, null, 409, null],
+      "falls back to update when another worker won the create race",
+      [500, 500, 409, 500, null],
       ["update", "create-message", "create-feed", "create-message", "update"],
+    ],
+    // The historical fixtures, kept: the ladder must not start *depending* on
+    // 500 either, or it breaks again the day Liveblocks reports 404 properly.
+    [
+      "still recovers if the API ever reports a missing message honestly",
+      [404, null],
+      ["update", "create-message"],
+    ],
+    [
+      "still recovers from a 409 on a duplicate message ID",
+      [404, 409, null, null],
+      ["update", "create-message", "create-feed", "create-message"],
     ],
   ];
 
@@ -412,7 +438,61 @@ async function checkServerUpsertRecoveryPaths(): Promise<void> {
     assert.deepEqual(calls, expectedCalls, description);
   }
 
+  // A key that is wrong is not a message that is missing. Walking the ladder
+  // against it would spend four extra round trips per flush — at a 400ms
+  // cadence, for the length of a run — arriving at the same refusal.
+  for (const status of [401, 403, 429]) {
+    const { client, calls } = createFakeFeedClient([status]);
+
+    await assert.rejects(
+      () =>
+        upsertAiChatMessageWithClient(
+          client,
+          "project-1",
+          "chat-run-1",
+          SERVER_MESSAGE,
+        ),
+      (error: unknown) => hasStatus(error, status),
+      `${status} is refused rather than retried`,
+    );
+
+    assert.deepEqual(calls, ["update"], `${status} stops at the first rung`);
+  }
+
+  // Out of rungs. The *first* error is what surfaces: the later ones are
+  // consequences of it, and "feed already exists" explains nothing.
+  const { client, calls } = createFakeFeedClient([500, 502, 409, 503, 504]);
+
+  await assert.rejects(
+    () =>
+      upsertAiChatMessageWithClient(
+        client,
+        "project-1",
+        "chat-run-1",
+        SERVER_MESSAGE,
+      ),
+    (error: unknown) => hasStatus(error, 500),
+    "the first failure is what the caller is told about",
+  );
+
+  assert.deepEqual(calls, [
+    "update",
+    "create-message",
+    "create-feed",
+    "create-message",
+    "update",
+  ]);
+
   console.log("✅ server upsert recovers deterministic Liveblocks races");
+}
+
+function hasStatus(error: unknown, status: number): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === status
+  );
 }
 
 async function main(): Promise<void> {

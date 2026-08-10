@@ -17,6 +17,10 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Prisma generation needs a syntactically valid datasource URL but does
+      # not connect. Live database checks are excluded from this workflow.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/truss
     steps:
       - uses: actions/checkout@v5
 
@@ -34,6 +38,5 @@ jobs:
           # Build-time placeholders only. The quality job never contacts these
           # services; live database/Liveblocks checks run locally through
           # `npm run verify:integration` with real development credentials.
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/truss
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZHVtbXkuY2xlcmsuYWNjb3VudHMuZGV2JA
           CLERK_SECRET_KEY: sk_test_ci_placeholder

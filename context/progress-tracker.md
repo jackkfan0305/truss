@@ -22,24 +22,42 @@ Update this file whenever the current phase, active feature, or implementation s
     one at a time, never batched: two concurrent `design-agent` runs read the
     same pre-state and stack their nodes, and a spec written during a design
     documents a half-drawn diagram.
-  - **One prompt, one assistant message.** Both subagents take an optional
-    `chatRunId`, and `resolveAiChatRunId` keys the publisher on it — so a
-    delegated run publishes into the parent's `chat-${runId}` row and a direct
-    run still owns its own. A delegated `design-agent` deliberately does *not*
-    call `start()` or `finish()`: two publishers each write a **complete**
-    snapshot, so a subagent settling the row would end the parent's turn before
-    the parent had written a word of it. It flushes what it emitted and returns
-    its non-reasoning activity, which the orchestrator replays into its own
-    timeline — the live view is the subagent's log during the wait, and the
-    settled snapshot carries routing *and* per-action detail.
+  - **`designCanvas` is called, not triggered.** The subagent hop was the
+    turn's biggest non-model cost: a real dev run took 3.5 minutes wall for 6.8s
+    of billed orchestrator compute, and the trace put 27.3s of that in the child's
+    `create_attempt` alone — queueing and booting the `design-agent` machine —
+    plus a checkpoint of the parent and a restore once the child returned.
+    `trigger/design-agent.ts` now exports `runDesign`, a plain async function
+    holding the whole design; the `designAgent` task is a thin wrapper around it
+    for dashboard replays and direct triggers, and the orchestrator calls it in
+    its own process. `writeSpec` still goes through `triggerAndWait` — it is far
+    rarer, and the same treatment is available if it starts to matter.
+  - **One prompt, one assistant message.** This is now structural rather than a
+    flag. `runDesign` owns the canvas and the AI presence and *nothing else*: it
+    never constructs a publisher and never closes the activity stream, so there
+    is only ever one publisher on a row. Two would each write a **complete**
+    snapshot and clobber the other, which is what the old `chatRunId` /
+    `isDelegated` dance existed to prevent; both are gone, along with the
+    replay of the child's non-reasoning activity. The design's reasoning now
+    survives into the settled snapshot when it fits the 96KB budget, because
+    `capRunSnapshot` already drops reasoning first when it does not.
+  - `runDesign` takes the caller's already-read `{ context, history }` rather
+    than re-reading. The orchestrator read both seconds earlier in the same
+    process, so this drops two Liveblocks round-trips and the duplicate
+    "Reading the canvas" step. Absent — a direct trigger — it reads them itself.
+  - The orchestrator's `maxDuration` went 180 → 600. It is CPU time and excludes
+    `triggerAndWait`, but the inlined design's generation *and* its paced build
+    now count: those sleeps are plain timers, not `wait.for`.
   - Text deltas and reasoning deltas land in different places, and the
     distinction is load-bearing: reasoning becomes `reasoning` activity parts
     inside the collapsed work log, while text grows the message's own `content`
     through the new `publisher.appendContent`. Routing the answer through the
     activity list would print it twice.
-  - `publisher.flush()` is new and is called before every `triggerAndWait`: a
-    scheduled 400ms debounce does not fire while a run is suspended, so without
-    it the step announcing a subagent lands only after that subagent finished.
+  - `publisher.flush()` is called before `triggerAndWait`: a scheduled 400ms
+    debounce does not fire while a run is suspended, so without it the step
+    announcing a subagent lands only after that subagent finished. Only the spec
+    path needs it now — nothing suspends around an inlined `runDesign`, so its
+    debounce fires normally during the design's own awaits.
   - Routes collapsed four to two. `/api/ai/design`, `/api/ai/design/token`,
     `/api/ai/spec` and `/api/ai/spec/token` are gone; `/api/ai/orchestrate` and
     `/api/ai/orchestrate/token` replace them, keeping the design route's order

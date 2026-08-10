@@ -28,7 +28,7 @@ import {
   orchestratorPayloadSchema,
   type OrchestratorPayload,
 } from "@/lib/orchestrate-requests";
-import type { designAgent } from "@/trigger/design-agent";
+import { runDesign, type DesignRoomReads } from "@/trigger/design-agent";
 import type { generateSpec } from "@/trigger/generate-spec";
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
@@ -56,17 +56,21 @@ const ORCHESTRATOR_THINKING_LEVEL = "low";
  *
  * ## Why a manual loop rather than automatic tool execution
  *
- * `triggerAndWait` checkpoints the parent: the run transitions to `WAITING`,
- * releases its concurrency slot, and resumes afterwards, potentially on a
- * different machine. An open `streamText` HTTP connection to the provider cannot
- * survive that, so a tool with an `execute` that waits on a child run would die
- * mid-stream.
+ * `writeSpec` still goes through `triggerAndWait`, which checkpoints the parent:
+ * the run transitions to `WAITING`, releases its concurrency slot, and resumes
+ * afterwards, potentially on a different machine. An open `streamText` HTTP
+ * connection to the provider cannot survive that, so a tool with an `execute`
+ * that waits on a child run would die mid-stream.
  *
  * Tools are therefore declared **without `execute`**. Each model call runs to
- * completion and returns either final text or a tool call; the wait happens in
+ * completion and returns either final text or a tool call; the work happens in
  * `runOrchestratorLoop`, outside the stream, and the result is fed back as a
  * tool-result message on the next iteration. Nothing is in flight when the run
  * checkpoints.
+ *
+ * `designCanvas` is the exception, and calls `runDesign` in this process — the
+ * hop was costing about a minute a turn in boot and checkpoint time with no
+ * model call in it. The loop shape is unchanged; only where the design runs is.
  *
  * ## Why sequential rather than batched
  *
@@ -84,9 +88,12 @@ export const orchestrator = schemaTask({
   // second attempt would regenerate and duplicate them.
   retry: { maxAttempts: 1 },
   // `maxDuration` is compared against CPU time and explicitly excludes time
-  // spent in `triggerAndWait`, so this only has to cover the orchestrator's own
-  // model calls — not the subagents' 300s each.
-  maxDuration: 180,
+  // spent in `triggerAndWait` — so it covers the model calls, and now the whole
+  // inlined design as well: its generation *and* its paced build, whose sleeps
+  // are plain timers rather than `wait.for` and so are counted. Sized as the
+  // design agent's own 300s plus the routing and closing calls, with slack; a
+  // run killed here dies mid-build and leaves a half-drawn canvas.
+  maxDuration: 600,
   run: async (payload, { ctx }) => {
     const { roomId, prompt, promptMessageId } = payload;
     const runId = ctx.run.id;
@@ -120,7 +127,14 @@ export const orchestrator = schemaTask({
       const result = await runOrchestratorLoop(messages, {
         callModel: (turnMessages) =>
           callModel(turnMessages, publisher, activity),
-        runTool: (call) => runTool(call, { payload, runId, publisher, activity }),
+        runTool: (call) =>
+          runTool(call, {
+            payload,
+            runId,
+            publisher,
+            activity,
+            reads: { context, history },
+          }),
       });
 
       if (result.didHitStepCap) {
@@ -256,22 +270,25 @@ interface ToolRunContext {
   runId: string;
   publisher: AiRunChatPublisher;
   activity: ActivityEmitter;
+  /** This turn's canvas and transcript, so `runDesign` need not re-read them. */
+  reads: DesignRoomReads;
 }
 
 /**
  * Runs one tool call and turns it into a tool result the model can read.
  *
- * `triggerAndWait` answers with a `Result`, not the child's output, so both call
- * sites check `ok` before reading `output`. `.unwrap()` is deliberately not
- * used: a failed subagent has to reach the model as a tool result it can explain,
- * rather than throwing and failing the whole turn.
+ * The two branches fail the same way by different means, and either way a
+ * failure is a value the model explains rather than a throw that ends the turn.
+ * `designCanvas` runs inline, so its failure is caught here. `writeSpec` still
+ * goes through `triggerAndWait`, which answers with a `Result` rather than the
+ * child's output — hence the `ok` check, and no `.unwrap()`.
  *
- * Both subagents are triggered by ID with type-only imports, matching the
+ * `generate-spec` is triggered by ID with a type-only import, matching the
  * convention the routes use, so the worker bundles stay separate.
  */
 async function runTool(
   call: OrchestratorToolCall,
-  { payload, runId, publisher, activity }: ToolRunContext
+  { payload, runId, publisher, activity, reads }: ToolRunContext
 ): Promise<ToolResultPart> {
   if (call.toolName === DESIGN_TOOL_NAME) {
     // Re-validated at this boundary, not trusted: the model chose these
@@ -287,33 +304,36 @@ async function runTool(
     }
 
     activity.emit({ type: "step", text: "Designing the canvas" });
-    // Not the debounce: `triggerAndWait` can suspend this run, and a scheduled
-    // flush does not fire while it is suspended — the step announcing the
-    // subagent would land only after the subagent had finished.
-    await publisher.flush();
 
-    const run = await tasks.triggerAndWait<typeof designAgent>("design-agent", {
-      prompt: input.data.instruction,
-      promptMessageId: payload.promptMessageId,
-      roomId: payload.roomId,
-      modelId: payload.modelId,
-      thinkingLevel: payload.thinkingLevel,
-      chatRunId: runId,
-    });
+    // Called, not triggered. `triggerAndWait` cost ~27s of child boot plus a
+    // checkpoint and restore of this run, none of it model time — see the
+    // `runDesign` comment. Inline, the design emits straight into this turn's
+    // one activity stream, so there is no second publisher writing a competing
+    // snapshot and nothing to replay afterwards. The canvas and history read at
+    // the top of this run are handed over rather than fetched again.
+    try {
+      const output = await runDesign(
+        {
+          prompt: input.data.instruction,
+          promptMessageId: payload.promptMessageId,
+          roomId: payload.roomId,
+          modelId: payload.modelId,
+          thinkingLevel: payload.thinkingLevel,
+        },
+        { runId, activity, reads }
+      );
 
-    if (run.ok) {
-      // The subagent published its work log live into this turn's row while it
-      // ran, but from its own snapshot — which this run's next flush overwrites.
-      // Replaying it folds the per-action log into the timeline that settles, so
-      // the finished turn shows what was drawn, not just that drawing happened.
-      for (const part of run.output.activity) {
-        activity.emit(part);
-      }
-    } else {
-      logger.warn("Design subagent failed", { error: run.error });
+      return toToolResult(call, describeDesignOutcome({ ok: true, output }));
+    } catch (error: unknown) {
+      // A failed design is a tool result the model explains, never a failed
+      // turn: the user asked for a cache, did not get one, and is owed a
+      // sentence saying so.
+      logger.warn("Design failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      return toToolResult(call, describeDesignOutcome({ ok: false, error }));
     }
-
-    return toToolResult(call, describeDesignOutcome(run));
   }
 
   if (call.toolName === SPEC_TOOL_NAME) {

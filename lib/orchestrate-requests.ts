@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 
+import { isProjectId, projectIdSchema } from "@/lib/project-id";
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
@@ -24,10 +25,6 @@ const MAX_PROMPT_MESSAGE_ID_LENGTH = 256;
 
 /** Trigger.dev run IDs are `run_<cuid>`; the cap is slack, not a format check. */
 const MAX_RUN_ID_LENGTH = 100;
-
-/** Room IDs are project ID slugs — see lib/project-requests.ts. */
-const MIN_ROOM_ID_LENGTH = 3;
-const MAX_ROOM_ID_LENGTH = 80;
 
 export interface OrchestrateRequest {
   prompt: string;
@@ -51,7 +48,7 @@ export interface OrchestrateRequest {
 export const orchestratorPayloadSchema = z.object({
   prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
   promptMessageId: z.string().trim().min(1).max(MAX_PROMPT_MESSAGE_ID_LENGTH),
-  roomId: z.string().trim().min(MIN_ROOM_ID_LENGTH).max(MAX_ROOM_ID_LENGTH),
+  roomId: z.string().trim().pipe(projectIdSchema),
   modelId: z.string().trim().max(80).optional(),
   thinkingLevel: z.string().trim().max(40).optional(),
 });
@@ -107,7 +104,12 @@ export function parseOrchestrateRequest(
     return null;
   }
 
-  if (!projectId || !roomId || roomId !== projectId) {
+  if (
+    !projectId ||
+    !roomId ||
+    roomId !== projectId ||
+    !isProjectId(projectId)
+  ) {
     return null;
   }
 

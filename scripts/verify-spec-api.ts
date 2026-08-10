@@ -40,6 +40,7 @@ function checkSpecPayloadParsing() {
     {},
     { roomId: valid.roomId },
     { projectId: valid.projectId },
+    { ...valid, roomId: "another-project-b2c3" },
     { ...valid, roomId: "" },
     { ...valid, roomId: "ab" },
     { ...valid, roomId: "x".repeat(81) },

@@ -14,9 +14,7 @@
 
 import { z } from "zod";
 
-/** Room IDs are project ID slugs — see lib/project-requests.ts. */
-const MIN_ROOM_ID_LENGTH = 3;
-const MAX_ROOM_ID_LENGTH = 80;
+import { projectIdSchema } from "@/lib/project-id";
 
 const MAX_MESSAGE_ID_LENGTH = 256;
 
@@ -26,18 +24,22 @@ const MAX_FOCUS_LENGTH = 500;
 const roomId = z
   .string()
   .trim()
-  .min(MIN_ROOM_ID_LENGTH)
-  .max(MAX_ROOM_ID_LENGTH);
+  .pipe(projectIdSchema);
 
-export const specPayloadSchema = z.object({
-  projectId: roomId,
-  roomId,
-  /** The human message this spec answers, excluded from the history it reads. */
-  promptMessageId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
-  /** The run owning the turn's chat row, so its own row is not read back in. */
-  chatRunId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
-  /** Optional emphasis the orchestrator carried over from the user's request. */
-  focus: z.string().trim().max(MAX_FOCUS_LENGTH).optional(),
-});
+export const specPayloadSchema = z
+  .object({
+    projectId: roomId,
+    roomId,
+    /** The human message this spec answers, excluded from the history it reads. */
+    promptMessageId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
+    /** The run owning the turn's chat row, so its own row is not read back in. */
+    chatRunId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
+    /** Optional emphasis the orchestrator carried over from the user's request. */
+    focus: z.string().trim().max(MAX_FOCUS_LENGTH).optional(),
+  })
+  .refine(({ projectId, roomId }) => projectId === roomId, {
+    message: "projectId and roomId must match",
+    path: ["roomId"],
+  });
 
 export type SpecPayload = z.infer<typeof specPayloadSchema>;

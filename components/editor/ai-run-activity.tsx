@@ -37,7 +37,10 @@ interface AiRunActivityProps {
 export function AiRunActivity({ state }: AiRunActivityProps) {
   const isRunning = state.phase === "starting" || state.phase === "running"
   const isStopped = state.phase === "error" || state.phase === "incomplete"
-  const latestStep = state.activity.findLast((part) => part.type === "step")
+  // Artifacts are attached beneath the message by `SpecAttachmentList`, so the
+  // work log neither counts nor renders them — a document is not a step.
+  const activity = state.activity.filter((part) => part.type !== "artifact")
+  const latestStep = activity.findLast((part) => part.type === "step")
   const headline =
     state.phase === "incomplete"
       ? "Work stopped before completion"
@@ -47,7 +50,7 @@ export function AiRunActivity({ state }: AiRunActivityProps) {
           : state.phase === "error"
             ? "Generation stopped"
             : "Work complete")
-  const stepCount = state.activity.length
+  const stepCount = activity.length
 
   return (
     <div data-run-id={state.runId ?? undefined}>
@@ -83,9 +86,9 @@ export function AiRunActivity({ state }: AiRunActivityProps) {
           </AccordionTrigger>
 
           <AccordionContent className="pb-2">
-            {state.activity.length > 0 ? (
+            {activity.length > 0 ? (
               <ol className="flex flex-col gap-2.5">
-                {state.activity.map((part) => (
+                {activity.map((part) => (
                   <ActivityItem
                     key={part.id}
                     part={part}

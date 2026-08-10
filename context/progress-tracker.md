@@ -76,6 +76,44 @@ Update this file whenever the current phase, active feature, or implementation s
     claim that the composer still settles rests on `DesignRunObserver`'s
     completion-plus-grace path rather than on an observed run.
 
+- `36-spec-attachment` complete. A generated spec is now part of the
+  conversation that asked for it, and the AI panel is one surface.
+  - The spec rides the feed as a fourth activity part: `{ type: "artifact",
+    text: fileName, detail: specId }`. It reuses `text`/`detail` rather than
+    introducing a differently shaped part, so one validator, one 200-part bound
+    and one byte budget still cover everything on `ai-chat`. There is no new
+    persistence — the Markdown is already in Blob and the pointer already a
+    `ProjectSpec` row.
+  - `fitAiRunToBudget` now **never** drops an artifact. Reasoning gives way
+    first as before, but the last resort keeps artifacts instead of emptying the
+    list: every other part describes work that happened, while an artifact is
+    the only pointer the transcript has to a document that was written, paid for
+    and saved.
+  - The card renders **outside** the collapsed work-log disclosure, beneath the
+    closing message, because a document is the result of the turn rather than a
+    step within it — and a reader should not have to expand a work log to find
+    one. `AiRunActivity` filters artifacts out of both its list and its step
+    count for the same reason.
+  - **The Chat/Specs tabs are gone.** `components/editor/spec-panel.tsx` is
+    deleted and its preview dialog, download link and timestamp moved to
+    `components/editor/spec-attachment.tsx`. `useProjectSpecs` went with it. `GET
+    /api/projects/[projectId]/specs` still exists and still answers, but nothing
+    in the client calls it: the transcript *is* the list now.
+  - The composer no longer claims to be about the canvas. Its placeholder,
+    aria-label and one starter prompt now reflect that a turn may answer,
+    design, or document.
+  - `verify-ai-chat` covers the new part: it validates, an incomplete one
+    (no spec ID, or no file name) becomes no card rather than a broken one, a
+    malformed one is dropped without dropping the message, and a real one
+    survives both the 200-part bound and the byte budget. Focused ESLint,
+    `tsc --noEmit` and the production build pass, and the whole `scripts/verify-*`
+    suite exits 0.
+  - **Unverified in a browser.** No signed-in pass has rendered the card, opened
+    the preview, or downloaded through it, and the panel's new single-surface
+    layout has not been seen at any width. React Doctor's one new finding —
+    `await` in a loop at `lib/orchestrator-loop.ts:96` — is a false positive:
+    that loop is deliberately sequential and the reason is in a comment above it.
+
 - `22-design-agent-api` complete: the first background-task path in the project. `POST /api/ai/design` triggers `design-agent` and records a `TaskRun`; `POST /api/ai/design/token` trades a run ID for a run-scoped realtime token. The task echoes its payload — no model call, no canvas write — and `TRIGGER_SECRET_KEY` still needs a real value. The AI sidebar is still the `20` stub.
 - `16-edge-behavior` complete: nodes have four hover-revealed connection handles, so the canvas is finally *connectable* — `onConnect` and `ConnectionMode.Loose` were wired since `11` but unreachable. New connections render through the `canvasEdge` renderer with a right-angle route, an arrowhead, and a double-click inline label. `ui-context.md`'s node and edge specs are now both fully implemented. The AI panel is still a placeholder.
 - `23-design-agent-logic` complete: the design agent is real. A prompt now reaches Gemini, comes back as validated canvas actions, and lands in the room's Liveblocks Storage through `@liveblocks/react-flow`'s own server-side `mutateFlow` — so an AI-made node is byte-identical to a dragged one. The AI shows up in the room as a presence (avatar, cursor, thinking flag) and narrates itself on the `ai-status-feed`. **Nothing in the sidebar reads either yet** — that is `24`/`25`; this unit is the producer.
@@ -88,6 +126,11 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- `36-spec-attachment` — specs live in the transcript. A new `artifact` activity
+  part carries `{ specId, fileName }` on the durable run, the card renders
+  outside the work log with Preview and Download, and the byte budget now
+  protects artifacts. The Chat/Specs tab strip and `SpecPanel` are deleted; the
+  AI panel is one surface.
 - `35-orchestrator-backend` — intent routing in a Trigger task. `orchestrator`
   owns the turn, exposes `designCanvas` and `writeSpec` as execute-less tools,
   waits on each subagent outside the model stream, and settles one durable chat
@@ -448,8 +491,12 @@ Update this file whenever the current phase, active feature, or implementation s
 - Autosave has no **unload flush**: closing the tab inside the 1500ms debounce loses that last edit. Liveblocks Storage still has it, so the room is intact and the next client to edit saves it — but a project whose room later empties would restore to the older snapshot. `visibilitychange` + `sendBeacon` is the fix if that ever bites.
 - Two clients opening the *same* cold room within one round trip can both restore and duplicate every node. Narrow — it needs a room nobody has touched since the last save — and marked with a `ponytail:` comment in `canvas.tsx`. A "restored" flag in Storage is the fix.
 - Blob deletion is still unimplemented, so `21` adds artifacts that project deletion does not remove. `canvasJsonPath` is already documented as a retained cleanup pointer for exactly this; the `del()` call belongs in `deleteProjectResources` alongside the Liveblocks room teardown.
-- The AI sidebar's **Specs tab** is still shell-only after `20`: `Generate Spec` does nothing, the spec card is hardcoded and its download is `disabled`. The backend it will call now exists (`27-spec-generation-flow` triggers, `28-spec-persistence-download` stores and serves), so `29` is a wiring job, not a new path. (Chat history and `isThinking` are done — `25` and `24` respectively.)
-- **There is no spec _list_ endpoint yet.** `28` asks only for the download route, and building a `GET /api/projects/[projectId]/specs` on spec would have been guessing at the shape `29` needs. It is a `findMany` on `[projectId, createdAt]` — the index is already there — and it is the one piece of backend `29` cannot avoid. The download route doubles as the preview fetch: `Content-Disposition` does not stop `fetch()` from reading the body as text.
+- `GET /api/projects/[projectId]/specs` now has **no client caller**: `36`
+  deleted the Specs tab, and a spec reaches the reader attached to its turn. The
+  route is kept rather than deleted because it is the natural read for any
+  future project-wide spec view, and because a spec whose `artifact` part was
+  lost — a pre-`36` run, or a row written before the budget rule changed — is
+  reachable through nothing else. Delete it if that view never arrives.
 - Deployed Trigger.dev environments now need `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` in the dashboard, not only in the local `.env` — `generate-spec` writes to both from inside the worker. Local `trigger dev` already reads them from `.env`.
 - Blob deletion now leaves **specs** behind too, not just canvas snapshots: `ProjectSpec` rows cascade with the project row, but their documents do not. Whatever `del()` call lands in `deleteProjectResources` has to cover `specs/{projectId}/*` as well as `canvas/{projectId}.json`.
 - `generate-spec` and `design-agent` both publish to the single-line

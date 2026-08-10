@@ -2,93 +2,23 @@
 
 import { useEffect, useState } from "react"
 
-import type { ProjectSpecSummary } from "@/types/project"
-
 /**
- * Reading generated specs from the Specs tab (29-spec-ui-integration).
+ * Reading a generated spec from the transcript (29-spec-ui-integration,
+ * 36-spec-attachment).
  *
- * Two reads against routes that already exist: the list is metadata, and the
- * document comes back from the download route. Nothing here touches Blob — its
- * store is private, so the browser could not fetch a spec directly even if the
- * URL were handed to it.
+ * One read against a route that already exists: the document comes back from
+ * the download route. Nothing here touches Blob — its store is private, so the
+ * browser could not fetch a spec directly even if the URL were handed to it.
+ *
+ * The project-scoped *list* read went with the Specs tab. `GET
+ * /api/projects/[projectId]/specs` still exists and still answers; nothing in
+ * the client calls it, because a spec now arrives attached to the turn that
+ * wrote it and the transcript is the list.
  */
 
 /** The download route, which is also where the preview reads its Markdown. */
 export function specDownloadHref(projectId: string, specId: string): string {
   return `/api/projects/${projectId}/specs/${specId}/download`
-}
-
-/**
- * Loaded specs, stamped with the project they belong to so a response for a
- * project the editor has navigated away from is never rendered as this one's.
- * Same shape as `useProjectMembers` for the same reason.
- */
-interface ListState {
-  projectId: string
-  specs: ProjectSpecSummary[]
-  error: string | null
-}
-
-export interface ProjectSpecList {
-  specs: ProjectSpecSummary[]
-  isLoading: boolean
-  error: string | null
-}
-
-/** This project's specs, newest first. Fetched once per project. */
-export function useProjectSpecs(projectId: string): ProjectSpecList {
-  const [list, setList] = useState<ListState | null>(null)
-
-  const isLoaded = list?.projectId === projectId
-
-  useEffect(() => {
-    const controller = new AbortController()
-    /*
-     * A flag of its own rather than `controller.signal.aborted`. The two are
-     * equivalent today, because the only thing that ends this run is the
-     * cleanup calling `abort()` — but that ties "should I still write state" to
-     * one particular fetch. Any later `await` that is not that fetch would slip
-     * past a signal check and not past this.
-     */
-    let isStale = false
-
-    void (async () => {
-      try {
-        const response = await fetch(`/api/projects/${projectId}/specs`, {
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error(await readErrorMessage(response))
-        }
-
-        const body = (await response.json()) as { specs?: ProjectSpecSummary[] }
-
-        // A response that resolved before the abort landed still belongs to a
-        // dead effect run; writing it would let an older list win the race.
-        if (isStale) return
-
-        setList({ projectId, specs: body.specs ?? [], error: null })
-      } catch (caught) {
-        if (isStale) return
-
-        setList({ projectId, specs: [], error: getErrorMessage(caught) })
-      }
-    })()
-
-    return () => {
-      isStale = true
-      controller.abort()
-    }
-  }, [projectId])
-
-  return {
-    specs: isLoaded ? list.specs : [],
-    error: isLoaded ? list.error : null,
-    // Derived rather than its own state, so the first render does not cost an
-    // extra pass just to flip a flag (react-hooks/set-state-in-effect).
-    isLoading: !isLoaded,
-  }
 }
 
 export interface SpecContent {
@@ -117,7 +47,9 @@ export function useSpecContent(
 
   useEffect(() => {
     const controller = new AbortController()
-    // Same reasoning as `useProjectSpecs` above.
+    // A flag of its own rather than `controller.signal.aborted`: that ties
+    // "should I still write state" to one particular fetch, and any later
+    // `await` that is not that fetch would slip past a signal check.
     let isStale = false
 
     void (async () => {

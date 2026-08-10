@@ -2,10 +2,9 @@
 
 import { useState } from "react"
 import { useRoom } from "@liveblocks/react"
-import { ArrowUp, Bot, CircleAlert, Loader2, Sparkles } from "lucide-react"
+import { ArrowUp, Bot, CircleAlert, Loader2 } from "lucide-react"
 
 import { AiChatTranscript } from "@/components/editor/ai-chat-transcript"
-import { SpecPanel } from "@/components/editor/spec-panel"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -14,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useAiChat } from "@/hooks/use-ai-chat"
 import { useAiStatus } from "@/hooks/use-ai-status"
@@ -36,10 +34,15 @@ interface AiSidebarProps {
   useCollaboratorsSource?: typeof useCollaborators
 }
 
+/**
+ * Starters for an empty room. Two ask for a diagram and one asks a question,
+ * because the panel answers as well as draws now — three build prompts would
+ * teach the opposite.
+ */
 const STARTER_PROMPTS = [
   "Design an e-commerce backend",
   "Create a chat app architecture",
-  "Build a CI/CD pipeline",
+  "What would you add to this system?",
 ]
 
 /** Monochrome AI workspace with room chat and run-scoped activity streams. */
@@ -64,8 +67,7 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
     isFetchingOlder,
     fetchOlderMessages,
   } = useAiChat()
-  const { start, isRunning, turns, subscription, settle } =
-    useAgentRun(roomId)
+  const { start, isRunning, turns, subscription, settle } = useAgentRun(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
 
   const submit = async (text: string) => {
@@ -89,175 +91,145 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
         isOpen ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"
       )}
     >
-      {/* No title bar. The tabs already say what the panel is, and the floating
-          control is its only close affordance. `aria-label` names the region. */}
-      <Tabs defaultValue="architect" className="min-h-0 flex-1 gap-0">
-        <div className="flex items-center gap-2 border-b border-surface-border pr-4 pl-16 xl:pl-14">
-          <TabsList
-            variant="line"
-            className="h-11 min-w-0 flex-1 justify-start gap-5 border-0 px-0"
+      {/*
+        One surface, no tabs and no title bar. The Specs tab is gone: a spec is
+        generated from chat now and attached to the turn that wrote it, so a
+        second list beside the transcript was only a separate place to remember
+        to look. The floating control is still this panel's one close
+        affordance, and `aria-label` names the region.
+
+        Must stay a flex column: the transcript sizes itself as a flex item and
+        its scroll viewport is `h-full`, so a block parent leaves both heights
+        indefinite — the viewport grows to fit the run instead of scrolling it,
+        and the activity spills over the composer. The top padding clears the
+        floating close control, which used to be the tab strip's job.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col px-4 pt-14">
+        <AiChatTranscript
+          messages={messages}
+          selfId={selfId}
+          turns={turns}
+          status={status}
+          isRoomActive={isGenerating}
+          // A room ID *is* its project ID — lib/room-id.ts.
+          projectId={roomId}
+          subscription={subscription}
+          onRunSettled={settle}
+          hasOlderMessages={hasOlderMessages}
+          isFetchingOlder={isFetchingOlder}
+          onFetchOlder={fetchOlderMessages}
+          useCollaboratorsSource={useCollaboratorsSource}
+          emptyState={
+            <EmptyChat onPick={submit} isDisabled={isComposerDisabled} />
+          }
+        />
+      </div>
+
+      {/* No bar behind the composer: no top border, no fill. The box hangs
+          on the panel and the transcript scrolls up to meet it. */}
+      <div className="p-3">
+        {error ? (
+          <p
+            role="alert"
+            className="mb-2 flex items-center gap-2 text-xs text-copy-primary"
           >
-            <TabsTrigger
-              value="architect"
-              className="h-11 flex-none px-0 text-xs text-copy-muted data-active:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
-            >
-              Chat
-            </TabsTrigger>
-            <TabsTrigger
-              value="specs"
-              className="h-11 flex-none px-0 text-xs text-copy-muted data-active:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
-            >
-              Specs
-            </TabsTrigger>
-          </TabsList>
-        </div>
+            <CircleAlert aria-hidden className="size-3.5" />
+            {error}
+          </p>
+        ) : null}
 
-        <TabsContent
-          value="architect"
-          className="flex min-h-0 flex-1 flex-col gap-0"
+        <form
+          className="rounded-2xl border border-surface-border px-3 py-2.5 focus-within:border-copy-primary focus-within:ring-1 focus-within:ring-copy-primary/20"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submit(draft)
+          }}
         >
-          {/* Must stay a flex column: the transcript sizes itself as a flex
-              item and its scroll viewport is `h-full`, so a block parent here
-              leaves both heights indefinite — the viewport grows to fit the
-              run instead of scrolling it, and the activity spills over the
-              composer. */}
-          <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 max-xl:pt-14">
-            <AiChatTranscript
-              messages={messages}
-              selfId={selfId}
-              turns={turns}
-              status={status}
-              isRoomActive={isGenerating}
-              subscription={subscription}
-              onRunSettled={settle}
-              hasOlderMessages={hasOlderMessages}
-              isFetchingOlder={isFetchingOlder}
-              onFetchOlder={fetchOlderMessages}
-              useCollaboratorsSource={useCollaboratorsSource}
-              emptyState={
-                <EmptyChat
-                  onPick={submit}
-                  isDisabled={isComposerDisabled}
-                />
-              }
-            />
-          </div>
-
-          {/* No bar behind the composer: no top border, no fill. The box hangs
-              on the panel and the transcript scrolls up to meet it. */}
-          <div className="p-3">
-            {error ? (
-              <p
-                role="alert"
-                className="mb-2 flex items-center gap-2 text-xs text-copy-primary"
-              >
-                <CircleAlert aria-hidden className="size-3.5" />
-                {error}
-              </p>
-            ) : null}
-
-            <form
-              className="rounded-2xl border border-surface-border px-3 py-2.5 focus-within:border-copy-primary focus-within:ring-1 focus-within:ring-copy-primary/20"
-              onSubmit={(event) => {
+          <Textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
                 void submit(draft)
-              }}
-            >
-              <Textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    void submit(draft)
-                  }
-                }}
-                maxLength={MAX_CHAT_CONTENT_LENGTH}
-                disabled={isComposerDisabled}
-                placeholder={
-                  isRunning
-                    ? "Working on the canvas…"
-                    : canSend
-                      ? "Ask Truss to design or edit the system…"
-                      : "Connecting to the room…"
-                }
-                aria-label="Ask Truss to design or edit the system"
-                /*
-                 * The four background resets are all load-bearing. The textarea
-                 * primitive fills itself with `dark:bg-input/30`, and swaps to
-                 * `dark:disabled:bg-input/80` while disabled — which is exactly
-                 * when a run is in flight — so a plain `bg-transparent` loses to
-                 * both variants and the grey comes back the moment you send.
-                 */
-                className="max-h-40 min-h-12 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:disabled:bg-transparent"
+              }
+            }}
+            maxLength={MAX_CHAT_CONTENT_LENGTH}
+            disabled={isComposerDisabled}
+            /*
+             * "Working on it", not "Working on the canvas": a turn may be
+             * answering a question or writing a spec, and naming the canvas
+             * would be wrong two times in three.
+             */
+            placeholder={
+              isRunning
+                ? "Working on it…"
+                : canSend
+                  ? "Ask about the system, request a change, or ask for a spec…"
+                  : "Connecting to the room…"
+            }
+            aria-label="Ask about the system, request a change, or ask for a spec"
+            /*
+             * The four background resets are all load-bearing. The textarea
+             * primitive fills itself with `dark:bg-input/30`, and swaps to
+             * `dark:disabled:bg-input/80` while disabled — which is exactly
+             * when a run is in flight — so a plain `bg-transparent` loses to
+             * both variants and the grey comes back the moment you send.
+             */
+            className="max-h-40 min-h-12 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:disabled:bg-transparent"
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            {/* `min-w-0` on the group, not the row: both triggers truncate
+                their own label rather than pushing the send button out of
+                the composer on the narrowest panel width. */}
+            <div className="flex min-w-0 items-center gap-0.5">
+              <ModelPicker
+                value={modelId}
+                onChange={setModelId}
+                disabled={isRunning}
               />
-              <div className="mt-2 flex items-center justify-between gap-2">
-                {/* `min-w-0` on the group, not the row: both triggers truncate
-                    their own label rather than pushing the send button out of
-                    the composer on the narrowest panel width. */}
-                <div className="flex min-w-0 items-center gap-0.5">
-                  <ModelPicker
-                    value={modelId}
-                    onChange={setModelId}
-                    disabled={isRunning}
-                  />
-                  <ThinkingPicker
-                    value={thinkingLevel}
-                    onChange={setThinkingLevel}
-                    disabled={isRunning}
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  size="icon-sm"
-                  disabled={isComposerDisabled}
-                  aria-busy={isSending || isRunning}
-                  aria-label={
-                    isSending
-                      ? "Sending"
-                      : isRunning
-                        ? "Agent is working"
-                        : "Send message"
-                  }
-                  className="size-7 shrink-0 rounded-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30"
-                >
-                  {isSending || isRunning ? (
-                    <Loader2
-                      aria-hidden
-                      className="size-3.5 motion-safe:animate-spin"
-                    />
-                  ) : (
-                    <ArrowUp aria-hidden className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-            </form>
+              <ThinkingPicker
+                value={thinkingLevel}
+                onChange={setThinkingLevel}
+                disabled={isRunning}
+              />
+            </div>
+            <Button
+              type="submit"
+              size="icon-sm"
+              disabled={isComposerDisabled}
+              aria-busy={isSending || isRunning}
+              aria-label={
+                isSending
+                  ? "Sending"
+                  : isRunning
+                    ? "Agent is working"
+                    : "Send message"
+              }
+              className="size-7 shrink-0 rounded-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30"
+            >
+              {isSending || isRunning ? (
+                <Loader2
+                  aria-hidden
+                  className="size-3.5 motion-safe:animate-spin"
+                />
+              ) : (
+                <ArrowUp aria-hidden className="size-3.5" />
+              )}
+            </Button>
           </div>
-        </TabsContent>
-
-        {/* Grid rows rather than a flex column: the spec list scrolls in a
-            ScrollArea, whose viewport needs a definite height to size against. */}
-        <TabsContent
-          value="specs"
-          className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 p-4 max-xl:pt-14"
-        >
-          {/* Still inert: `29` wires viewing, and triggering a run from here
-              needs the canvas graph, which this panel does not hold. */}
-          <Button className="min-h-11 w-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30">
-            <Sparkles aria-hidden className="size-4" />
-            Generate Spec
-          </Button>
-
-          {/* A room ID *is* its project ID — lib/room-id.ts. */}
-          <SpecPanel projectId={roomId} />
-        </TabsContent>
-      </Tabs>
+        </form>
+      </div>
     </aside>
   )
 }
 
 /**
  * The model the next prompt runs on.
+ *
+ * Still labelled for the design work, because that is what it configures: the
+ * orchestrator that routes the message runs on the default at low effort, and a
+ * second picker for it would be a setting nobody turns.
  *
  * The trigger is stripped to plain text and a chevron — no border, no filled
  * background — because it sits *inside* the composer's own border and a second
@@ -379,8 +351,8 @@ function EmptyChat({
         What should we design?
       </h3>
       <p className="mt-1 text-sm leading-relaxed text-copy-muted">
-        Describe a system or ask for an edit. Truss streams its work here while
-        the shared canvas updates.
+        Describe a system, ask for an edit, or ask a question about what is on
+        the canvas. Ask for a spec and the document lands here in the thread.
       </p>
       <div className="mt-5 flex flex-col gap-2">
         {STARTER_PROMPTS.map((prompt) => (

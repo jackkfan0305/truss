@@ -137,6 +137,7 @@ function checkRunObserverDoesNotDependOnVisibleMessages() {
         turns={[]}
         status={null}
         isRoomActive={false}
+        projectId="checkout-flow-a1b2"
         emptyState={<p>No messages yet</p>}
         subscription={{ runId: "run-delayed-feed", token: "token" }}
         onRunSettled={() => undefined}

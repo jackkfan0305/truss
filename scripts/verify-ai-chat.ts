@@ -13,13 +13,19 @@ import {
   type ChatMessage,
 } from "../lib/ai-chat";
 import { parseAiChatRequest } from "../lib/ai-chat-requests";
+import { fitAiRunToBudget, MAX_AI_RUN_SNAPSHOT_BYTES } from "../lib/ai-run-chat";
 import { toPersistedAiActivity } from "../lib/ai-timeline";
 import { renderChatMarkdown } from "../lib/markdown";
+import { selectSpecAttachments } from "../lib/spec-attachments";
 import {
   AI_USER_ID,
   AI_USER_NAME,
+  MAX_AI_ACTIVITY_PARTS,
   MAX_CHAT_CONTENT_LENGTH,
   parseAiChatMessage,
+  parseAiActivityPart,
+  readAiArtifactSpecId,
+  type AiActivityPart,
   type AiChatMessage,
 } from "../types/tasks";
 
@@ -651,6 +657,117 @@ function checkTimelineCanBePersistedWithoutTransientIds() {
   );
 }
 
+/**
+ * A generated spec reaches the transcript as an `artifact` activity part
+ * (36-spec-attachment): `text` is the file name, `detail` the `ProjectSpec` ID.
+ *
+ * It goes through the one validator every other part goes through, because the
+ * alternative — a differently shaped part with its own parser — is a second
+ * trust boundary on the same feed. What that buys is asserted here: a malformed
+ * artifact must not take the whole message down with it, and a real one must
+ * survive both the 200-part bound and the byte budget, because it is the only
+ * pointer the transcript has to a document that was written, paid for and
+ * saved.
+ */
+function checkSpecArtifactsRideTheActivityFeed() {
+  const artifact: AiActivityPart = {
+    type: "artifact",
+    text: "spec-2026-08-09-14-32.md",
+    detail: "run_c3d4",
+  };
+
+  assert.deepEqual(parseAiActivityPart(artifact), artifact, "an artifact validates");
+  assert.equal(readAiArtifactSpecId(artifact), "run_c3d4");
+
+  // An artifact with no spec ID points at nothing, so it renders as nothing
+  // rather than as a card whose download 404s.
+  assert.equal(readAiArtifactSpecId({ type: "artifact", text: "spec.md" }), null);
+  assert.equal(
+    readAiArtifactSpecId({ type: "step", text: "Writing the spec", detail: "x" }),
+    null,
+    "only artifacts name a spec",
+  );
+
+  assert.deepEqual(
+    selectSpecAttachments([
+      { type: "step", text: "Writing the spec" },
+      artifact,
+      // Neither of these is a document: one names no spec, the other no file.
+      { type: "artifact", text: "spec.md" },
+      { type: "artifact", text: "", detail: "run_orphan" },
+    ]),
+    [{ specId: "run_c3d4", fileName: "spec-2026-08-09-14-32.md" }],
+    "only complete artifacts become cards",
+  );
+  assert.deepEqual(selectSpecAttachments(undefined), []);
+
+  // A malformed part is dropped by the message parser without dropping the
+  // message — the closing text and the rest of the work log still render.
+  const withBadPart = parseAiChatMessage({
+    role: "assistant",
+    senderId: AI_USER_ID,
+    senderName: AI_USER_NAME,
+    content: "I wrote that up.",
+    sentAt: 1_700_000_000_000,
+    run: {
+      runId: "run_parent",
+      promptMessageId: "chat-prompt",
+      phase: "complete",
+      activity: [artifact, { type: "artifact", text: 42 }],
+    },
+  });
+
+  assert.equal(
+    withBadPart?.content,
+    "I wrote that up.",
+    "a malformed part never costs the message",
+  );
+
+  // The bound and the budget. An artifact past part 200 is dropped with
+  // everything else past it, but one inside the bound outlives the byte budget:
+  // reasoning gives way first, and artifacts are what the last resort keeps.
+  const filler: AiActivityPart[] = Array.from(
+    { length: MAX_AI_ACTIVITY_PARTS - 1 },
+    (_, index) => ({ type: "step", text: `step ${index}` }),
+  );
+  const bounded = parseAiChatMessage({
+    role: "assistant",
+    senderId: AI_USER_ID,
+    senderName: AI_USER_NAME,
+    content: "Done.",
+    sentAt: 1_700_000_000_000,
+    run: {
+      runId: "run_parent",
+      promptMessageId: "chat-prompt",
+      phase: "complete",
+      activity: [...filler, artifact],
+    },
+  });
+
+  assert.deepEqual(
+    selectSpecAttachments(bounded?.run?.activity),
+    [{ specId: "run_c3d4", fileName: "spec-2026-08-09-14-32.md" }],
+    "an artifact at the 200-part boundary survives",
+  );
+
+  const oversized = fitAiRunToBudget({
+    runId: "run_parent",
+    promptMessageId: "chat-prompt",
+    phase: "complete",
+    activity: [
+      { type: "reasoning", text: "r".repeat(MAX_AI_RUN_SNAPSHOT_BYTES) },
+      { type: "action", text: "addNode", detail: "a".repeat(MAX_AI_RUN_SNAPSHOT_BYTES) },
+      artifact,
+    ],
+  });
+
+  assert.deepEqual(
+    oversized.activity,
+    [artifact],
+    "the byte budget drops everything before it drops the document pointer",
+  );
+}
+
 function checkMessageIdsCanAnchorInlineRuns() {
   assert.equal(
     createAiChatMessageId(() => "00000000-0000-4000-8000-000000000000"),
@@ -736,6 +853,7 @@ async function main() {
   checkStaleTimerReevaluatesUntilItSettles();
   checkTimelineCanBePersistedWithoutTransientIds();
   checkMessageIdsCanAnchorInlineRuns();
+  checkSpecArtifactsRideTheActivityFeed();
   checkMarkdownCannotInjectHtml();
   checkMarkdownRendersChatFormatting();
   console.log("✅ markdown is escaped and rendered");

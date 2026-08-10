@@ -1,22 +1,39 @@
 "use client"
 
 import { useState } from "react"
-import { Bot, Download, FileText, Send, Sparkles, X } from "lucide-react"
+import { useRoom } from "@liveblocks/react"
+import { ArrowUp, Bot, CircleAlert, Loader2, Sparkles } from "lucide-react"
 
+import { AiChatTranscript } from "@/components/editor/ai-chat-transcript"
+import { SpecPanel } from "@/components/editor/spec-panel"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { useAiChat } from "@/hooks/use-ai-chat"
+import { useAiStatus } from "@/hooks/use-ai-status"
+import { useCollaborators } from "@/hooks/use-collaborators"
+import { useDesignRun } from "@/hooks/use-design-run"
 import { cn } from "@/lib/utils"
+import {
+  AI_DESIGN_MODELS,
+  AI_THINKING_LEVELS,
+  DEFAULT_AI_DESIGN_MODEL_ID,
+  DEFAULT_AI_THINKING_LEVEL,
+  MAX_CHAT_CONTENT_LENGTH,
+  type AiDesignModelId,
+  type AiThinkingLevel,
+} from "@/types/tasks"
 
 interface AiSidebarProps {
   isOpen: boolean
-  onClose: () => void
-}
-
-interface ChatMessage {
-  id: string
-  role: "user" | "assistant"
-  text: string
+  useCollaboratorsSource?: typeof useCollaborators
 }
 
 const STARTER_PROMPTS = [
@@ -25,182 +42,358 @@ const STARTER_PROMPTS = [
   "Build a CI/CD pipeline",
 ]
 
-/**
- * Floating AI panel. UI only — no model calls yet, so sending a prompt echoes a
- * fixed placeholder reply. Open/close stays with EditorShell.
- */
-export function AiSidebar({ isOpen, onClose }: AiSidebarProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+/** Monochrome AI workspace with room chat and run-scoped activity streams. */
+export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const [draft, setDraft] = useState("")
+  const [modelId, setModelId] = useState<AiDesignModelId>(
+    DEFAULT_AI_DESIGN_MODEL_ID
+  )
+  const [thinkingLevel, setThinkingLevel] = useState<AiThinkingLevel>(
+    DEFAULT_AI_THINKING_LEVEL
+  )
+  const roomId = useRoom().id
+  const { message: status, isGenerating } = useAiStatus()
+  const {
+    messages,
+    send,
+    error,
+    isSending,
+    canSend,
+    selfId,
+    hasOlderMessages,
+    isFetchingOlder,
+    fetchOlderMessages,
+  } = useAiChat()
+  const { start, isRunning, turns, subscription, settle } =
+    useDesignRun(roomId)
+  const isComposerDisabled = !canSend || isSending || isRunning
 
-  const send = (text: string) => {
-    const trimmed = text.trim()
-    if (!trimmed) return
+  const submit = async (text: string) => {
+    if (isComposerDisabled) return
 
-    setMessages((current) => [
-      ...current,
-      { id: `${Date.now()}-user`, role: "user", text: trimmed },
-      {
-        id: `${Date.now()}-assistant`,
-        role: "assistant",
-        // ponytail: canned reply until generation lands (spec 20 scope limit).
-        text: "Generation isn't wired up yet — this is a preview of the chat layout.",
-      },
-    ])
+    const promptMessageId = await send(text)
+
+    if (!promptMessageId) return
+
     setDraft("")
+    await start(text, promptMessageId, { modelId, thinkingLevel })
   }
 
   return (
     <aside
+      id="ai-sidebar"
       aria-label="AI assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-3 right-3 z-40 flex w-80 max-w-[calc(100%-1.5rem)] flex-col gap-3 rounded-2xl border border-surface-border bg-surface/80 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
+        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-surface shadow-2xl shadow-page/80 transition-transform duration-200 ease-out motion-reduce:transition-none",
         isOpen ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-ai-text" />
-          <div>
-            <h2 className="text-sm font-medium text-copy-primary">
-              AI Workspace
-            </h2>
-            <p className="text-xs text-copy-muted">Collaborate with Truss</p>
-          </div>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          aria-label="Close AI sidebar"
-        >
-          <X className="h-4 w-4 text-copy-muted" />
-        </Button>
-      </div>
-
-      <Tabs defaultValue="architect" className="min-h-0 flex-1">
-        <TabsList className="w-full bg-subtle">
-          <TabsTrigger
-            value="architect"
-            className="text-copy-muted data-active:bg-ai data-active:text-copy-primary"
+      {/* No title bar. The tabs already say what the panel is, and the floating
+          control is its only close affordance. `aria-label` names the region. */}
+      <Tabs defaultValue="architect" className="min-h-0 flex-1 gap-0">
+        <div className="flex items-center gap-2 border-b border-surface-border pr-4 pl-16 xl:pl-14">
+          <TabsList
+            variant="line"
+            className="h-11 min-w-0 flex-1 justify-start gap-5 border-0 px-0"
           >
-            AI Architect
-          </TabsTrigger>
-          <TabsTrigger
-            value="specs"
-            className="text-copy-muted data-active:bg-ai data-active:text-copy-primary"
-          >
-            Specs
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="architect" className="flex min-h-0 flex-col gap-3">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {messages.length === 0 ? (
-              <EmptyChat onPick={send} />
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {messages.map((message) => (
-                  <li
-                    key={message.id}
-                    className={cn(
-                      "max-w-[85%] rounded-xl px-3 py-2 text-sm",
-                      message.role === "user"
-                        ? "self-end border-2 border-brand/50 bg-accent-dim text-copy-primary"
-                        : "self-start border border-surface-border bg-elevated text-ai-text"
-                    )}
-                  >
-                    {message.text}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <form
-            className="flex items-end gap-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              send(draft)
-            }}
-          >
-            <Textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              // Enter sends; Shift+Enter keeps the textarea's newline default.
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  send(draft)
-                }
-              }}
-              placeholder="Describe the system you want to design…"
-              aria-label="Message the AI architect"
-              // `field-sizing-content` on the base component does the growing.
-              className="max-h-40 min-h-[72px] resize-none bg-elevated text-sm"
-            />
-            <Button
-              type="submit"
-              size="icon"
-              aria-label="Send message"
-              className="bg-ai text-white hover:bg-ai/80"
+            <TabsTrigger
+              value="architect"
+              className="h-11 flex-none px-0 text-xs text-copy-muted data-active:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
             >
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
+              Chat
+            </TabsTrigger>
+            <TabsTrigger
+              value="specs"
+              className="h-11 flex-none px-0 text-xs text-copy-muted data-active:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
+            >
+              Specs
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent
+          value="architect"
+          className="flex min-h-0 flex-1 flex-col gap-0"
+        >
+          {/* Must stay a flex column: the transcript sizes itself as a flex
+              item and its scroll viewport is `h-full`, so a block parent here
+              leaves both heights indefinite — the viewport grows to fit the
+              run instead of scrolling it, and the activity spills over the
+              composer. */}
+          <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 max-xl:pt-14">
+            <AiChatTranscript
+              messages={messages}
+              selfId={selfId}
+              turns={turns}
+              status={status}
+              isRoomActive={isGenerating}
+              subscription={subscription}
+              onRunSettled={settle}
+              hasOlderMessages={hasOlderMessages}
+              isFetchingOlder={isFetchingOlder}
+              onFetchOlder={fetchOlderMessages}
+              useCollaboratorsSource={useCollaboratorsSource}
+              emptyState={
+                <EmptyChat
+                  onPick={submit}
+                  isDisabled={isComposerDisabled}
+                />
+              }
+            />
+          </div>
+
+          {/* No bar behind the composer: no top border, no fill. The box hangs
+              on the panel and the transcript scrolls up to meet it. */}
+          <div className="p-3">
+            {error ? (
+              <p
+                role="alert"
+                className="mb-2 flex items-center gap-2 text-xs text-copy-primary"
+              >
+                <CircleAlert aria-hidden className="size-3.5" />
+                {error}
+              </p>
+            ) : null}
+
+            <form
+              className="rounded-2xl border border-surface-border px-3 py-2.5 focus-within:border-copy-primary focus-within:ring-1 focus-within:ring-copy-primary/20"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submit(draft)
+              }}
+            >
+              <Textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    void submit(draft)
+                  }
+                }}
+                maxLength={MAX_CHAT_CONTENT_LENGTH}
+                disabled={isComposerDisabled}
+                placeholder={
+                  isRunning
+                    ? "Working on the canvas…"
+                    : canSend
+                      ? "Ask Truss to design or edit the system…"
+                      : "Connecting to the room…"
+                }
+                aria-label="Ask Truss to design or edit the system"
+                /*
+                 * The four background resets are all load-bearing. The textarea
+                 * primitive fills itself with `dark:bg-input/30`, and swaps to
+                 * `dark:disabled:bg-input/80` while disabled — which is exactly
+                 * when a run is in flight — so a plain `bg-transparent` loses to
+                 * both variants and the grey comes back the moment you send.
+                 */
+                className="max-h-40 min-h-12 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 disabled:bg-transparent dark:bg-transparent dark:disabled:bg-transparent"
+              />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                {/* `min-w-0` on the group, not the row: both triggers truncate
+                    their own label rather than pushing the send button out of
+                    the composer on the narrowest panel width. */}
+                <div className="flex min-w-0 items-center gap-0.5">
+                  <ModelPicker
+                    value={modelId}
+                    onChange={setModelId}
+                    disabled={isRunning}
+                  />
+                  <ThinkingPicker
+                    value={thinkingLevel}
+                    onChange={setThinkingLevel}
+                    disabled={isRunning}
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  size="icon-sm"
+                  disabled={isComposerDisabled}
+                  aria-busy={isSending || isRunning}
+                  aria-label={
+                    isSending
+                      ? "Sending"
+                      : isRunning
+                        ? "Agent is working"
+                        : "Send message"
+                  }
+                  className="size-7 shrink-0 rounded-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30"
+                >
+                  {isSending || isRunning ? (
+                    <Loader2
+                      aria-hidden
+                      className="size-3.5 motion-safe:animate-spin"
+                    />
+                  ) : (
+                    <ArrowUp aria-hidden className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
         </TabsContent>
 
-        <TabsContent value="specs" className="flex min-h-0 flex-col gap-3">
-          <Button className="w-full bg-ai text-white hover:bg-ai/80">
-            <Sparkles className="h-4 w-4" />
+        {/* Grid rows rather than a flex column: the spec list scrolls in a
+            ScrollArea, whose viewport needs a definite height to size against. */}
+        <TabsContent
+          value="specs"
+          className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 p-4 max-xl:pt-14"
+        >
+          {/* Still inert: `29` wires viewing, and triggering a run from here
+              needs the canvas graph, which this panel does not hold. */}
+          <Button className="min-h-11 w-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30">
+            <Sparkles aria-hidden className="size-4" />
             Generate Spec
           </Button>
 
-          <div className="rounded-2xl border border-surface-border bg-elevated p-3">
-            <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-ai-text" />
-              <h3 className="text-sm font-medium text-copy-primary">
-                Payments Service Spec
-              </h3>
-            </div>
-            <p className="mt-2 text-xs text-copy-muted">
-              Checkout flow, webhook retries, and ledger invariants across the
-              payment gateway boundary.
-            </p>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled
-              className="mt-2 text-copy-muted"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download
-            </Button>
-          </div>
+          {/* A room ID *is* its project ID — lib/room-id.ts. */}
+          <SpecPanel projectId={roomId} />
         </TabsContent>
       </Tabs>
     </aside>
   )
 }
 
-function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
+/**
+ * The model the next prompt runs on.
+ *
+ * The trigger is stripped to plain text and a chevron — no border, no filled
+ * background — because it sits *inside* the composer's own border and a second
+ * bordered control there reads as a nested box rather than as a setting on the
+ * thing it belongs to. The popup keeps the shadcn styling as generated.
+ */
+function ModelPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: AiDesignModelId
+  onChange: (modelId: AiDesignModelId) => void
+  disabled: boolean
+}) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-      <Bot className="h-8 w-8 text-copy-faint" />
-      <p className="text-sm text-copy-muted">
-        Ask the AI architect to draft a system, or start from a prompt below.
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as AiDesignModelId)}
+      disabled={disabled}
+      items={MODEL_ITEMS}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Design model"
+        className="h-7 gap-1 border-0 bg-transparent px-1.5 text-xs text-copy-secondary shadow-none hover:bg-elevated focus-visible:ring-1 focus-visible:ring-copy-primary/30 dark:bg-transparent dark:hover:bg-elevated [&_svg]:size-3 [&_svg]:text-copy-faint"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-56">
+        {AI_DESIGN_MODELS.map((model) => (
+          <SelectItem key={model.id} value={model.id} className="text-xs">
+            <span className="flex w-full items-center justify-between gap-3">
+              <span className="truncate">{model.label}</span>
+              <span className="shrink-0 text-copy-faint">{model.hint}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/**
+ * Base UI renders the closed trigger from this list rather than from the
+ * selected `<SelectItem>`, so the label has to be given here too — without it
+ * the trigger shows the raw model id.
+ */
+const MODEL_ITEMS = AI_DESIGN_MODELS.map((model) => ({
+  value: model.id,
+  label: model.label,
+}))
+
+/**
+ * How hard the model thinks before answering, for the next prompt.
+ *
+ * Deliberately the same stripped trigger as `ModelPicker` and sat directly
+ * beside it: they are two settings on one send, and giving this one its own
+ * chrome would read as a different kind of control. The effort is named on the
+ * trigger (`High effort`, not `High`) because next to a model name a bare
+ * adjective reads as a property of the model.
+ */
+function ThinkingPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: AiThinkingLevel
+  onChange: (thinkingLevel: AiThinkingLevel) => void
+  disabled: boolean
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as AiThinkingLevel)}
+      disabled={disabled}
+      items={THINKING_ITEMS}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Thinking effort"
+        className="h-7 gap-1 border-0 bg-transparent px-1.5 text-xs text-copy-secondary shadow-none hover:bg-elevated focus-visible:ring-1 focus-visible:ring-copy-primary/30 dark:bg-transparent dark:hover:bg-elevated [&_svg]:size-3 [&_svg]:text-copy-faint"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-56">
+        {AI_THINKING_LEVELS.map((level) => (
+          <SelectItem key={level.id} value={level.id} className="text-xs">
+            <span className="flex w-full items-center justify-between gap-3">
+              <span className="truncate">{level.label}</span>
+              <span className="shrink-0 text-copy-faint">{level.hint}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** Same reason as `MODEL_ITEMS`: Base UI reads the closed trigger from here. */
+const THINKING_ITEMS = AI_THINKING_LEVELS.map((level) => ({
+  value: level.id,
+  label: level.label,
+}))
+
+function EmptyChat({
+  onPick,
+  isDisabled,
+}: {
+  onPick: (prompt: string) => void
+  isDisabled: boolean
+}) {
+  return (
+    <div className="flex h-full min-h-80 flex-col justify-center py-8">
+      <span className="grid size-10 place-items-center rounded-xl border border-surface-border bg-page">
+        <Bot aria-hidden className="size-5 text-copy-primary" />
+      </span>
+      <h3 className="mt-4 text-base font-medium text-copy-primary">
+        What should we design?
+      </h3>
+      <p className="mt-1 text-sm leading-relaxed text-copy-muted">
+        Describe a system or ask for an edit. Truss streams its work here while
+        the shared canvas updates.
       </p>
-      <div className="flex flex-wrap justify-center gap-2">
+      <div className="mt-5 flex flex-col gap-2">
         {STARTER_PROMPTS.map((prompt) => (
-          <button
+          <Button
             key={prompt}
             type="button"
+            variant="outline"
             onClick={() => onPick(prompt)}
-            className="rounded-xl bg-subtle px-2.5 py-1.5 text-xs text-ai-text transition-colors hover:bg-elevated"
+            disabled={isDisabled}
+            className="min-h-11 justify-start border-surface-border bg-page px-3 text-left text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
           >
             {prompt}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

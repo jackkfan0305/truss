@@ -1,0 +1,20 @@
+/// A triggered Trigger.dev run, recorded so a later request can prove the caller
+/// owns the run before it is handed a run-scoped realtime token.
+///
+/// No relation to `Project`: deletion tombstones the project row rather than
+/// removing it (lib/project-lifecycle.ts), so there is nothing for a cascade to
+/// clean up and a foreign key would only add a write-time constraint.
+model TaskRun {
+  id String @id @default(cuid())
+
+  /// Trigger.dev run ID. Unique, which in Postgres is itself the index the
+  /// token route's lookup uses — a separate `@@index([runId])` would be a
+  /// duplicate of it.
+  runId String @unique
+
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, projectId])
+}

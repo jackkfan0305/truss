@@ -77,7 +77,7 @@ export async function getAccessibleProject(
 }
 
 export type Authorization =
-  | { ok: true; role: ProjectRole; ownerId: string }
+  | { ok: true; role: ProjectRole; userId: string; ownerId: string }
   | { ok: false; response: Response };
 
 /**
@@ -93,8 +93,9 @@ export type Authorization =
  * segment — but note it is the opposite trade-off from `getAccessibleProject`,
  * which hides existence because it answers unauthenticated page loads.
  *
- * `ownerId` comes back on success so callers that need it (the member list)
- * do not repeat the lookup this function already performed.
+ * `userId` and `ownerId` come back on success so callers that need them (the
+ * member list, the task-run record) do not repeat a lookup this function has
+ * already performed. They differ whenever the caller is a collaborator.
  *
  * Deletion tombstones answer 404 for every normal caller. The DELETE handler
  * alone opts into them so the original owner can retry failed room cleanup.
@@ -132,7 +133,7 @@ export async function authorizeProject(
   }
 
   if (project.ownerId === userId) {
-    return { ok: true, role: "owner", ownerId: project.ownerId };
+    return { ok: true, role: "owner", userId, ownerId: project.ownerId };
   }
 
   if (requireOwner) {
@@ -153,6 +154,6 @@ export async function authorizeProject(
   });
 
   return collaborator
-    ? { ok: true, role: "collaborator", ownerId: project.ownerId }
+    ? { ok: true, role: "collaborator", userId, ownerId: project.ownerId }
     : { ok: false, response: jsonError("Forbidden", 403) };
 }

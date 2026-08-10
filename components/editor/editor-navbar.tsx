@@ -1,13 +1,13 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { UserButton } from "@clerk/nextjs"
 import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Share2,
-  Sparkles,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -30,8 +30,21 @@ interface EditorNavbarProps {
    * there would throw (19-presence-avatars-cursors).
    */
   presence?: ReactNode
+  /**
+   * Workspace only — the canvas save state. A slot for the same reason
+   * `presence` is one: it is driven by flow state that only exists inside the
+   * canvas, and the editor home has no canvas at all (21-canvas-autosave).
+   */
+  saveStatus?: ReactNode
+  /** Account control supplied by the shell so this component stays pure. */
+  profile?: ReactNode
   className?: string
 }
+
+const FLOATING_SURFACE =
+  "rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
+const FLOATING_CONTROL =
+  "pointer-events-auto absolute top-3 z-10 rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
 
 export function EditorNavbar({
   isSidebarOpen,
@@ -42,75 +55,113 @@ export function EditorNavbar({
   isAiSidebarOpen = false,
   onToggleAiSidebar,
   presence,
+  saveStatus,
+  profile,
   className,
 }: EditorNavbarProps) {
-  const ToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
+  const LeftToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
+  const RightToggleIcon = isAiSidebarOpen
+    ? PanelRightClose
+    : PanelRightOpen
 
   return (
     <header
       className={cn(
-        "flex h-14 shrink-0 items-center gap-2 border-b border-surface-border bg-page px-3",
+        "pointer-events-none absolute inset-0 z-50 min-w-0",
         className
       )}
     >
-      <div className="flex flex-1 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleSidebar}
-          aria-expanded={isSidebarOpen}
-          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
-        >
-          <ToggleIcon className="h-5 w-5 text-copy-secondary" />
-        </Button>
-      </div>
+      <Button
+        variant="ghost"
+        size="icon-lg"
+        onClick={onToggleSidebar}
+        aria-controls="projects-sidebar"
+        aria-expanded={isSidebarOpen}
+        aria-label={
+          isSidebarOpen ? "Close projects sidebar" : "Open projects sidebar"
+        }
+        className={cn(
+          FLOATING_CONTROL,
+          isSidebarOpen
+            ? "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
+            : "left-3"
+        )}
+      >
+        <LeftToggleIcon className="size-5 text-copy-secondary" />
+      </Button>
 
-      <div className="flex min-w-0 flex-1 items-center justify-center">
-        {projectName ? (
-          <p className="truncate text-sm font-medium text-copy-primary">
+      {projectName && !isSidebarOpen ? (
+        <div
+          className={cn(
+            FLOATING_SURFACE,
+            "pointer-events-auto absolute flex h-9 min-w-0 items-center px-3",
+            isAiSidebarOpen
+              ? "top-15 left-3 max-w-[calc(100%-14rem)] xl:top-3 xl:left-14 xl:max-w-sm"
+              : "top-3 left-14 max-w-[calc(100%-7rem)] sm:max-w-sm"
+          )}
+        >
+          <p className="min-w-0 truncate pr-2 text-sm font-medium text-copy-primary">
             {projectName}
           </p>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      <div className="flex flex-1 items-center justify-end gap-2">
+      <div
+        className={cn(
+          FLOATING_SURFACE,
+          "pointer-events-auto absolute flex h-10 items-center gap-1 px-1",
+          isAiSidebarOpen
+            ? "top-15 right-3 xl:top-3 xl:right-[calc(26rem+0.75rem)]"
+            : "top-15 right-3 sm:top-3 sm:right-14"
+        )}
+      >
+        {saveStatus}
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
-            <LayoutTemplate className="h-4 w-4" />
-            <span className="hidden sm:inline">Templates</span>
-          </Button>
-        ) : null}
-
-        {onToggleAiSidebar ? (
-          <>
-            <Button variant="ghost" size="sm" onClick={onShare}>
-              <Share2 className="h-4 w-4" />
-              <span className="hidden sm:inline">Share</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggleAiSidebar}
-              aria-expanded={isAiSidebarOpen}
-              aria-label={
-                isAiSidebarOpen ? "Close AI assistant" : "Open AI assistant"
+            <LayoutTemplate className="size-4" />
+            <span
+              className={
+                isAiSidebarOpen ? "hidden xl:inline" : "hidden sm:inline"
               }
             >
-              <Sparkles
-                className={cn(
-                  "h-5 w-5",
-                  isAiSidebarOpen ? "text-ai-text" : "text-copy-secondary"
-                )}
-              />
-            </Button>
-          </>
+              Templates
+            </span>
+          </Button>
         ) : null}
-
+        {onShare ? (
+          <Button variant="ghost" size="sm" onClick={onShare}>
+            <Share2 className="size-4" />
+            <span
+              className={
+                isAiSidebarOpen ? "hidden xl:inline" : "hidden sm:inline"
+              }
+            >
+              Share
+            </span>
+          </Button>
+        ) : null}
         {presence}
-
-        <UserButton />
+        {profile}
       </div>
+
+      {onToggleAiSidebar ? (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          onClick={onToggleAiSidebar}
+          aria-controls="ai-sidebar"
+          aria-expanded={isAiSidebarOpen}
+          aria-label={isAiSidebarOpen ? "Close AI sidebar" : "Open AI sidebar"}
+          className={cn(
+            FLOATING_CONTROL,
+            isAiSidebarOpen
+              ? "right-[calc(min(26rem,calc(100vw-1.5rem))-3.75rem)] xl:right-[calc(26rem-3rem)]"
+              : "right-3"
+          )}
+        >
+          <RightToggleIcon className="size-5 text-copy-secondary" />
+        </Button>
+      ) : null}
     </header>
   )
 }

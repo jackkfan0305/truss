@@ -7,6 +7,7 @@ import {
   buildShapeGeometry,
   isSvgShape,
 } from "@/lib/node-shape-geometry";
+import { cn } from "@/lib/utils";
 import { NODE_COLORS, type NodeColor, type NodeShape } from "@/types/canvas";
 
 /**
@@ -41,6 +42,12 @@ interface NodeShapeFrameProps {
   width: number;
   height: number;
   selected?: boolean;
+  /**
+   * Applied to the shape's own wrapper rather than the React Flow node, which
+   * owns `transform` for positioning — an arrival animation there would fight
+   * it and drag the node across the canvas.
+   */
+  className?: string;
   children?: ReactNode;
 }
 
@@ -50,6 +57,7 @@ export function NodeShapeFrame({
   width,
   height,
   selected = false,
+  className,
   children,
 }: NodeShapeFrameProps) {
   const { fill, text } = NODE_COLORS[color];
@@ -57,7 +65,10 @@ export function NodeShapeFrame({
   const stroke = selected ? text : `${text}${REST_STROKE_ALPHA}`;
 
   return (
-    <div className="relative h-full w-full" style={{ color: text }}>
+    <div
+      className={cn("relative h-full w-full", className)}
+      style={{ color: text }}
+    >
       {isSvgShape(shape) ? (
         <ShapeSvg
           shape={shape}

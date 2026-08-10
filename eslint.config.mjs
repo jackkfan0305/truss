@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    // Trigger.dev build artifacts bundle third-party code and are not source.
+    ".trigger/**",
     "next-env.d.ts",
   ]),
 ]);

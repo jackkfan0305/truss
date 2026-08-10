@@ -48,6 +48,7 @@ export function CanvasRoom({ roomId, children }: CanvasRoomProps) {
 }
 
 interface CanvasSurfaceProps {
+  projectId: string;
   /** Owned by the editor shell, since the navbar is what opens the picker. */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
@@ -55,6 +56,7 @@ interface CanvasSurfaceProps {
 
 /** The canvas itself, with the room's connection and loading states around it. */
 export function CanvasSurface({
+  projectId,
   isTemplatesOpen,
   onTemplatesOpenChange,
 }: CanvasSurfaceProps) {
@@ -67,6 +69,7 @@ export function CanvasSurface({
         fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
       >
         <Canvas
+          projectId={projectId}
           isTemplatesOpen={isTemplatesOpen}
           onTemplatesOpenChange={onTemplatesOpenChange}
         />

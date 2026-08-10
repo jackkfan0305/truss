@@ -29,10 +29,15 @@ import {
 import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
+import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
+import { useCanvasSave } from "@/components/canvas/canvas-save-context";
+import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
+import { useCanvasRestore } from "@/hooks/use-canvas-restore";
+import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -106,12 +111,16 @@ const isConnectionBetweenNodes: IsValidConnection<CanvasEdge> = ({
 export function Canvas(props: CanvasProps) {
   return (
     <ReactFlowProvider>
-      <CanvasFlow {...props} />
+      <CanvasMotionProvider>
+        <CanvasFlow {...props} />
+      </CanvasMotionProvider>
     </ReactFlowProvider>
   );
 }
 
 interface CanvasProps {
+  /** Doubles as the room ID and the project the canvas is persisted under. */
+  projectId: string;
   /**
    * The starter template picker is opened from the editor navbar, which sits
    * outside the room — but importing one is a Storage write, so the dialog is
@@ -121,7 +130,18 @@ interface CanvasProps {
   onTemplatesOpenChange: (open: boolean) => void;
 }
 
-function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
+function CanvasFlow({
+  projectId,
+  isTemplatesOpen,
+  onTemplatesOpenChange,
+}: CanvasProps) {
+  /*
+   * Autosave state reaches the navbar through context rather than a callback
+   * prop: the indicator lives outside `ReactFlowProvider` and cannot read the
+   * flow state that drives it, and pushing it up through an effect would
+   * re-render the whole workspace an extra time per save (21-canvas-autosave).
+   */
+  const { setStatus: setSaveStatus, registerSaveNow } = useCanvasSave();
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
     useLiveblocksFlow<CanvasNode, CanvasEdge>({
       suspense: true,
@@ -231,6 +251,45 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
     void fitView({ duration: VIEWPORT_TRANSITION_MS });
   }, [fitView, nodes]);
 
+  /**
+   * A restored snapshot is written through the same `add` changes a drop uses,
+   * so it lands in Liveblocks Storage and reaches everyone else in the room
+   * rather than existing only in this client's local flow state.
+   */
+  const handleRestore = useCallback(
+    (snapshot: CanvasSnapshot) => {
+      onNodesChange(snapshot.nodes.map((node) => ({ type: "add", item: node })));
+      onEdgesChange(snapshot.edges.map((edge) => ({ type: "add", item: edge })));
+
+      isAwaitingImportedNodes.current = true;
+    },
+    [onEdgesChange, onNodesChange]
+  );
+
+  /*
+   * ponytail: two clients opening the *same* cold room within one round trip
+   * can both restore, which duplicates every node. Narrow enough to accept for
+   * now — it needs an empty room, which means nobody has edited it since the
+   * last save. A Storage-held "restored" flag is the fix if it ever shows up.
+   */
+  useCanvasRestore(
+    projectId,
+    nodes.length === 0 && edges.length === 0,
+    handleRestore
+  );
+
+  // Status is set straight from the save lifecycle, so the navbar indicator
+  // updates without this component re-rendering to report it.
+  const { saveNow } = useCanvasAutosave(projectId, nodes, edges, setSaveStatus);
+
+  useEffect(() => {
+    registerSaveNow(saveNow);
+
+    // The handle must not outlive the canvas, or a Save click on the editor
+    // home would call into an unmounted room.
+    return () => registerSaveNow(null);
+  }, [registerSaveNow, saveNow]);
+
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {
       return;
@@ -322,7 +381,8 @@ function CanvasFlow({ isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
         // <body> instead. Nodes are still individually tab-reachable.
         tabIndex={-1}
         fitView
-        // Themes React Flow's own chrome (minimap, attribution) to match the dark
+        proOptions={{ hideAttribution: true }}
+        // Themes React Flow's remaining chrome (the minimap) to match the dark
         // workspace without restyling its internals.
         colorMode="dark"
       >

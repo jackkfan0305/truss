@@ -1,0 +1,27 @@
+/// A generated Markdown spec. Prisma holds the pointer, Vercel Blob holds the
+/// document — the storage split in `context/architecture-context.md`.
+///
+/// Unlike `TaskRun` this *does* relate to `Project`: a spec is only ever read
+/// through a project-scoped route, and deletion tombstones the project row
+/// rather than removing it, so the cascade is a safety net that never fires.
+model ProjectSpec {
+  /// The Trigger.dev run ID that produced this spec — no `@default`, because the
+  /// ID is chosen by the writer, not the database. `trigger/generate-spec.ts`
+  /// explains why: the blob pathname needs an ID before the upload, and reusing
+  /// the run's own makes blob + row idempotent under retry.
+  id String @id
+
+  projectId String
+
+  /// Vercel Blob URL of the Markdown document. The store is private, so this is
+  /// not fetchable on its own (403) — a pointer for the download route to
+  /// resolve with the store token, never a link to hand to a browser.
+  filePath String
+
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The list read is "this project's specs, newest first".
+  @@index([projectId, createdAt])
+}

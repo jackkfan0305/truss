@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   SHAPE_DRAG_MIME,
@@ -19,9 +20,18 @@ import {
 import { resolveShortcut, type ShortcutKeys } from "../lib/canvas-shortcuts";
 import { dedupeByUser, getInitials } from "../lib/presence";
 import {
+  MAX_SNAPSHOT_NODES,
+  canvasBlobPath,
+  parseCanvasSnapshot,
+  serializeCanvasSnapshot,
+} from "../lib/canvas-snapshot";
+import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
+  CANVAS_NODE_TYPE,
   CONNECTION_SNAP_RADIUS,
+  DEFAULT_NODE_COLOR,
+  DEFAULT_NODE_SHAPE,
   NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
@@ -412,6 +422,101 @@ function checkAvatarsAreOnePerPerson() {
   assert.deepEqual(dedupeByUser([]), [], "an empty room dedupes to nothing");
 }
 
+function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
+  const validNode = {
+    id: "node-1",
+    type: CANVAS_NODE_TYPE,
+    position: { x: 10, y: 20 },
+    width: 180,
+    height: 80,
+    data: { label: "API", color: "blue", shape: "rectangle" },
+  };
+
+  const roundTripped = parseCanvasSnapshot(
+    JSON.parse(
+      serializeCanvasSnapshot(
+        parseCanvasSnapshot({ nodes: [validNode], edges: [] })!,
+      ),
+    ),
+  );
+
+  assert.equal(roundTripped?.nodes.length, 1, "a valid node survives a round trip");
+  assert.deepEqual(
+    roundTripped?.nodes[0]?.data,
+    { label: "API", color: "blue", shape: "rectangle" },
+    "node data is preserved verbatim",
+  );
+
+  // Anything that is not a `{ nodes, edges }` envelope is rejected outright.
+  for (const junk of [null, undefined, 42, "{}", [], {}, { nodes: [] }, { edges: [] }]) {
+    assert.equal(
+      parseCanvasSnapshot(junk),
+      null,
+      `${JSON.stringify(junk) ?? "undefined"} is not a snapshot`,
+    );
+  }
+
+  // A single malformed entry is dropped; the rest of the diagram still loads.
+  const partial = parseCanvasSnapshot({
+    nodes: [
+      validNode,
+      { id: "no-position" },
+      { id: "nan", position: { x: Number.NaN, y: 0 } },
+      { position: { x: 1, y: 1 } },
+      // Duplicate ID: the first wins, the second is dropped.
+      { ...validNode, data: { ...validNode.data, label: "Impostor" } },
+    ],
+    edges: [],
+  });
+
+  assert.equal(partial?.nodes.length, 1, "malformed and duplicate nodes are dropped");
+  assert.equal(partial?.nodes[0]?.data.label, "API", "the first node of an ID wins");
+
+  // An unknown colour or shape degrades rather than failing the snapshot.
+  const degraded = parseCanvasSnapshot({
+    nodes: [{ ...validNode, data: { label: "x", color: "chartreuse", shape: "blob" } }],
+    edges: [],
+  });
+
+  assert.equal(degraded?.nodes[0]?.data.color, DEFAULT_NODE_COLOR);
+  assert.equal(degraded?.nodes[0]?.data.shape, DEFAULT_NODE_SHAPE);
+
+  // Edges are only kept when both endpoints are in the same snapshot.
+  const withEdges = parseCanvasSnapshot({
+    nodes: [validNode, { ...validNode, id: "node-2" }],
+    edges: [
+      { id: "edge-1", source: "node-1", target: "node-2", data: { label: "calls" } },
+      { id: "edge-2", source: "node-1", target: "missing" },
+      { id: "edge-3", source: "ghost", target: "node-2" },
+    ],
+  });
+
+  assert.equal(withEdges?.edges.length, 1, "edges to absent nodes are dropped");
+  assert.equal(withEdges?.edges[0]?.data?.label, "calls");
+  assert.deepEqual(
+    withEdges?.edges[0]?.style,
+    CANVAS_EDGE_STYLE,
+    "edge style comes from the constant, not from the stored blob",
+  );
+
+  // The size ceiling rejects the whole payload rather than truncating it.
+  const oversized = {
+    nodes: Array.from({ length: MAX_SNAPSHOT_NODES + 1 }, (_, index) => ({
+      ...validNode,
+      id: `node-${index}`,
+    })),
+    edges: [],
+  };
+
+  assert.equal(
+    parseCanvasSnapshot(oversized),
+    null,
+    "a snapshot above the node ceiling is rejected",
+  );
+
+  assert.equal(canvasBlobPath("my-project"), "canvas/my-project.json");
+}
+
 function checkTemplateBoundsEncloseEveryNode() {
   assert.deepEqual(
     getTemplateBounds([]),
@@ -445,6 +550,19 @@ function checkTemplateBoundsEncloseEveryNode() {
   }
 }
 
+function checkCanvasBrandingIsHidden() {
+  const source = readFileSync(
+    new URL("../components/canvas/canvas.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /proOptions=\{\{\s*hideAttribution:\s*true\s*}}/,
+    "the bottom-right React Flow attribution box stays hidden",
+  );
+}
+
 function main() {
   checkPayloadRoundTrips();
   checkDefaultSizeRules();
@@ -460,8 +578,10 @@ function main() {
   checkTemplateBoundsEncloseEveryNode();
   checkInitialsAlwaysRenderSomething();
   checkAvatarsAreOnePerPerson();
+  checkSnapshotsRejectJunkAndSurviveRoundTrips();
+  checkCanvasBrandingIsHidden();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates and presence initials/dedupe verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials/dedupe and snapshot validation verified",
   );
 }
 

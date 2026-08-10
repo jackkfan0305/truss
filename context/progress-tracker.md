@@ -75,7 +75,10 @@ Update this file whenever the current phase, active feature, or implementation s
     exactly 10 acquired a slot, and a request after the rolling window reset was
     accepted. Route checks prove authorization, prompt verification, quota,
     Trigger failure and persistence failure all stop at the intended boundary.
-  - Review, full verification, CI observation and merge remain pending.
+  - `npm test` now runs every deterministic contract program, with live-service
+    checks grouped under `npm run verify:integration`. The new Quality workflow
+    gates pull requests on install, lint, unit verification, typecheck and build.
+  - CI observation and merge remain pending.
 
 - `37-inline-spec-writer` complete. `writeSpec` runs in the orchestrator's
   process, so no part of a turn suspends the run any more.

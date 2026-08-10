@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import {
   BrainCircuit,
   Check,
@@ -51,15 +52,19 @@ export function AiRunActivity({ state }: AiRunActivityProps) {
             ? "Generation stopped"
             : "Work complete")
   const stepCount = activity.length
+  // Whether the log starts open is a mount-time decision: a live run shows its
+  // work, a finished one from history stays folded. Recomputing it as the phase
+  // advances would not reopen or collapse anything — an uncontrolled Accordion
+  // reads its default once — it would only make Base UI warn that the default
+  // moved. A reader who opened or closed the log keeps their choice.
+  const [defaultOpen] = useState(() => (isRunning || isStopped ? [state.id] : []))
 
   return (
     <div data-run-id={state.runId ?? undefined}>
       {/* No card: the work log sits on the panel background like the messages
           around it, so a run reads as part of the conversation rather than as
           a widget dropped into it. */}
-      <Accordion
-        defaultValue={isRunning || isStopped ? [state.id] : []}
-      >
+      <Accordion defaultValue={defaultOpen}>
         <AccordionItem value={state.id} className="border-0">
           <AccordionTrigger className="min-h-11 gap-3 py-1 hover:no-underline focus-visible:border-copy-primary focus-visible:ring-copy-primary/20">
             <span className="flex min-w-0 items-center gap-2.5">

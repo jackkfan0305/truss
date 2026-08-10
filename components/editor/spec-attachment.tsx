@@ -244,12 +244,19 @@ function SpecTimestamp({
   return (
     <time dateTime={iso} className={cn("block text-xs", className)}>
       {prefix}
-      {isHydrated
-        ? new Date(sentAt).toLocaleString(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })
-        : iso.slice(0, 10)}
+      {isHydrated ? formatSpecTimestamp(sentAt) : iso.slice(0, 10)}
     </time>
   )
+}
+
+/**
+ * Called only once `useHydrated` reports the browser is rendering, so
+ * `undefined` here resolves to the *reader's* locale and timezone rather than
+ * whatever the server happens to run in.
+ */
+function formatSpecTimestamp(sentAt: number): string {
+  return new Date(sentAt).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }

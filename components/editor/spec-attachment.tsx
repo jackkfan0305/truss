@@ -197,6 +197,23 @@ function SpecPreviewBody({
 function CopyAction({ markdown }: { markdown: string }) {
   const { status, copy } = useCopyToClipboard()
 
+  if (status === "error") {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+        <ManualSpecCopyFallback markdown={markdown} />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void copy(markdown)}
+          className="shrink-0 text-copy-muted hover:bg-subtle hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
+        >
+          <Copy aria-hidden className="size-3.5" />
+          Retry copy
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <Button
       variant="ghost"
@@ -206,19 +223,37 @@ function CopyAction({ markdown }: { markdown: string }) {
     >
       {status === "copied" ? (
         <Check aria-hidden className="size-3.5 text-state-success" />
-      ) : status === "error" ? (
-        <CircleAlert aria-hidden className="size-3.5" />
       ) : (
         <Copy aria-hidden className="size-3.5" />
       )}
       {/* The label carries the outcome, so a screen reader hears the change
           rather than only seeing a swapped icon. */}
-      {status === "copied"
-        ? "Copied!"
-        : status === "error"
-          ? "Press Ctrl+C"
-          : "Copy"}
+      {status === "copied" ? "Copied!" : "Copy"}
     </Button>
+  )
+}
+
+/** The denied-clipboard fallback exposes the exact source it asks users to copy. */
+export function ManualSpecCopyFallback({ markdown }: { markdown: string }) {
+  const selectAll = (element: HTMLTextAreaElement) => element.select()
+
+  return (
+    <label className="min-w-0 flex-1 space-y-1.5 text-xs text-copy-muted">
+      <span className="flex items-center gap-1.5">
+        <CircleAlert aria-hidden className="size-3.5 shrink-0" />
+        Clipboard access failed. Copy the Markdown manually.
+      </span>
+      <textarea
+        aria-label="Spec Markdown to copy manually"
+        autoFocus
+        readOnly
+        rows={3}
+        value={markdown}
+        onClick={(event) => selectAll(event.currentTarget)}
+        onFocus={(event) => selectAll(event.currentTarget)}
+        className="block w-full resize-y rounded-lg border border-surface-border bg-page px-2.5 py-2 font-mono text-xs leading-relaxed text-copy-primary outline-none focus-visible:border-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/20"
+      />
+    </label>
   )
 }
 

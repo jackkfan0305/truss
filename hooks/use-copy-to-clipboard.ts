@@ -9,7 +9,7 @@ export type CopyStatus = "idle" | "copied" | "error"
 
 export interface CopyToClipboard {
   status: CopyStatus
-  /** Writes `text` and shows the outcome for `COPIED_FEEDBACK_MS`. */
+  /** Writes `text`; success clears automatically while an actionable error stays. */
   copy: (text: string) => Promise<void>
 }
 
@@ -24,8 +24,8 @@ export interface CopyToClipboard {
  *
  * A failed write is a state, never a throw. `navigator.clipboard` rejects on an
  * insecure origin and when the permission is denied, and a button that silently
- * does nothing reads as a broken button — the caller renders `"error"` so the
- * reader knows to select the text themselves.
+ * does nothing reads as a broken button. Unlike the brief success confirmation,
+ * an actionable error stays visible until the user retries or closes the caller.
  */
 export function useCopyToClipboard(): CopyToClipboard {
   const [status, setStatus] = useState<CopyStatus>("idle")
@@ -46,10 +46,16 @@ export function useCopyToClipboard(): CopyToClipboard {
       next = "error"
     }
 
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    timeoutRef.current = null
     setStatus(next)
 
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => setStatus("idle"), COPIED_FEEDBACK_MS)
+    if (next === "copied") {
+      timeoutRef.current = setTimeout(() => {
+        setStatus("idle")
+        timeoutRef.current = null
+      }, COPIED_FEEDBACK_MS)
+    }
   }, [])
 
   return { status, copy }

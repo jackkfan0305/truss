@@ -14,6 +14,7 @@ import {
 } from "../components/editor/ai-run-activity";
 import { AiChatTranscript } from "../components/editor/ai-chat-transcript";
 import { ChatEntry } from "../components/editor/chat-entry";
+import { ManualSpecCopyFallback } from "../components/editor/spec-attachment";
 import type { DesignRunObserverProps } from "../components/editor/design-run-observer";
 import type { ChatMessage } from "../lib/ai-chat";
 
@@ -192,6 +193,22 @@ function checkSpecPreviewCopiesMarkdownSource() {
   );
 }
 
+/** A denied Clipboard API write must expose the source the instruction refers to. */
+function checkSpecCopyFailureExposesSelectableMarkdown() {
+  const markdown = "# Queue\n\nRetry failed jobs with backoff.";
+  const html = renderEntry(<ManualSpecCopyFallback markdown={markdown} />);
+
+  assert.ok(
+    html.includes("Copy the Markdown manually"),
+    "the fallback explains the manual action",
+  );
+  assert.ok(html.includes("<textarea"), "the fallback exposes a selectable control");
+  assert.ok(
+    html.includes("# Queue\n\nRetry failed jobs with backoff."),
+    "the selectable control contains the exact Markdown source",
+  );
+}
+
 /**
  * One clipboard implementation, not one per dialog.
  *
@@ -214,8 +231,13 @@ function checkClipboardFeedbackLivesInOneHook() {
   );
   assert.match(
     hook,
-    /if\s*\(timeoutRef\.current\)\s*clearTimeout\(timeoutRef\.current\)\s*\n\s*timeoutRef\.current\s*=\s*setTimeout/,
+    /if\s*\(timeoutRef\.current\)\s*clearTimeout\(timeoutRef\.current\)/,
     "a second copy re-arms the timer rather than racing the first",
+  );
+  assert.match(
+    hook,
+    /if\s*\(next\s*===\s*"copied"\)\s*{[\s\S]*?setTimeout/,
+    "only transient success feedback clears automatically",
   );
   assert.match(hook, /catch\s*{[\s\S]*?next\s*=\s*"error"/, "a denied write is a state, not a throw");
 
@@ -241,5 +263,6 @@ checkOwnPromptStaysQuiet();
 checkIncompleteRunKeepsItsPartialWork();
 checkRunObserverDoesNotDependOnVisibleMessages();
 checkSpecPreviewCopiesMarkdownSource();
+checkSpecCopyFailureExposesSelectableMarkdown();
 checkClipboardFeedbackLivesInOneHook();
 console.log("✅ ai-chat collaborator markup and spec copy checks passed");

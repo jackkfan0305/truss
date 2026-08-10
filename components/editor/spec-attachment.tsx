@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { CircleAlert, Download, FileText, Loader2 } from "lucide-react"
+import { Check, CircleAlert, Copy, Download, FileText, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useHydrated } from "@/hooks/use-hydrated"
 import { specDownloadHref, useSpecContent } from "@/hooks/use-project-specs"
 import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
@@ -174,10 +175,50 @@ function SpecPreviewBody({
         ) : null}
       </ScrollArea>
 
-      <div className="flex justify-end border-t border-surface-border pt-3">
+      <div className="flex justify-end gap-1 border-t border-surface-border pt-3">
+        {/* Only once there is a document to copy — a button that would put an
+            error message or an empty string on the clipboard is worse than no
+            button. */}
+        {markdown ? <CopyAction markdown={markdown} /> : null}
         <DownloadAction spec={spec} projectId={projectId} withLabel />
       </div>
     </DialogContent>
+  )
+}
+
+/**
+ * Copies the spec's Markdown source, not the rendered HTML.
+ *
+ * The document is Markdown everywhere else it exists — in Blob, in the
+ * download, in the model's output — so pasting it into an editor or an issue
+ * should reproduce it, not a flattened copy of what the dialog happens to look
+ * like.
+ */
+function CopyAction({ markdown }: { markdown: string }) {
+  const { status, copy } = useCopyToClipboard()
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => void copy(markdown)}
+      className="shrink-0 text-copy-muted hover:bg-subtle hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
+    >
+      {status === "copied" ? (
+        <Check aria-hidden className="size-3.5 text-state-success" />
+      ) : status === "error" ? (
+        <CircleAlert aria-hidden className="size-3.5" />
+      ) : (
+        <Copy aria-hidden className="size-3.5" />
+      )}
+      {/* The label carries the outcome, so a screen reader hears the change
+          rather than only seeing a swapped icon. */}
+      {status === "copied"
+        ? "Copied!"
+        : status === "error"
+          ? "Press Ctrl+C"
+          : "Copy"}
+    </Button>
   )
 }
 

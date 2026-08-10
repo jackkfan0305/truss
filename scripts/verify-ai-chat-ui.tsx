@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { ImageConfigContext } from "next/dist/shared/lib/image-config-context.shared-runtime";
 import {
@@ -161,10 +162,84 @@ function checkRunObserverDoesNotDependOnVisibleMessages() {
   }
 }
 
+/**
+ * The spec preview's copy button.
+ *
+ * Asserted against the source, not a render: the preview only exists inside an
+ * open dialog, and there is no DOM in this toolchain to open one. What is worth
+ * pinning is not the markup anyway — it is the three things that fail silently.
+ */
+function checkSpecPreviewCopiesMarkdownSource() {
+  const source = readFileSync(
+    new URL("../components/editor/spec-attachment.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // The clipboard gets the document, not the dialog's rendered HTML.
+  assert.match(source, /copy\(markdown\)/);
+  assert.doesNotMatch(
+    source,
+    /copy\(\s*renderChatMarkdown/,
+    "the clipboard gets Markdown source, never the rendered HTML",
+  );
+
+  // No button while the fetch is in flight or has failed: copying an error
+  // message or an empty string is worse than offering nothing.
+  assert.match(
+    source,
+    /\{markdown\s*\?\s*<CopyAction/,
+    "the copy button waits for a document to exist",
+  );
+}
+
+/**
+ * One clipboard implementation, not one per dialog.
+ *
+ * The timeout is the part that rots: a component that unmounts inside the
+ * feedback window (the spec preview closes on Escape, routinely) leaves a timer
+ * holding a setter for a component that is gone. It is cleared on unmount and
+ * re-armed on every copy, in one place — so a second open-coded `writeText` is
+ * a regression, not a style question.
+ */
+function checkClipboardFeedbackLivesInOneHook() {
+  const hook = readFileSync(
+    new URL("../hooks/use-copy-to-clipboard.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    hook,
+    /return\s*\(\)\s*=>\s*{\s*if\s*\(timeoutRef\.current\)\s*clearTimeout\(timeoutRef\.current\)/,
+    "the feedback timer is cleared on unmount",
+  );
+  assert.match(
+    hook,
+    /if\s*\(timeoutRef\.current\)\s*clearTimeout\(timeoutRef\.current\)\s*\n\s*timeoutRef\.current\s*=\s*setTimeout/,
+    "a second copy re-arms the timer rather than racing the first",
+  );
+  assert.match(hook, /catch\s*{[\s\S]*?next\s*=\s*"error"/, "a denied write is a state, not a throw");
+
+  for (const path of [
+    "../components/editor/spec-attachment.tsx",
+    "../components/editor/share-dialog.tsx",
+  ]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+
+    assert.match(source, /useCopyToClipboard\(\)/, `${path} uses the shared hook`);
+    assert.doesNotMatch(
+      source,
+      /navigator\.clipboard/,
+      `${path} must not open-code a second clipboard write`,
+    );
+  }
+}
+
 checkCollaboratorIdentityIsVisible();
 checkLegacyCollaboratorUsesInitials();
 checkLegacyCollaboratorUsesLivePresenceAvatar();
 checkOwnPromptStaysQuiet();
 checkIncompleteRunKeepsItsPartialWork();
 checkRunObserverDoesNotDependOnVisibleMessages();
-console.log("✅ ai-chat collaborator markup checks passed");
+checkSpecPreviewCopiesMarkdownSource();
+checkClipboardFeedbackLivesInOneHook();
+console.log("✅ ai-chat collaborator markup and spec copy checks passed");

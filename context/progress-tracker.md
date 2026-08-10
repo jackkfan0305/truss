@@ -58,6 +58,18 @@ Update this file whenever the current phase, active feature, or implementation s
     announcing a subagent lands only after that subagent finished. Only the spec
     path needs it now — nothing suspends around an inlined `runDesign`, so its
     debounce fires normally during the design's own awaits.
+  - The spec preview has a Copy button beside Download. It puts the **Markdown
+    source** on the clipboard, not the dialog's rendered HTML — the document is
+    Markdown everywhere else it exists, so a paste should reproduce it. It only
+    renders once `useSpecContent` has a document: copying an error message or an
+    empty string is worse than offering no button.
+  - `hooks/use-copy-to-clipboard.ts` is the one clipboard implementation, shared
+    with the share dialog's link row. The part worth centralising is the timer,
+    not the `writeText`: a component that unmounts inside the two-second
+    feedback window — the spec preview closes on Escape, routinely — would leave
+    a timeout holding a setter for a component that is gone. A denied write (an
+    insecure origin, a refused permission) is a `"error"` status the button
+    renders as "Press Ctrl+C", never a silent no-op or an unhandled rejection.
   - Routes collapsed four to two. `/api/ai/design`, `/api/ai/design/token`,
     `/api/ai/spec` and `/api/ai/spec/token` are gone; `/api/ai/orchestrate` and
     `/api/ai/orchestrate/token` replace them, keeping the design route's order

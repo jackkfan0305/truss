@@ -5,20 +5,20 @@ import type { RealtimeRun } from "@trigger.dev/core/v3"
 import { useRealtimeRun, useRealtimeStream } from "@trigger.dev/react-hooks"
 
 import type {
-  DesignRunSettlement,
+  AgentRunSettlement,
   RunSubscription,
-} from "@/hooks/use-design-run"
+} from "@/hooks/use-agent-run"
 import { resolveAiRunPhase } from "@/lib/ai-run-turns"
 import {
   appendAiActivityTimelinePart,
   type AiTimelinePart,
 } from "@/lib/ai-timeline"
-import type { designAgent } from "@/trigger/design-agent"
+import type { orchestrator } from "@/trigger/orchestrator"
 import { AI_ACTIVITY_STREAM_ID, isAiActivityTerminalPart } from "@/types/tasks"
 
 export interface DesignRunObserverProps {
   subscription: RunSubscription
-  onSettled: (settlement: DesignRunSettlement) => void
+  onSettled: (settlement: AgentRunSettlement) => void
 }
 
 const TERMINAL_GRACE_MS = 1_500
@@ -83,7 +83,7 @@ export function DesignRunObserver({
   )
 
   const handleComplete = useCallback(
-    (run: RealtimeRun<typeof designAgent>, runError?: Error) => {
+    (run: RealtimeRun<typeof orchestrator>, runError?: Error) => {
       if (run.id !== subscription.runId) return
 
       runOutcomeRef.current =
@@ -115,7 +115,7 @@ export function DesignRunObserver({
     }
   )
 
-  useRealtimeRun<typeof designAgent>(subscription.runId, {
+  useRealtimeRun<typeof orchestrator>(subscription.runId, {
     id: `${subscription.runId}-run`,
     accessToken: subscription.token,
     onComplete: handleComplete,

@@ -1,8 +1,14 @@
 /**
- * Request parsing for the AI design routes. Same shape as
+ * Request parsing for the AI orchestration routes. Same shape as
  * lib/project-requests.ts — pure functions over an already-parsed body, so the
  * handlers stay thin and the rules are assertable without a request.
+ *
+ * Renamed from `lib/design-requests.ts` in 35-orchestrator-backend. The rules did
+ * not change: one prompt, one project, one room, and an allowlist on both run
+ * settings. Only what the request starts did.
  */
+
+import { z } from "zod";
 
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
@@ -19,7 +25,11 @@ const MAX_PROMPT_MESSAGE_ID_LENGTH = 256;
 /** Trigger.dev run IDs are `run_<cuid>`; the cap is slack, not a format check. */
 const MAX_RUN_ID_LENGTH = 100;
 
-export interface DesignRequest {
+/** Room IDs are project ID slugs — see lib/project-requests.ts. */
+const MIN_ROOM_ID_LENGTH = 3;
+const MAX_ROOM_ID_LENGTH = 80;
+
+export interface OrchestrateRequest {
   prompt: string;
   promptMessageId: string;
   projectId: string;
@@ -27,6 +37,26 @@ export interface DesignRequest {
   modelId: AiDesignModelId;
   thinkingLevel: AiThinkingLevel;
 }
+
+/**
+ * The orchestrator's task payload.
+ *
+ * A `schemaTask` schema rather than the plain interface `design-agent` uses,
+ * because this is the one task the API triggers and its payload is the only
+ * thing standing between a queue entry and a paid loop. `modelId` and
+ * `thinkingLevel` are plain optional strings here and re-validated against the
+ * allowlist by the design agent that consumes them — a task payload is not only
+ * ever written by the route.
+ */
+export const orchestratorPayloadSchema = z.object({
+  prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+  promptMessageId: z.string().trim().min(1).max(MAX_PROMPT_MESSAGE_ID_LENGTH),
+  roomId: z.string().trim().min(MIN_ROOM_ID_LENGTH).max(MAX_ROOM_ID_LENGTH),
+  modelId: z.string().trim().max(80).optional(),
+  thinkingLevel: z.string().trim().max(40).optional(),
+});
+
+export type OrchestratorPayload = z.infer<typeof orchestratorPayloadSchema>;
 
 function readString(body: unknown, key: string): string | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -48,18 +78,20 @@ function readValue(body: unknown, key: string): unknown {
 }
 
 /**
- * Validates a design trigger body. Returns `null` when the caller should answer
- * 400.
+ * Validates an orchestration trigger body. Returns `null` when the caller should
+ * answer 400.
  *
  * `roomId` must equal `projectId`: they are one value doing two jobs
  * (lib/room-id.ts), so accepting a mismatch would let an authorized request for
- * one project trigger generation aimed at another project's room. Rejecting is
- * the only reading that cannot be wrong.
+ * one project trigger work aimed at another project's room. Rejecting is the
+ * only reading that cannot be wrong.
  *
  * `modelId` and `thinkingLevel` are optional and default, but an unrecognized
  * one is refused — see `parseAiDesignModelId`.
  */
-export function parseDesignRequest(body: unknown): DesignRequest | null {
+export function parseOrchestrateRequest(
+  body: unknown
+): OrchestrateRequest | null {
   const prompt = readString(body, "prompt");
   const promptMessageId = readString(body, "promptMessageId");
   const projectId = readString(body, "projectId");

@@ -12,13 +12,12 @@ import {
   type DesignAction,
   type DesignContext,
 } from "../lib/design-plan";
+import { SYSTEM_PROMPT, buildDesignPrompt } from "../lib/design-prompt";
 import {
-  SYSTEM_PROMPT,
-  buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
   selectDesignChatHistory,
-} from "../lib/design-prompt";
+} from "../lib/canvas-context";
 import type { ChatMessage } from "../lib/ai-chat";
 import {
   appendAiActivityTimelinePart,
@@ -1041,23 +1040,57 @@ function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
   );
 }
 
-/** The worker must tee live activity into the deterministic assistant message. */
-function assertWorkerPersistsLiveActivity(source: string): void {
+/**
+ * The worker must tee live activity into the deterministic assistant message,
+ * and must publish into the *parent's* row when it is a subagent.
+ *
+ * Asserted against the source because both are wiring, not a return value: a
+ * publisher that never sees the stream still runs, it just leaves the shared
+ * transcript blank; and a delegated run that calls `finish` settles the
+ * orchestrator's turn before the orchestrator has written a word of it.
+ */
+function assertWorkerPersistsLiveActivity(
+  source: string,
+  streamSource: string
+): void {
   const publisherOptions = extractPublisherOptions(source);
 
   assert.match(publisherOptions, /\broomId\s*(?:,|:)/);
   assert.match(publisherOptions, /\brunId\s*(?:,|:)/);
   assert.match(publisherOptions, /\bpromptMessageId\s*(?:,|:|$)/);
+
+  // The row is the parent's when there is one. `resolveAiChatRunId` is the only
+  // thing allowed to answer that, so an inlined `??` here is a second answer.
+  assert.match(
+    publisherOptions,
+    /runId:\s*chatRunId/,
+    "the publisher is keyed on the resolved chat run, not this run's own id"
+  );
   assert.match(
     source,
-    /openActivityStream\(\s*publisher\.emit\s*\)/,
+    /resolveAiChatRunId\(\s*payload\.chatRunId\s*,\s*runId\s*\)/,
+    "the parent row is resolved through the shared helper"
+  );
+
+  assert.match(
+    source,
+    /openActivityStream\(\s*\(part\)\s*=>\s*{[\s\S]*?publisher\.emit\(part\)/,
     "the run publisher receives every stream activity emission"
   );
 
-  const activityStream = extractFunction(source, "openActivityStream");
+  // A delegated run flushes what it emitted and stops there; only an
+  // undelegated one writes the terminal phase and the closing message.
+  assert.match(
+    source,
+    /if\s*\(\s*isDelegated\s*\)\s*{\s*await\s+publisher\.flush\(\);\s*return;\s*}/,
+    "a subagent never settles the row it is borrowing"
+  );
+  assert.match(source, /publisher\.finish\(phase,\s*text\)/);
+
+  const activityStream = extractFunction(streamSource, "openActivityStream");
   assert.match(
     activityStream,
-    /if\s*\(\s*part\.type\s*!==\s*["']terminal["']\s*\)\s*{\s*onActivity\(part\);\s*}/,
+    /if\s*\(part\.type\s*!==\s*["']terminal["']\)\s*{\s*onActivity\(part\);\s*}/,
     "only non-terminal activity parts reach the durable publisher"
   );
   assert.equal(
@@ -1067,8 +1100,6 @@ function assertWorkerPersistsLiveActivity(source: string): void {
   );
 
   assert.doesNotMatch(source, /publishAiChatSummary\(/);
-  assert.match(source, /finish\("complete"/);
-  assert.match(source, /finish\("error"/);
 }
 
 function extractPublisherOptions(source: string): string {
@@ -1118,18 +1149,23 @@ function checkWorkerPersistsLiveActivity(): void {
     new URL("../trigger/design-agent.ts", import.meta.url),
     "utf8"
   );
+  const streamSource = readFileSync(
+    new URL("../lib/ai-activity-stream.ts", import.meta.url),
+    "utf8"
+  );
+  // A worker that constructs a publisher, never feeds it, and settles the row
+  // whether or not it owns it — every failure this check exists to catch.
   const insufficientSource = `
+    const chatRunId = payload.chatRunId ?? runId;
     const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
     const activity = openActivityStream(() => undefined);
-    function openActivityStream(onActivity: (part: AiActivityPart) => void) {
-      onActivity(part);
-    }
-    await publisher.finish("complete", "Done.");
-    await publisher.finish("error", "Failed.");
+    await publisher.finish(phase, text);
   `;
 
-  assertWorkerPersistsLiveActivity(source);
-  assert.throws(() => assertWorkerPersistsLiveActivity(insufficientSource));
+  assertWorkerPersistsLiveActivity(source, streamSource);
+  assert.throws(() =>
+    assertWorkerPersistsLiveActivity(insufficientSource, streamSource)
+  );
 }
 
 /**

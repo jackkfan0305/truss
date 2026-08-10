@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAiChat } from "@/hooks/use-ai-chat"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
-import { useDesignRun } from "@/hooks/use-design-run"
+import { useAgentRun } from "@/hooks/use-agent-run"
 import { cn } from "@/lib/utils"
 import {
   AI_DESIGN_MODELS,
@@ -65,7 +65,7 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
     fetchOlderMessages,
   } = useAiChat()
   const { start, isRunning, turns, subscription, settle } =
-    useDesignRun(roomId)
+    useAgentRun(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
 
   const submit = async (text: string) => {

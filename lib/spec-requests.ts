@@ -1,87 +1,43 @@
 /**
- * The spec generation contract (27-spec-generation-flow), as Zod schemas shared
- * by `POST /api/ai/spec` and the `generate-spec` task.
+ * The spec generation contract (27-spec-generation-flow), as a Zod schema the
+ * `generate-spec` task parses its payload with.
  *
- * One definition, parsed twice: the route parses the browser's body, and
- * `schemaTask` re-parses the payload in the worker. A task payload is not only
- * ever written by that route — a dashboard replay or an older caller can put
- * anything on the queue — so the worker validates for itself rather than
- * trusting that the route already did.
+ * `schemaTask` re-parses in the worker rather than trusting whoever queued the
+ * run: a dashboard replay or an older caller can put anything on the queue, so
+ * the worker validates for itself.
  *
- * Unknown keys are stripped rather than rejected: the canvas sends full React
- * Flow nodes, and a spec only needs the labels and connections out of them.
+ * The canvas graph and the chat transcript used to arrive here from the browser
+ * and are gone (35-orchestrator-backend). The task reads the room itself, which
+ * removes a large client-supplied body, removes the chance of a spec describing
+ * a stale canvas, and leaves this schema as the four identifiers a run needs.
  */
 
 import { z } from "zod";
-
-import { NODE_SHAPES } from "@/types/canvas";
-import { AI_CHAT_ROLES, MAX_CHAT_CONTENT_LENGTH } from "@/types/tasks";
 
 /** Room IDs are project ID slugs — see lib/project-requests.ts. */
 const MIN_ROOM_ID_LENGTH = 3;
 const MAX_ROOM_ID_LENGTH = 80;
 
-const MAX_ELEMENT_ID_LENGTH = 200;
-const MAX_LABEL_LENGTH = 200;
+const MAX_MESSAGE_ID_LENGTH = 256;
 
-/**
- * Caps, not expectations. A canvas or transcript larger than this cannot be
- * described to the model in one prompt anyway, and an unbounded array here is
- * an unbounded request body.
- */
-const MAX_GRAPH_ITEMS = 300;
-const MAX_CHAT_MESSAGES = 60;
+/** Enough for a sentence of emphasis; this is a hint, not a brief. */
+const MAX_FOCUS_LENGTH = 500;
 
-const elementId = z.string().trim().min(1).max(MAX_ELEMENT_ID_LENGTH);
-const label = z.string().trim().max(MAX_LABEL_LENGTH).optional().default("");
+const roomId = z
+  .string()
+  .trim()
+  .min(MIN_ROOM_ID_LENGTH)
+  .max(MAX_ROOM_ID_LENGTH);
 
-/**
- * Position, size and styling are deliberately absent: a Markdown spec is written
- * from what the nodes *are*, not from where they sit. Shape carries meaning on
- * this canvas (cylinder = store, hexagon = external system), so it is kept.
- */
-const specNodeSchema = z.object({
-  id: elementId,
-  data: z
-    .object({ label, shape: z.enum(NODE_SHAPES).optional() })
-    .optional()
-    .default({ label: "" }),
+export const specPayloadSchema = z.object({
+  projectId: roomId,
+  roomId,
+  /** The human message this spec answers, excluded from the history it reads. */
+  promptMessageId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
+  /** The run owning the turn's chat row, so its own row is not read back in. */
+  chatRunId: z.string().trim().max(MAX_MESSAGE_ID_LENGTH).optional(),
+  /** Optional emphasis the orchestrator carried over from the user's request. */
+  focus: z.string().trim().max(MAX_FOCUS_LENGTH).optional(),
 });
 
-const specEdgeSchema = z.object({
-  id: elementId,
-  source: elementId,
-  target: elementId,
-  data: z.object({ label }).optional().default({ label: "" }),
-});
-
-const specChatMessageSchema = z.object({
-  role: z.enum(AI_CHAT_ROLES),
-  content: z.string().trim().min(1).max(MAX_CHAT_CONTENT_LENGTH),
-});
-
-/**
- * The request body. No `projectId`: a room ID *is* its project ID
- * (lib/room-id.ts), so the route derives the project to authorize against
- * rather than accepting a second, client-chosen answer to the same question.
- */
-export const specRequestSchema = z.object({
-  roomId: z.string().trim().min(MIN_ROOM_ID_LENGTH).max(MAX_ROOM_ID_LENGTH),
-  chatHistory: z
-    .array(specChatMessageSchema)
-    .max(MAX_CHAT_MESSAGES)
-    .optional()
-    .default([]),
-  nodes: z.array(specNodeSchema).max(MAX_GRAPH_ITEMS).optional().default([]),
-  edges: z.array(specEdgeSchema).max(MAX_GRAPH_ITEMS).optional().default([]),
-});
-
-/** The task payload: the request plus the project the route resolved for it. */
-export const specPayloadSchema = specRequestSchema.extend({
-  projectId: z.string().trim().min(MIN_ROOM_ID_LENGTH).max(MAX_ROOM_ID_LENGTH),
-});
-
-export type SpecRequest = z.infer<typeof specRequestSchema>;
 export type SpecPayload = z.infer<typeof specPayloadSchema>;
-export type SpecNode = z.infer<typeof specNodeSchema>;
-export type SpecEdge = z.infer<typeof specEdgeSchema>;

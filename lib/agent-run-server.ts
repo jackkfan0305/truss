@@ -1,4 +1,4 @@
-import type { DesignRequest } from "@/lib/design-requests";
+import type { OrchestrateRequest } from "@/lib/orchestrate-requests";
 import {
   AI_CHAT_FEED_ID,
   parseAiChatMessage,
@@ -13,7 +13,7 @@ interface AiChatFeedReadEntry {
   data: unknown;
 }
 
-interface DesignAgentTriggerPayload {
+interface AgentTriggerPayload {
   prompt: string;
   promptMessageId: string;
   roomId: string;
@@ -21,14 +21,12 @@ interface DesignAgentTriggerPayload {
   thinkingLevel: AiThinkingLevel;
 }
 
-export interface VerifiedDesignRunDependencies {
+export interface VerifiedAgentRunDependencies {
   readFeedMessages: (params: {
     roomId: string;
     feedId: string;
   }) => Promise<{ data: AiChatFeedReadEntry[] }>;
-  trigger: (
-    payload: DesignAgentTriggerPayload,
-  ) => Promise<{ id: string }>;
+  trigger: (payload: AgentTriggerPayload) => Promise<{ id: string }>;
 }
 
 /**
@@ -36,10 +34,10 @@ export interface VerifiedDesignRunDependencies {
  * the authenticated server proves that exact human message in the authorized
  * room. Invalid anchors return `null` without reaching Trigger.dev.
  */
-export async function startVerifiedDesignRun(
-  request: DesignRequest,
+export async function startVerifiedAgentRun(
+  request: OrchestrateRequest,
   authenticatedUserId: string,
-  dependencies: VerifiedDesignRunDependencies,
+  dependencies: VerifiedAgentRunDependencies,
 ): Promise<string | null> {
   const { data } = await dependencies.readFeedMessages({
     roomId: request.roomId,

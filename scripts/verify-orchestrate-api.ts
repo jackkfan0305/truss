@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 
-import { startVerifiedDesignRun } from "../lib/design-run-server";
-import { parseDesignRequest, parseRunId } from "../lib/design-requests";
+import { startVerifiedAgentRun } from "../lib/agent-run-server";
+import {
+  parseOrchestrateRequest,
+  parseRunId,
+} from "../lib/orchestrate-requests";
 import {
   AI_CHAT_FEED_ID,
   AI_DESIGN_MODELS,
@@ -27,11 +30,11 @@ const parsedValid = {
   thinkingLevel: DEFAULT_AI_THINKING_LEVEL,
 };
 
-function checkDesignRequestParsing() {
-  assert.deepEqual(parseDesignRequest(valid), parsedValid, "valid request");
+function checkOrchestrateRequestParsing() {
+  assert.deepEqual(parseOrchestrateRequest(valid), parsedValid, "valid request");
 
   assert.deepEqual(
-    parseDesignRequest({
+    parseOrchestrateRequest({
       ...valid,
       prompt: "  Design a checkout flow  ",
       promptMessageId: "  chat-00000000-0000-4000-8000-000000000000  ",
@@ -43,7 +46,7 @@ function checkDesignRequestParsing() {
   // The mismatch guard. A room ID that is not the project ID would aim
   // generation at a room this request was never authorized for.
   assert.equal(
-    parseDesignRequest({ ...valid, roomId: "someone-elses-room" }),
+    parseOrchestrateRequest({ ...valid, roomId: "someone-elses-room" }),
     null,
     "roomId must equal projectId",
   );
@@ -83,7 +86,7 @@ function checkDesignRequestParsing() {
 
   for (const body of rejected) {
     assert.equal(
-      parseDesignRequest(body),
+      parseOrchestrateRequest(body),
       null,
       `rejected: ${JSON.stringify(body)}`,
     );
@@ -93,7 +96,7 @@ function checkDesignRequestParsing() {
   // picker would show an option that 400s on send.
   for (const model of AI_DESIGN_MODELS) {
     assert.deepEqual(
-      parseDesignRequest({ ...valid, modelId: model.id }),
+      parseOrchestrateRequest({ ...valid, modelId: model.id }),
       { ...parsedValid, modelId: model.id },
       `accepts offered model: ${model.id}`,
     );
@@ -103,14 +106,14 @@ function checkDesignRequestParsing() {
   // independent, so any pair the composer can produce has to be accepted.
   for (const level of AI_THINKING_LEVELS) {
     assert.deepEqual(
-      parseDesignRequest({ ...valid, thinkingLevel: level.id }),
+      parseOrchestrateRequest({ ...valid, thinkingLevel: level.id }),
       { ...parsedValid, thinkingLevel: level.id },
       `accepts offered effort: ${level.id}`,
     );
 
     for (const model of AI_DESIGN_MODELS) {
       assert.deepEqual(
-        parseDesignRequest({
+        parseOrchestrateRequest({
           ...valid,
           modelId: model.id,
           thinkingLevel: level.id,
@@ -123,11 +126,11 @@ function checkDesignRequestParsing() {
 
   // The ceiling is inclusive — the boundary is the value most likely to drift.
   assert.ok(
-    parseDesignRequest({ ...valid, prompt: "x".repeat(2000) }),
+    parseOrchestrateRequest({ ...valid, prompt: "x".repeat(2000) }),
     "prompt at the limit",
   );
   assert.ok(
-    parseDesignRequest({ ...valid, promptMessageId: "x".repeat(256) }),
+    parseOrchestrateRequest({ ...valid, promptMessageId: "x".repeat(256) }),
     "prompt message ID at the limit",
   );
 }
@@ -166,7 +169,7 @@ interface PromptAnchorCase {
 /**
  * The prompt ID becomes trusted worker-authored run metadata, so the route-side
  * helper must prove the exact authenticated human message before spending a
- * Trigger run. Every denied fixture also asserts that the trigger callback was
+ * Trigger run — an orchestrator run now, which can spend two more behind it. Every denied fixture also asserts that the trigger callback was
  * never reached.
  */
 async function checkPromptAnchorBeforeTriggering() {
@@ -246,7 +249,7 @@ async function checkPromptAnchorBeforeTriggering() {
   for (const testCase of cases) {
     let triggerCount = 0;
     const reads: Array<{ roomId: string; feedId: string }> = [];
-    const result = await startVerifiedDesignRun(
+    const result = await startVerifiedAgentRun(
       parsedValid,
       "user_ada",
       {
@@ -280,11 +283,11 @@ async function checkPromptAnchorBeforeTriggering() {
 }
 
 async function main() {
-  checkDesignRequestParsing();
+  checkOrchestrateRequestParsing();
   checkRunIdParsing();
   await checkPromptAnchorBeforeTriggering();
 
-  console.log("✅ Design API request parsing and prompt anchor verified");
+  console.log("✅ Orchestrate API request parsing and prompt anchor verified");
 }
 
 void main();

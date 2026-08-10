@@ -8,105 +8,74 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- `34-shared-ai-run-activity` complete. Every design run now has one durable,
-  shared `ai-chat` assistant row (`chat-${runId}`), updated in place from the
-  worker and anchored beside the server-authored human prompt. It persists the
-  bounded curated work log and final summary for every collaborator and reload,
-  while the initiating Trigger subscription is retained only to settle that
-  initiator's composer. Human feed writes remain server-authored; the room is
-  feed-read-only for clients. Collaborator prompts now render avatar/name on a
-  left rail with `bg-elevated`; stored avatar snapshots fall back to current
-  Liveblocks presence and then initials for legacy rows. Stale running rows
-  become incomplete after 315s and retain their partial activity. Raw provider
-  chain of thought remains excluded.
-  - The focused contract suite is GREEN: `verify-ai-chat`,
-    `verify-ai-chat-ui`, `verify-ai-run-chat`, `verify-design-api`, and
-    `verify-design-agent` all exit 0. Focused ESLint, `tsc --noEmit`, and the
-    production build also exit 0. The publisher verifier deliberately prints
-    one simulated failed Liveblocks update before proving that the following
-    full snapshot repairs it; that log is expected test output.
-  - Retained RED-stage evidence is explicit, not inferred from GREEN: Task 1's
-    parser returned `null` where a running empty assistant work-log message was
-    expected; Task 2 could not load `../lib/ai-run-chat`; Task 3 omitted
-    `promptMessageId` and had no server-authored avatar-message builder; Task 4
-    lacked `createAiRunChatPublisher` in the worker; and Task 5 lacked both
-    `arrangeAiChatMessages` and `ChatEntry`, then later lacked the local
-    edge-state helper that preserves a start failure beside a durable run.
-  - Repo-local React Doctor did **not** pass: `npx react-doctor . --verbose`
-    exits 1 at 51/100 with 2 errors and 20 warnings. Its repository-wide output
-    includes unrelated findings. Independent review classifies the two changed
-    dynamic-HTML reports as false positives at their component sinks: both use
-    only `renderChatMarkdown`, whose markdown-it boundary has `html: false`,
-    validates link URLs, and has escaping/render verification coverage. The
-    observer-effect report is non-actionable: on stream error it performs the
-    required settlement bridge that unlocks the initiator's composer. These
-    classifications do not make the repository-wide 51/100 scan pass.
-  - Live collaborative QA remains explicitly **unverified**. The gstack browser
-    harness reports `NEEDS_SETUP`, and no two authenticated collaborator
-    sessions were supplied. Do not read the automated checks as proof that the
-    two-client, reload, console, bottom-follow, or pagination scenario passed.
-  - Final integration review fixes are complete. The design route now reads the
-    installed Liveblocks 3.23 `getFeedMessages({ roomId, feedId })` server API
-    through a narrow injectable boundary and triggers only when the exact
-    `promptMessageId` parses as a user message in the authorized room, belongs
-    to `access.userId`, and exactly matches the normalized request prompt. The
-    worker removes the current prompt ID and `chat-${runId}` by exact ID after
-    `publisher.start()`. The initiating observer mounts once from the
-    subscription even before its prompt is visible, and a matching non-stale
-    durable running row suppresses only its duplicate coarse collaborator line.
-  - Final-review RED evidence was observed before production changes:
-    `verify-design-api` failed with `Cannot find module
-    '../lib/design-run-server'`; `verify-design-agent` failed because
-    `selectDesignChatHistory` was not a function; `verify-ai-chat-ui` rendered
-    zero observer probes where one was required; and `verify-ai-chat` failed
-    because `shouldShowRemoteRunStatus` was not a function.
-  - Final-review GREEN evidence: all five focused verifiers exit 0 with their
-    success lines, including `Design API request parsing and prompt anchor
-    verified`; focused ESLint and `npx tsc --noEmit` exit 0; `npm run build`
-    compiles, type-checks, and generates all 12 static pages. The build retains
-    the pre-existing multiple-lockfile workspace-root warning and Node 26
-    `localStorage` experimental warnings.
-  - PR #7 integration preserves its newer terminal-marker authority (the
-    Trigger run record is only a 1.5s fallback), live-presence avatar fallback,
-    per-prompt thinking effort, and oversized-log safety. Live snapshots keep
-    the run/prompt anchor even when activity must be trimmed below the 96KB
-    budget. Every repository verifier passes, including the service-backed
-    Liveblocks, Prisma, and project-data checks; full ESLint, strict TypeScript,
-    and the production build also pass.
-  - The canvas passes React Flow's supported `proOptions.hideAttribution` flag,
-    removing the bottom-right framework branding box without CSS overrides.
-  - Latest changed-scope React Doctor, run with an isolated npm cache, completes
-    at 78/100 with six warnings rather than a clean score. The only reported
-    changed-feature file is the pre-existing `DesignRunObserver` callback that
-    bridges terminal stream state to parent settlement; the other five warnings
-    are unrelated files. No live two-client QA was run, so collaborator growth,
-    reload reconstruction, console, bottom-follow, and pagination remain
-    explicitly unverified.
-- `33-thinking-disclosure` complete. The model's reasoning is now behind a disclosure that is collapsed on every run: the closed row is the status — a spinner and "Thinking" while deltas arrive, a brain icon and "Thought process" once they stop — so a run reads as one line instead of a wall of text pushing the actions out of view. The text renders through `lib/markdown.ts` because the provider writes Markdown; as plain text its headings and lists showed up as literal `**` and `-`. Reasoning also stops arriving in paragraph-sized jumps: deltas are the *target* and `useSmoothText` reveals toward it on the frame clock at a rate proportional to the backlog, so a burst is consumed quickly and a trickle stays gentle without the text ever falling permanently behind. `MARKDOWN_STYLES` moved from `ai-chat-transcript.tsx` to `lib/markdown.ts` — the transcript imports the activity component, so hanging the styles off it would have closed an import cycle.
-  - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover the reveal converging rather than stranding its tail, staying monotonic and clamped when a target shrinks, and stopping on word boundaries without letting an unbroken 400-character token land in one jump. Mutations disabling boundary snapping, and rounding the per-frame step down instead of up, each fail their check.
-  - Correction worth keeping: the convergence guarantee is the step being rounded *up*, not `MIN_CHARS_PER_FRAME`, which is only a speed knob. The first version of the check credited the floor and passed against a mutation that removed it.
-- `32-live-canvas-building` complete. The AI Architect now visibly builds the diagram: its cursor sweeps to each position and the node or edge appears under it, instead of the whole plan landing in one frame. The pacing is in shared state, so every client in the room watches the same build rather than one client replaying an animation. Kept to a single `mutateFlow` — `mutateStorage` fetches Storage once and flushes buffered ops on a 200ms debounce *while the callback runs*, so sleeping between actions broadcasts them progressively without the O(n²) re-fetch a call-per-action would cost. Pace is derived from the action count against a total build budget, so a 60-action plan speeds up instead of running 40s, and is floored above the flush debounce below which actions coalesce. `live-cursors.tsx` split its single `translate` into nested viewport/position/zoom-cancel layers so only position transitions — a transition on the combined transform animated pan and zoom too, sliding the cursor around behind the diagram. Arrival motion is gated by a non-reactive freshness read so opening a saved diagram does not animate every node at once.
-  - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover cursor targets resolving against nodes created earlier in the same plan (an edge points at its target, not its source), unresolvable subjects leaving the cursor still rather than flinging it to the origin, and the pace staying watchable at both ends of the plan-size range. A mutation pointing `addEdge` at its source failed the target check before it was restored.
-  - Trade-off taken deliberately: paced writes are no longer atomic, so a mid-build failure leaves a partial diagram. Rollback was rejected because on a shared canvas it either clobbers or misses concurrent human edits; the error path now reports how many changes landed instead.
-- Design agent reasoning quality raised on four fronts. `THINKING_LEVEL` is `high`, not `low`: deciding what a system is made of and where it lays out is the work, and at `low` the model reached for the generic shape of a diagram rather than the requested one. The prompt moved out of the task into `lib/design-prompt.ts`, where it now briefs the model on producing a buildable schema named in the user's own domain, and where `scripts/verify-design-agent.ts` can assert on what the model is actually shown. The canvas description carries each node's **size** as well as its position — the "nothing you add may overlap" rule was previously unfollowable, since only `pushClear` knew how big anything was — and `MAX_CONTEXT_ITEMS` went 120 → 400 with truncation now stated in the prompt instead of silently hiding nodes the model would then duplicate. Runs read the room's `ai-chat` feed for prior turns, so "now add a refund path" resolves against the conversation; history comes from the shared feed rather than the request payload, which means it includes what other collaborators asked for and cannot be forged by the caller. `maxDuration` 180 → 300 to cover high thinking plus the paced build.
-  - Verified: `npx tsx scripts/verify-design-agent.ts`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. New checks cover node sizes reaching the prompt (including unmeasured nodes falling back to their shape default) and history never echoing the prompt it is answering back at the model.
-  - The sidebar now shows the model's real thinking as it thinks. Generation moved from `generateObject` to `streamText` with `Output.object` — reasoning only exists on a stream, and showing it after the wait it explains is not showing it — with `includeThoughts: true` so Gemini returns thought summaries, and `reasoning-delta` parts forwarded to the activity stream as they land. The truncation that `generateObject` was originally chosen to avoid is still avoided: the plan is read from `result.output`, the complete-response parse, and nothing reads `partialOutputStream`. No frontend change was needed — `appendAiActivityTimelinePart` already merged adjacent reasoning parts into one growing disclosure and `ai-run-activity.tsx` already animated deltas in place; both were being fed a hardcoded string. The fabricated "I'm mapping the request to components…" line is gone. The two remaining `reasoning` emits are derived from real counts (nodes read, actions validated), not invented.
-  - Thinking effort is now a per-prompt choice, picked in the composer beside the model. `AI_THINKING_LEVELS` offers `low`/`medium`/`high` and deliberately omits `minimal`: per the Gemini docs, `minimal` is Flash and Flash-Lite only and 3.1 Pro rejects it, so offering it would make the effort picker's valid options depend on the model picker's selection. Google's own defaults vary by model (`high` for Pro and 3 Flash, `medium` for 3.5 Flash, `minimal` for Flash-Lite), so the level is sent explicitly on every run rather than left implicit. It travels prompt → `parseDesignRequest` → route → task payload, allowlisted at the boundary exactly like `modelId` (unknown value = 400, absent = default) and re-validated in the task, which does not trust a payload the route is not the only writer of. `start()` now takes a `DesignRunOptions` object rather than a growing positional argument list.
-  - Verified: both verify scripts, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. `verify-design-api.ts` round-trips every model × effort pair the composer can produce and rejects `minimal`; `verify-design-agent.ts` covers the effort allowlist. A mutation replacing the effort default with `"low"` failed the API contract before it was reverted.
-  - Not verified live: thought summaries actually arriving, their pacing against the paced build, and how the two pickers sit together at the narrowest panel width. The first two need a real run with a Google key against a Liveblocks room; the third needs the editor open behind auth. The composer's picker group carries `min-w-0` so both triggers truncate rather than pushing the send button out.
-- `31-mirrored-sidebar-toggles` complete. Projects and AI now use one persistent floating shadcn button each: the button itself owns the surface chrome and moves into its full-height, edge-aligned panel while open. The project title is an independent surface that hides only for an open Projects panel; below `xl`, an AI-open title and compact utilities share a reserved second row without covering the panel content. One union state makes the panels mutually exclusive, and the redundant internal Projects close button and interactive tap-out are gone, leaving each floating toggle as its panel's only close control.
-  - Verified: `npx tsx scripts/verify-editor-controls.tsx`, focused ESLint, `npx tsc --noEmit`, and `npm run build` pass. The real open/closed sidebar markup is covered, including `inert`, full-height geometry, responsive max widths, direct button chrome, state-appropriate labels/icons, title visibility, and wrapper rejection. A mutation restoring the old inset AI geometry failed the focused contract before the full-height class was restored. Repo-local React Doctor v0.9.1 reports 100/100 with no changed-scope findings; fetching the latest package was blocked by an npm cache permission collision outside the repository.
-- `30-floating-editor-controls` complete: the full-width editor navbar is gone. The canvas now fills behind three minimal floating shadcn control islands; the project title sits beside the left projects toggle, workspace utilities remain grouped, and a mirrored right toggle is the single open/close control for AI chat. Both sidebars clear the responsive control rows and retain their overlay behavior.
-  - Verified: `npx tsx scripts/verify-editor-controls.tsx`, focused ESLint, `npx tsc --noEmit`, and `npm run build` all passed. `npx react-doctor@latest . --verbose` completed with pre-existing repository-wide findings; the changed-scope follow-up also reported only pre-existing files.
-- `04-project-dialogs` complete against its spec: the editor home has its create prompt, all three project dialogs exist, and the sidebar renders project lists with owner-only actions — all on mock data. Everything is wired to one hook, so `06-project-apis` → `07-wire-editor-home` only have to replace the data source and the no-op mutations.
-- `12-shape-panel` complete: the canvas is now creatable — drag a shape off the bottom palette (or click it) and a `canvasNode` is written into Liveblocks Storage.
-- `13-node-shape` complete: nodes now draw as their actual shape and the drag carries a ghost preview of what will land. Connection handles, resize and label editing are all still ahead. The AI panel is still a placeholder.
-- `14-node-editing` complete: selected nodes carry a resize frame and double-clicking a node's label opens an inline textarea. Both write through `onNodesChange` into Liveblocks. Connection handles are now the only piece of `ui-context.md`'s node spec still missing. The AI panel is still a placeholder.
-- `15-node-color-toolbar` complete: a selected node floats a swatch toolbar above itself, and picking a swatch recolours the node body and its label together. Connection handles remain the last missing piece of the node spec. The AI panel is still a placeholder.
-- `17-canvas-ergonomics` complete: the canvas has a bottom-left zoom/history bar and the matching keyboard shortcuts. Undo/redo are Liveblocks room history, so they are the first canvas actions that are *not* a React Flow concern. The AI panel is still a placeholder.
-- `18-starter-templates` complete: the editor navbar has a Templates button, and importing one of the three predefined diagrams replaces the canvas through the same Liveblocks Storage path node creation already uses. The AI panel is still a placeholder.
-- `19-presence-avatars-cursors` complete: a canvas room now *shows* who else is in it — a collaborator avatar stack beside the navbar's `UserButton` and live cursors on the canvas. This is the first use of Liveblocks **Presence**; everything before it used Storage only. The AI panel is still a placeholder.
-- `20-ai-sidebar-shell` complete: the right panel is no longer a placeholder — it is `components/editor/ai-sidebar.tsx`, with a header, `AI Architect` / `Specs` tabs, a chat empty state with starter chips, an auto-growing composer, and a static demo spec card. **UI only**: no model calls, no Liveblocks, no persistence.
+- `35-orchestrator-backend` complete. Chat is routed, not hard-wired. A new
+  `orchestrator` Trigger task is the only task the API triggers: it reads the
+  canvas and the room's `ai-chat` history, then decides per message whether to
+  answer in words, edit the canvas via `design-agent`, or write a spec via
+  `generate-spec`. Spec generation is reachable from chat for the first time.
+  - **The loop is manual on purpose.** `triggerAndWait` checkpoints the parent
+    run, which an open `streamText` connection to the provider cannot survive,
+    so the two tools are declared **without `execute`**. Each model call runs to
+    completion and returns either text or a tool call; the wait happens in
+    `runOrchestratorLoop`, outside the stream, and the result is fed back as a
+    tool-result message. Nothing is in flight when the run checkpoints. Tools run
+    one at a time, never batched: two concurrent `design-agent` runs read the
+    same pre-state and stack their nodes, and a spec written during a design
+    documents a half-drawn diagram.
+  - **One prompt, one assistant message.** Both subagents take an optional
+    `chatRunId`, and `resolveAiChatRunId` keys the publisher on it — so a
+    delegated run publishes into the parent's `chat-${runId}` row and a direct
+    run still owns its own. A delegated `design-agent` deliberately does *not*
+    call `start()` or `finish()`: two publishers each write a **complete**
+    snapshot, so a subagent settling the row would end the parent's turn before
+    the parent had written a word of it. It flushes what it emitted and returns
+    its non-reasoning activity, which the orchestrator replays into its own
+    timeline — the live view is the subagent's log during the wait, and the
+    settled snapshot carries routing *and* per-action detail.
+  - Text deltas and reasoning deltas land in different places, and the
+    distinction is load-bearing: reasoning becomes `reasoning` activity parts
+    inside the collapsed work log, while text grows the message's own `content`
+    through the new `publisher.appendContent`. Routing the answer through the
+    activity list would print it twice.
+  - `publisher.flush()` is new and is called before every `triggerAndWait`: a
+    scheduled 400ms debounce does not fire while a run is suspended, so without
+    it the step announcing a subagent lands only after that subagent finished.
+  - Routes collapsed four to two. `/api/ai/design`, `/api/ai/design/token`,
+    `/api/ai/spec` and `/api/ai/spec/token` are gone; `/api/ai/orchestrate` and
+    `/api/ai/orchestrate/token` replace them, keeping the design route's order
+    and rules exactly — parse before authorizing, `requireOwner: false`, prove
+    the `promptMessageId` anchor, trigger, record the `TaskRun`, answer 202.
+    `lib/design-requests.ts` → `lib/orchestrate-requests.ts`,
+    `lib/design-run-server.ts` → `lib/agent-run-server.ts`,
+    `hooks/use-design-run.ts` → `hooks/use-agent-run.ts`. `lib/run-tokens.ts` is
+    unchanged and now has one caller.
+  - `generate-spec` no longer takes `nodes`, `edges` or `chatHistory` from the
+    client. It reads the room itself with the shared `readCanvas` /
+    `readChatHistory`, which closes the "a member can spec a canvas that is not
+    the one in the room" gap `27` left open and means a spec asked for straight
+    after a canvas edit describes the canvas as it *now* is. Its prompt moved to
+    `lib/spec-prompt.ts` and now carries positions, sizes and colors — the old
+    `- name (shape)` description could not tell the writer that a left-to-right
+    layout *is* the data flow, or that the teal nodes are the datastores.
+  - `describeCanvas` / `formatChatHistory` / `selectDesignChatHistory` moved to
+    `lib/canvas-context.ts`, shared by all three prompts. `openActivityStream`
+    moved to `lib/ai-activity-stream.ts`. The design agent's own prompt is
+    **unchanged**, which `verify-design-agent` still proves.
+  - The contract suite is GREEN: `verify-orchestrator`, `verify-spec-prompt`,
+    `verify-orchestrate-api`, `verify-spec-api`, `verify-design-agent`,
+    `verify-ai-chat` and `verify-ai-run-chat` all exit 0, alongside focused
+    ESLint, `tsc --noEmit` and the production build. `verify-ai-run-chat` still
+    prints one simulated failed Liveblocks update before proving the next full
+    snapshot repairs it; that log is expected test output.
+  - **Routing behaviour is unverified.** Whether "is this a bottleneck?" answers
+    in words and "add a cache" edits the canvas is a property of the model plus
+    the prompt, and no contract check can establish it. It needs a real
+    `trigger dev` run against a real Liveblocks room with a Google API key.
+    Neither can the checkpoint behaviour be asserted locally: the activity
+    stream is expected to die across a `triggerAndWait` suspension, and the
+    claim that the composer still settles rests on `DesignRunObserver`'s
+    completion-plus-grace path rather than on an observed run.
+
 - `22-design-agent-api` complete: the first background-task path in the project. `POST /api/ai/design` triggers `design-agent` and records a `TaskRun`; `POST /api/ai/design/token` trades a run ID for a run-scoped realtime token. The task echoes its payload — no model call, no canvas write — and `TRIGGER_SECRET_KEY` still needs a real value. The AI sidebar is still the `20` stub.
 - `16-edge-behavior` complete: nodes have four hover-revealed connection handles, so the canvas is finally *connectable* — `onConnect` and `ConnectionMode.Loose` were wired since `11` but unreachable. New connections render through the `canvasEdge` renderer with a right-angle route, an arrowhead, and a double-click inline label. `ui-context.md`'s node and edge specs are now both fully implemented. The AI panel is still a placeholder.
 - `23-design-agent-logic` complete: the design agent is real. A prompt now reaches Gemini, comes back as validated canvas actions, and lands in the room's Liveblocks Storage through `@liveblocks/react-flow`'s own server-side `mutateFlow` — so an AI-made node is byte-identical to a dragged one. The AI shows up in the room as a presence (avatar, cursor, thinking flag) and narrates itself on the `ai-status-feed`. **Nothing in the sidebar reads either yet** — that is `24`/`25`; this unit is the producer.
@@ -119,6 +88,12 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- `35-orchestrator-backend` — intent routing in a Trigger task. `orchestrator`
+  owns the turn, exposes `designCanvas` and `writeSpec` as execute-less tools,
+  waits on each subagent outside the model stream, and settles one durable chat
+  row. Four AI routes became two; the spec writer reads the room instead of the
+  request body. Backend plus one hook rename; the transcript's spec attachment
+  card is `36`.
 - `34-shared-ai-run-activity` — durable shared AI work activity and
   collaborator identity rendering. The worker creates and repeatedly upserts
   one full-snapshot `chat-${runId}` row, anchored by `promptMessageId`; it
@@ -477,8 +452,10 @@ Update this file whenever the current phase, active feature, or implementation s
 - **There is no spec _list_ endpoint yet.** `28` asks only for the download route, and building a `GET /api/projects/[projectId]/specs` on spec would have been guessing at the shape `29` needs. It is a `findMany` on `[projectId, createdAt]` — the index is already there — and it is the one piece of backend `29` cannot avoid. The download route doubles as the preview fetch: `Content-Disposition` does not stop `fetch()` from reading the body as text.
 - Deployed Trigger.dev environments now need `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` in the dashboard, not only in the local `.env` — `generate-spec` writes to both from inside the worker. Local `trigger dev` already reads them from `.env`.
 - Blob deletion now leaves **specs** behind too, not just canvas snapshots: `ProjectSpec` rows cascade with the project row, but their documents do not. Whatever `del()` call lands in `deleteProjectResources` has to cover `specs/{projectId}/*` as well as `canvas/{projectId}.json`.
-- Spec generation trusts the **client's** nodes and edges, unlike design generation, which reads the room itself with `mutateFlow`. The spec asks for it that way and the authorization is unaffected — a caller can only ever spec a room it has access to — but the worst case is a member specifying a canvas that is not the one in the room. `readCanvas` in `trigger/design-agent.ts` is the drop-in fix if that ever matters; the payload fields would then be a hint, not the source.
-- `generate-spec` publishes `kind: "spec"` to `ai-status-feed`, which the sidebar's status line already renders. Once `29` triggers spec runs, a spec run and a design run write to the same single-line feed and the later one wins. Only a problem if both can be in flight at once.
+- `generate-spec` and `design-agent` both publish to the single-line
+  `ai-status-feed`, and the later write wins. `35` makes them sequential within
+  one turn, so the collision now needs two *turns* in flight in one room — which
+  the composer lock does not prevent for two different collaborators.
 - Chat is **feed-only, with no send-time echo**: a message appears when the feed round-trips it, not the instant it is typed, so a slow connection shows a visible gap. `useCreateFeedMessage` has an `id` option, which is the hook an optimistic entry would hang off if that reads badly in use.
 - A full room's chat history still loads in whatever pages `useFeedMessages`
   fetches with no "load more" control. Bottom-follow and Jump to latest now

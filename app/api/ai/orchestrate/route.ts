@@ -1,34 +1,39 @@
 import { tasks } from "@trigger.dev/sdk";
 
-import { parseDesignRequest } from "@/lib/design-requests";
-import { startVerifiedDesignRun } from "@/lib/design-run-server";
+import { startVerifiedAgentRun } from "@/lib/agent-run-server";
 import { getLiveblocks } from "@/lib/liveblocks";
+import { parseOrchestrateRequest } from "@/lib/orchestrate-requests";
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
-import type { designAgent } from "@/trigger/design-agent";
+import type { orchestrator } from "@/trigger/orchestrator";
 
 /**
- * Starts a design generation run (22-design-agent-api).
+ * Starts an orchestrated chat turn (35-orchestrator-backend).
  *
- * The handler does no generation itself — it validates, authorizes, hands the
- * work to Trigger.dev and answers with the run ID. Long-running AI work in a
- * request handler is exactly what `context/architecture-context.md` forbids.
+ * The one AI entry point. It replaces `/api/ai/design` and `/api/ai/spec` and
+ * keeps their order and rules exactly: the handler does no generation itself —
+ * it validates, authorizes, hands the work to Trigger.dev and answers with the
+ * run ID. Long-running AI work in a request handler is what
+ * `context/architecture-context.md` forbids.
  *
  * `requireOwner: false` for the same reason the canvas routes are: a
- * collaborator edits the canvas, so a collaborator may ask for a design.
+ * collaborator edits the canvas, so a collaborator may ask for work on it.
  */
 export async function POST(request: Request): Promise<Response> {
   // Parsed before authorizing, unlike the project routes: the project to
   // authorize against is in the body, not the path. Parsing is pure and has no
   // side effects, so nothing is spent on an unauthorized caller.
-  const designRequest = parseDesignRequest(await readJsonBody(request));
+  const orchestrateRequest = parseOrchestrateRequest(await readJsonBody(request));
 
-  if (!designRequest) {
-    return jsonError("A prompt and a matching projectId and roomId are required", 400);
+  if (!orchestrateRequest) {
+    return jsonError(
+      "A prompt and a matching projectId and roomId are required",
+      400
+    );
   }
 
-  const access = await authorizeProject(designRequest.projectId, {
+  const access = await authorizeProject(orchestrateRequest.projectId, {
     requireOwner: false,
   });
 
@@ -39,16 +44,15 @@ export async function POST(request: Request): Promise<Response> {
   let runId: string;
 
   try {
-    const verifiedRunId = await startVerifiedDesignRun(
-      designRequest,
+    const verifiedRunId = await startVerifiedAgentRun(
+      orchestrateRequest,
       access.userId,
       {
-        readFeedMessages: (params) =>
-          getLiveblocks().getFeedMessages(params),
+        readFeedMessages: (params) => getLiveblocks().getFeedMessages(params),
         // Type-only import plus trigger-by-ID: importing the task instance
         // would pull the Trigger.dev worker bundle into the Next.js bundle.
         trigger: (payload) =>
-          tasks.trigger<typeof designAgent>("design-agent", payload),
+          tasks.trigger<typeof orchestrator>("orchestrator", payload),
       },
     );
 
@@ -58,8 +62,11 @@ export async function POST(request: Request): Promise<Response> {
 
     runId = verifiedRunId;
   } catch (error: unknown) {
-    console.error(`Design trigger failed for ${designRequest.projectId}`, error);
-    return jsonError("Could not start design generation", 502);
+    console.error(
+      `Orchestrator trigger failed for ${orchestrateRequest.projectId}`,
+      error
+    );
+    return jsonError("Could not start the agent", 502);
   }
 
   // Recorded after triggering, because the run ID does not exist before it. A
@@ -75,7 +82,7 @@ export async function POST(request: Request): Promise<Response> {
     await prisma.taskRun.create({
       data: {
         runId,
-        projectId: designRequest.projectId,
+        projectId: orchestrateRequest.projectId,
         userId: access.userId,
       },
     });
@@ -83,7 +90,7 @@ export async function POST(request: Request): Promise<Response> {
     console.error(`Task run record failed for ${runId}`, error);
 
     return jsonError(
-      "Generation started, but this run could not be tracked. The canvas will still update.",
+      "The agent started, but this run could not be tracked. The canvas will still update.",
       502
     );
   }

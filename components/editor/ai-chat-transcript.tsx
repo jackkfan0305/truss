@@ -21,9 +21,9 @@ import {
 } from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
 import type {
-  DesignRunSettlement,
+  AgentRunSettlement,
   RunSubscription,
-} from "@/hooks/use-design-run"
+} from "@/hooks/use-agent-run"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import {
@@ -45,7 +45,7 @@ interface AiChatTranscriptProps {
   isRoomActive: boolean
   emptyState: React.ReactNode
   subscription: RunSubscription | null
-  onRunSettled: (settlement: DesignRunSettlement) => void
+  onRunSettled: (settlement: AgentRunSettlement) => void
   hasOlderMessages: boolean
   isFetchingOlder: boolean
   onFetchOlder: () => void

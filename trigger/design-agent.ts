@@ -1,6 +1,6 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { logger, streams, task } from "@trigger.dev/sdk";
+import { logger, task } from "@trigger.dev/sdk";
 import { Output, jsonSchema, streamText } from "ai";
 
 import {
@@ -8,8 +8,15 @@ import {
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
-import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
-import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
+import {
+  openActivityStream,
+  type ActivityEmitter,
+} from "@/lib/ai-activity-stream";
+import {
+  createAiRunChatPublisher,
+  resolveAiChatRunId,
+} from "@/lib/ai-run-chat";
+import { readCanvas, readChatHistory } from "@/lib/canvas-read";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -22,11 +29,7 @@ import {
   type DesignContext,
   type DesignPlan,
 } from "@/lib/design-plan";
-import {
-  SYSTEM_PROMPT,
-  buildDesignPrompt,
-  selectDesignChatHistory,
-} from "@/lib/design-prompt";
+import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
@@ -35,8 +38,6 @@ import {
   type CanvasNode,
 } from "@/types/canvas";
 import {
-  AI_ACTIVITY_STREAM_ID,
-  AI_CHAT_FEED_ID,
   AI_CURSOR_ARRIVAL_PAD_MS,
   AI_CURSOR_SWEEP_MS,
   DEFAULT_AI_DESIGN_MODEL_ID,
@@ -50,14 +51,28 @@ import {
 } from "@/types/tasks";
 
 /**
- * The payload `POST /api/ai/design` sends. `roomId` is the Liveblocks room the
- * generated nodes and edges are written into — which is also the project ID
- * (lib/room-id.ts), so the route validates the two agree before triggering.
+ * The payload the orchestrator's `designCanvas` tool sends. `roomId` is the
+ * Liveblocks room the generated nodes and edges are written into — which is also
+ * the project ID (lib/room-id.ts), so the route validates the two agree before
+ * triggering the orchestrator that triggers this.
+ *
+ * `prompt` is the orchestrator's own self-contained design brief, not the raw
+ * user message: this agent cannot see the conversation the way the orchestrator
+ * can, so "add that too" is resolved before it arrives.
  */
 export interface DesignAgentPayload {
   prompt: string;
   promptMessageId: string;
   roomId: string;
+  /**
+   * The run that owns the turn's durable chat row, when this agent is a subagent.
+   *
+   * One user prompt produces exactly one assistant message, so a delegated run
+   * publishes its work log into the *parent's* row rather than opening a second
+   * one. Absent when the task is run directly — a dashboard replay still gets
+   * its own row, keyed on its own run ID.
+   */
+  chatRunId?: string;
   /**
    * Which model to design with, chosen in the composer. Optional so a run
    * triggered without one (an older caller, a dashboard replay) still works.
@@ -192,83 +207,6 @@ const designPlanSchema = jsonSchema({
 const INCLUDE_THOUGHTS = true;
 
 /**
- * The run's live activity, as a stream the sidebar subscribes to.
- *
- * A `ReadableStream` handed to `streams.pipe` rather than a chain of
- * `streams.append` calls: phases, summaries, and operations can be enqueued
- * synchronously while the pipe batches transport in the background.
- */
-function openActivityStream(onActivity: (part: AiActivityPart) => void) {
-  let controller!: ReadableStreamDefaultController<
-    AiActivityPart | AiActivityTerminalPart
-  >;
-  let isWritable = true;
-  let didClose = false;
-  let didLogTransportError = false;
-
-  const { waitUntilComplete } = streams.pipe(
-    AI_ACTIVITY_STREAM_ID,
-    new ReadableStream<AiActivityPart | AiActivityTerminalPart>({
-      start: (streamController) => {
-        controller = streamController;
-      },
-    })
-  );
-
-  return {
-    // Never throws: activity is commentary, and a closed stream must not be
-    // able to fail the canvas write that is the actual work.
-    emit: (part: AiActivityPart | AiActivityTerminalPart): void => {
-      if (part.type !== "terminal") {
-        onActivity(part);
-      }
-
-      if (!isWritable) {
-        return;
-      }
-
-      try {
-        controller.enqueue(part);
-      } catch (error: unknown) {
-        isWritable = false;
-        logActivityTransportError(error);
-      }
-    },
-    close: async (): Promise<void> => {
-      if (didClose) {
-        return;
-      }
-
-      didClose = true;
-      isWritable = false;
-
-      try {
-        controller.close();
-      } catch (error: unknown) {
-        logActivityTransportError(error);
-      }
-
-      try {
-        await waitUntilComplete();
-      } catch (error: unknown) {
-        logActivityTransportError(error);
-      }
-    },
-  };
-
-  function logActivityTransportError(error: unknown): void {
-    if (didLogTransportError) {
-      return;
-    }
-
-    didLogTransportError = true;
-    logger.warn("AI activity stream transport failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
  * Design generation (23-design-agent-logic).
  *
  * Reads the room's current diagram, asks Gemini for a set of canvas edits,
@@ -315,12 +253,32 @@ export const designAgent = task({
       thinkingLevel,
     });
 
+    // The turn's chat row belongs to the orchestrator when there is one. Two
+    // publishers on one message would each write a *complete* snapshot and
+    // clobber the other's activity, so a delegated run only ever emits into the
+    // parent's row: it does not open it (`start`) and does not close it
+    // (`finish`). The parent writes the closing message and the terminal phase,
+    // and replays `activity` from this run's output so the settled snapshot
+    // carries the per-action log as well as the routing.
+    const isDelegated = Boolean(payload.chatRunId);
+    const chatRunId = resolveAiChatRunId(payload.chatRunId, runId);
     const publisher = createAiRunChatPublisher({
       roomId,
-      runId,
+      runId: chatRunId,
       promptMessageId,
     });
-    const activity = openActivityStream(publisher.emit);
+    // What the parent replays. Reasoning is left out on purpose: it is the
+    // largest part of a run by far, it is the first thing the byte budget drops
+    // anyway, and a task output is not the place to carry sixteen kilobytes of
+    // thought summaries that were already streamed live.
+    const replayable: AiActivityPart[] = [];
+    const activity = openActivityStream((part) => {
+      publisher.emit(part);
+
+      if (part.type !== "reasoning") {
+        replayable.push(part);
+      }
+    });
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
     // Paced writes flush as they go, so a failure can leave part of the plan on
     // the canvas. Both are read by the error path, so both are declared out
@@ -328,7 +286,9 @@ export const designAgent = task({
     let applied = 0;
     let planned = 0;
 
-    await publisher.start();
+    if (!isDelegated) {
+      await publisher.start();
+    }
 
     await Promise.all([
       setAiPresence(roomId, { cursor: null, isThinking: true }),
@@ -340,6 +300,26 @@ export const designAgent = task({
       }),
     ]);
 
+    /**
+     * Ends this run's contribution to the chat row.
+     *
+     * A delegated run only flushes what it has emitted: marking the row
+     * complete would settle the parent's turn before the parent has written a
+     * word of it. The flush is not optional — a scheduled debounce would not
+     * survive this run finishing, and would leave the row on stale activity.
+     */
+    const settleChatRow = async (
+      phase: "complete" | "error",
+      text: string
+    ): Promise<void> => {
+      if (isDelegated) {
+        await publisher.flush();
+        return;
+      }
+
+      await publisher.finish(phase, text);
+    };
+
     try {
       activity.emit({ type: "step", text: "Reading the canvas" });
 
@@ -347,7 +327,7 @@ export const designAgent = task({
       // against the same room.
       const [context, history] = await Promise.all([
         readCanvas(roomId),
-        readChatHistory(roomId, promptMessageId, runId),
+        readChatHistory(roomId, promptMessageId, chatRunId),
       ]);
 
       activity.emit({
@@ -401,9 +381,9 @@ export const designAgent = task({
           text: "No canvas changes to make.",
         });
 
-        await publisher.finish("complete", plan.summary || "No canvas changes to make.");
+        await settleChatRow("complete", plan.summary || "No canvas changes to make.");
         activityOutcome = "complete";
-        return { summary: plan.summary, applied: 0 };
+        return { summary: plan.summary, applied: 0, activity: replayable };
       }
 
       // Park the AI cursor where the work is landing, so collaborators watching
@@ -424,10 +404,13 @@ export const designAgent = task({
         text: plan.summary || `Applied ${plan.actions.length} canvas changes.`,
       });
 
-      await publisher.finish("complete", plan.summary || `Applied ${plan.actions.length} canvas changes.`);
+      await settleChatRow(
+        "complete",
+        plan.summary || `Applied ${plan.actions.length} canvas changes.`
+      );
 
       activityOutcome = "complete";
-      return { summary: plan.summary, applied };
+      return { summary: plan.summary, applied, activity: replayable };
     } catch (error: unknown) {
       logger.error("Design generation failed", {
         roomId,
@@ -449,7 +432,7 @@ export const designAgent = task({
         text: failureText,
       });
 
-      await publisher.finish("error", failureText);
+      await settleChatRow("error", failureText);
 
       throw error;
     } finally {
@@ -461,11 +444,6 @@ export const designAgent = task({
     }
   },
 });
-
-/** `openActivityStream`'s emitter, as much of it as a phase needs. */
-type ActivityEmitter = {
-  emit: (part: AiActivityPart | AiActivityTerminalPart) => void;
-};
 
 /**
  * Asks for the plan, and forwards the model's thinking to the sidebar while it
@@ -592,60 +570,4 @@ async function buildCanvas(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Reads the diagram without changing it. `mutateFlow` is the read path as well
- * as the write path: it is the only thing that knows how `@liveblocks/react-flow`
- * lays nodes and edges out in Storage, and a callback that mutates nothing
- * flushes nothing.
- */
-async function readCanvas(roomId: string): Promise<DesignContext> {
-  let context: DesignContext = { nodes: [], edges: [] };
-
-  await mutateFlow<CanvasNode, CanvasEdge>(
-    { client: getLiveblocks(), roomId },
-    (flow) => {
-      context = flow.toJSON();
-    }
-  );
-
-  return context;
-}
-
-/**
- * The room's chat transcript, so a run can see the turns before it.
- *
- * Read from the shared feed rather than taken from the request payload: the feed
- * is the authoritative record every client already renders, it includes what
- * *other* collaborators asked for, and it cannot be forged by whoever posted the
- * prompt. `selectAiChatMessages` is the same validator the sidebar reads it with.
- *
- * Never throws. A run that cannot fetch history is a run with less context, not
- * a failed one — the canvas edit is still the work.
- */
-async function readChatHistory(
-  roomId: string,
-  promptMessageId: string,
-  runId: string,
-): Promise<ChatMessage[]> {
-  try {
-    const { data } = await getLiveblocks().getFeedMessages({
-      roomId,
-      feedId: AI_CHAT_FEED_ID,
-    });
-
-    return selectDesignChatHistory(
-      selectAiChatMessages(data),
-      promptMessageId,
-      runId,
-    );
-  } catch (error: unknown) {
-    logger.warn("Chat history unavailable; designing without it", {
-      roomId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    return [];
-  }
 }

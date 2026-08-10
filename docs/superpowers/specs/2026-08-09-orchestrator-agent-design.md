@@ -143,6 +143,10 @@ site checks `result.ok` before reading `result.output`; `.unwrap()` is not used,
 because a failed subagent must reach the model as a tool result rather than
 throwing and failing the turn.
 
+For reading the canvas part, we can read the ai-chat history, and we can also give the canvas JSON to the agent so that the agent understands the structure of the canvas.
+
+Separate: In the JSON structure that stores the canvas, we should specify the size of the blocks as well, so that the agent knows for generation.
+
 Both subagents are triggered by ID with type-only imports, matching the existing
 convention, so the worker bundles stay separate.
 
@@ -306,7 +310,7 @@ Markdown renders through `renderChatMarkdown`, whose markdown-it boundary has
 | Delete | `app/api/ai/spec/route.ts` |
 | Delete | `app/api/ai/spec/token/route.ts` |
 | Add | `app/api/ai/orchestrate/route.ts` |
-| Add | `app/api/ai/orchestrate/token/route.ts` |
+| Add | `app/api/ai  /orchestrate/token/route.ts` |
 
 `POST /api/ai/orchestrate` keeps the existing design route's order and rules:
 parse the body (pure, before authorizing, because the project to authorize
@@ -377,6 +381,8 @@ request-parser and hook renames. The only UI change is the hook rename.
 validation, `components/editor/spec-attachment.tsx`, the Specs tab refactored
 onto it, the chat transcript rendering the card, and the `Generate Spec` button
 wired through the orchestrator.
+
+As for the frontend, we can delete the chat and specs tabs at the top of the chat panel, since we are generating specs in the chat already. We will persist the spec doc as a part of the chat as well.
 
 Unit 35 is shippable alone: spec generation becomes reachable from chat, and the
 resulting document appears in the Specs tab, which already lists, previews, and

@@ -25,25 +25,20 @@ export function useSmoothText(target: string, settled = false): string {
   // The rAF loop's own cursor. State exists to trigger the re-render; this is
   // what the next frame reads, so a burst arriving mid-frame cannot rewind it.
   const revealedRef = useRef(0);
-  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
     /*
-     * Every path returns this, including the ones that never schedule a frame.
-     * Whether a frame can still be pending on those paths is an argument about
-     * the *previous* cleanup having run; cancelling unconditionally is one line
-     * and needs no such argument.
+     * A plain binding rather than a ref: only this effect run schedules frames,
+     * and only its own cleanup cancels them, so the handle has no reason to
+     * outlive the closure. Every path returns the same teardown, including the
+     * two that never schedule anything — `cancelAnimationFrame(0)` is a no-op,
+     * so they cost a call rather than a branch.
      */
-    const cancel = () => {
-      if (frameRef.current !== null) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-    };
+    let frameId = 0;
 
     // Nothing to animate toward: render already returns the whole string.
     if (settled) {
-      return cancel;
+      return () => cancelAnimationFrame(frameId);
     }
 
     // A shorter target is different text, not a rewind. Clamping the ref (never
@@ -54,7 +49,7 @@ export function useSmoothText(target: string, settled = false): string {
     }
 
     if (isFullyRevealed(revealedRef.current, target)) {
-      return cancel;
+      return () => cancelAnimationFrame(frameId);
     }
 
     const step = () => {
@@ -67,14 +62,17 @@ export function useSmoothText(target: string, settled = false): string {
       revealedRef.current = next;
       setRevealed(next);
 
-      frameRef.current = isFullyRevealed(next, target)
-        ? null
-        : requestAnimationFrame(step);
+      if (isFullyRevealed(next, target)) {
+        frameId = 0;
+        return;
+      }
+
+      frameId = requestAnimationFrame(step);
     };
 
-    frameRef.current = requestAnimationFrame(step);
+    frameId = requestAnimationFrame(step);
 
-    return cancel;
+    return () => cancelAnimationFrame(frameId);
   }, [target, settled]);
 
   // `slice` clamps on its own, so an out-of-range cursor renders the whole

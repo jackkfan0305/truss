@@ -105,7 +105,7 @@ export function DesignRunObserver({
   // `onData` is the authoritative accumulator. The installed hook's `parts`
   // cache can overwrite bursty zero-throttle chunks before its ref commits, so
   // it is intentionally ignored here.
-  const { error: activityError } = useRealtimeStream<unknown>(
+  useRealtimeStream<unknown>(
     subscription.runId,
     AI_ACTIVITY_STREAM_ID,
     {
@@ -121,12 +121,15 @@ export function DesignRunObserver({
     onComplete: handleComplete,
   })
 
-  useEffect(() => {
-    if (activityError) {
-      didGraceElapseRef.current = true
-      settleIfReady()
-    }
-  }, [activityError, settleIfReady])
+  /*
+   * The stream's `error` used to settle the run from an effect here. Both are
+   * gone: it was only ever a 1.5s shortcut, because `settleIfReady` needs a run
+   * outcome regardless — so the effect could never settle anything by itself,
+   * and by the time `handleComplete` has that outcome it has already scheduled
+   * the grace timer that settles. Dropping it costs at most TERMINAL_GRACE_MS
+   * on a stream that has already failed, and buys back a component that reports
+   * to its parent only from callbacks.
+   */
 
   useEffect(
     () => () => {

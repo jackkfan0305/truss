@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { CircleAlert, Download, FileText, Loader2 } from "lucide-react"
 
+import { useHydrated } from "@/hooks/use-hydrated"
 import { MARKDOWN_STYLES } from "@/lib/markdown"
 import { Button } from "@/components/ui/button"
 import {
@@ -254,8 +255,16 @@ function DownloadAction({
 }
 
 /**
- * Client-rendered from a list the browser fetched, so the locale string cannot
- * mismatch a server render.
+ * A spec's timestamp, in the reader's own locale and timezone.
+ *
+ * Formatted after mount rather than during render. In practice this only ever
+ * renders client-side — the list it comes from is fetched in an effect — but
+ * "there is no server render to mismatch" is a fact about the *caller*, and a
+ * component is not the place to depend on one. Formatting in an effect makes it
+ * true here regardless of who renders it.
+ *
+ * The ISO date shows until then: unambiguous, identical on both sides, and the
+ * same width class as the real thing so nothing jumps when it lands.
  */
 function SpecTimestamp({
   createdAt,
@@ -266,15 +275,24 @@ function SpecTimestamp({
   prefix?: string
   className?: string
 }) {
-  const date = new Date(createdAt)
+  const isHydrated = useHydrated()
 
   return (
     <time dateTime={createdAt} className={cn("block text-xs", className)}>
       {prefix}
-      {date.toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}
+      {isHydrated ? formatSpecTimestamp(createdAt) : createdAt.slice(0, 10)}
     </time>
   )
+}
+
+/**
+ * Called only once `useHydrated` reports the browser is rendering, so
+ * `undefined` here resolves to the *reader's* locale and timezone rather than
+ * whatever the server happens to run in.
+ */
+function formatSpecTimestamp(createdAt: string): string {
+  return new Date(createdAt).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }

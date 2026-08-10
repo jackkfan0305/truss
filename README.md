@@ -56,29 +56,16 @@ npm install
 
 ### Environment
 
-Two files, and the split matters: `prisma.config.ts` and `prisma/seed.ts` load
-**`.env` only** (via `dotenv/config`), while Next.js loads both. Keep
-`DATABASE_URL` in `.env` or the Prisma CLI will not see it.
-
-`.env`:
-
-```bash
-DATABASE_URL=postgresql://user:pass@localhost:5432/truss
-
-# Liveblocks → Project → API keys. Server-only, read in lib/liveblocks.ts.
-LIVEBLOCKS_SECRET_KEY=sk_...
-
-# Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
-# client bundle would let anyone overwrite any project's canvas.
-BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
-
-# Trigger.dev → API Keys. Used by tasks.trigger() in route handlers.
-TRIGGER_SECRET_KEY=tr_dev_...
-```
-
-`.env.local`:
+One file, `.env`. Next.js reads it, and so do `prisma.config.ts` and
+`prisma/seed.ts` — those load **`.env` only**, via `dotenv/config`, which is why
+everything lives there rather than being split with `.env.local`. Gitignored by
+`.env*`, so nothing in it is committed.
 
 ```bash
+# ---------------------------------------------------------------- Database
+DATABASE_URL=postgresql://user:pass@localhost:5432/truss?sslmode=verify-full
+
+# -------------------------------------------------------------------- Auth
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
@@ -86,12 +73,40 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/editor
 NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/editor
 
+# ------------------------------------------------------------- Liveblocks
+# Project → API keys. Server-only, read in lib/liveblocks.ts.
+LIVEBLOCKS_SECRET_KEY=sk_...
+
+# Optional. Nothing reads it: the canvas authenticates through
+# /api/liveblocks-auth, not through LiveblocksProvider's publicApiKey. Kept
+# unprefixed so it stays out of the client bundle.
+LIVEBLOCKS_PUBLIC_KEY=pk_...
+
+# ------------------------------------------------------------ Vercel Blob
+# Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
+# client bundle would let anyone overwrite any project's canvas.
+BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+
+# ------------------------------------------------------------- Trigger.dev
+# API Keys page. Used by tasks.trigger() in route handlers; the CLI dev worker
+# does not read it (it authenticates via `trigger.dev login`).
+TRIGGER_SECRET_KEY=tr_dev_...
+
+# ------------------------------------------------------------ Google Gemini
 GEMINI_API_KEY=...   # GOOGLE_AI_API_KEY is also accepted
 ```
 
 `proxy.ts` throws at boot if the two Clerk URL vars are missing — with no public
 paths, the middleware would protect the sign-in page itself and you would get an
 unexplained redirect loop instead of an error.
+
+`sslmode=verify-full` rather than `require`: `pg` currently treats the two as
+identical, but in pg v9 a bare `require` drops to libpq semantics and stops
+verifying the certificate. Being explicit pins today's behaviour.
+
+If you keep a `.env.local`, Next.js still reads it and it still wins on
+conflicts — but the Prisma CLI will not see it, so a key that lives only there
+is invisible to migrations and the seed.
 
 ### Database
 

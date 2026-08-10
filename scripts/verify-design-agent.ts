@@ -12,13 +12,12 @@ import {
   type DesignAction,
   type DesignContext,
 } from "../lib/design-plan";
+import { SYSTEM_PROMPT, buildDesignPrompt } from "../lib/design-prompt";
 import {
-  SYSTEM_PROMPT,
-  buildDesignPrompt,
   describeCanvas,
   formatChatHistory,
   selectDesignChatHistory,
-} from "../lib/design-prompt";
+} from "../lib/canvas-context";
 import type { ChatMessage } from "../lib/ai-chat";
 import {
   appendAiActivityTimelinePart,
@@ -26,6 +25,7 @@ import {
 } from "../lib/ai-timeline";
 import {
   reduceAiRunTurns,
+  selectLiveRunStep,
   resolveAiRunPhase,
   type AiRunTurn,
 } from "../lib/ai-run-turns";
@@ -984,6 +984,61 @@ function checkRunTurnsRemainAnchoredForTheSession() {
 }
 
 /**
+ * The status line above the composer (38-live-step-status).
+ *
+ * It answers "why can't I type?", so the failure that matters is it outliving
+ * the run: a sweeping label over an enabled composer, or over a turn that ended
+ * ten minutes ago. Settled turns must not produce one at all.
+ */
+function checkTheLiveStepFollowsOnlyALiveTurn() {
+  const settled: AiRunTurn = {
+    promptMessageId: "chat-1",
+    runId: "run-1",
+    phase: "complete",
+    activity: [{ id: "activity-0", type: "step", text: "Applying to the canvas" }],
+    startedAt: 100,
+    completedAt: 200,
+  };
+
+  assert.equal(
+    selectLiveRunStep([settled]),
+    null,
+    "a finished turn leaves no status line behind"
+  );
+  assert.equal(selectLiveRunStep([]), null);
+
+  const live: AiRunTurn = {
+    promptMessageId: "chat-2",
+    runId: "run-2",
+    phase: "running",
+    activity: [
+      { id: "activity-0", type: "step", text: "Reading the canvas" },
+      { id: "activity-1", type: "reasoning", text: "…" },
+      { id: "activity-2", type: "step", text: "Designing" },
+    ],
+    startedAt: 300,
+  };
+
+  assert.equal(
+    selectLiveRunStep([settled, live]),
+    "Designing",
+    "the newest step of the live turn wins, not the newest part"
+  );
+
+  // A run exists the moment it is triggered, before the worker has said
+  // anything. Rendering nothing there would leave the composer locked with no
+  // explanation for the seconds a cold start takes — which is exactly the
+  // window this line exists for.
+  assert.equal(
+    selectLiveRunStep([
+      { ...live, activity: [], phase: "starting" },
+    ]),
+    "Starting",
+    "a triggered run with no step yet still announces itself"
+  );
+}
+
+/**
  * A finished run releases the composer on the stream's terminal marker alone.
  *
  * The run record can lag behind the worker, so it remains a fallback instead
@@ -1041,23 +1096,59 @@ function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
   );
 }
 
-/** The worker must tee live activity into the deterministic assistant message. */
-function assertWorkerPersistsLiveActivity(source: string): void {
+/**
+ * The worker must tee live activity into the deterministic assistant message,
+ * and `runDesign` must never own a chat row.
+ *
+ * Asserted against the source because both are wiring, not a return value: a
+ * publisher that never sees the stream still runs, it just leaves the shared
+ * transcript blank. And the second rule is what keeps one prompt to one
+ * assistant message now that the orchestrator calls `runDesign` inline — two
+ * publishers on one row each write a *complete* snapshot and clobber the other's
+ * activity, which is exactly the bug the old delegation flag existed to avoid.
+ */
+function assertWorkerPersistsLiveActivity(
+  source: string,
+  streamSource: string
+): void {
   const publisherOptions = extractPublisherOptions(source);
 
   assert.match(publisherOptions, /\broomId\s*(?:,|:)/);
   assert.match(publisherOptions, /\brunId\s*(?:,|:)/);
   assert.match(publisherOptions, /\bpromptMessageId\s*(?:,|:|$)/);
+
   assert.match(
     source,
-    /openActivityStream\(\s*publisher\.emit\s*\)/,
+    /openActivityStream\(publisher\.emit\)/,
     "the run publisher receives every stream activity emission"
   );
 
-  const activityStream = extractFunction(source, "openActivityStream");
+  // The task wrapper owns the row: it opens it, and settles it either way.
+  assert.match(source, /publisher\.start\(\)/);
+  assert.match(source, /publisher\.finish\("complete",\s*result\.summary\)/);
+  assert.match(
+    source,
+    /onFailure:\s*\(text\)\s*=>\s*publisher\.finish\("error",\s*text\)/,
+    "a failed design still settles the row it opened"
+  );
+
+  const designRun = extractFunction(source, "runDesign");
+
+  assert.doesNotMatch(
+    designRun,
+    /createAiRunChatPublisher\(/,
+    "runDesign must not open a second publisher on the caller's row"
+  );
+  assert.doesNotMatch(
+    designRun,
+    /activity\.close\(/,
+    "the activity stream belongs to the caller, which closes it"
+  );
+
+  const activityStream = extractFunction(streamSource, "openActivityStream");
   assert.match(
     activityStream,
-    /if\s*\(\s*part\.type\s*!==\s*["']terminal["']\s*\)\s*{\s*onActivity\(part\);\s*}/,
+    /if\s*\(part\.type\s*!==\s*["']terminal["']\)\s*{\s*onActivity\(part\);\s*}/,
     "only non-terminal activity parts reach the durable publisher"
   );
   assert.equal(
@@ -1067,8 +1158,6 @@ function assertWorkerPersistsLiveActivity(source: string): void {
   );
 
   assert.doesNotMatch(source, /publishAiChatSummary\(/);
-  assert.match(source, /finish\("complete"/);
-  assert.match(source, /finish\("error"/);
 }
 
 function extractPublisherOptions(source: string): string {
@@ -1118,18 +1207,25 @@ function checkWorkerPersistsLiveActivity(): void {
     new URL("../trigger/design-agent.ts", import.meta.url),
     "utf8"
   );
+  const streamSource = readFileSync(
+    new URL("../lib/ai-activity-stream.ts", import.meta.url),
+    "utf8"
+  );
+  // A worker that constructs a publisher, never feeds it, and lets the design
+  // open a competing one — every failure this check exists to catch.
   const insufficientSource = `
     const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
     const activity = openActivityStream(() => undefined);
-    function openActivityStream(onActivity: (part: AiActivityPart) => void) {
-      onActivity(part);
+    async function runDesign(payload, options) {
+      const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
+      await activity.close();
     }
-    await publisher.finish("complete", "Done.");
-    await publisher.finish("error", "Failed.");
   `;
 
-  assertWorkerPersistsLiveActivity(source);
-  assert.throws(() => assertWorkerPersistsLiveActivity(insufficientSource));
+  assertWorkerPersistsLiveActivity(source, streamSource);
+  assert.throws(() =>
+    assertWorkerPersistsLiveActivity(insufficientSource, streamSource)
+  );
 }
 
 /**
@@ -1198,6 +1294,7 @@ function main() {
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
+  checkTheLiveStepFollowsOnlyALiveTurn();
   checkRunSettlesOnTheStreamMarkerNotTheRunRecord();
   checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();

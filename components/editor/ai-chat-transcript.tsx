@@ -15,15 +15,16 @@ import {
   type AiRunActivityState,
 } from "@/components/editor/ai-run-activity"
 import { ChatEntry } from "@/components/editor/chat-entry"
+import { SpecAttachmentList } from "@/components/editor/spec-attachment"
 import {
   DesignRunObserver,
   type DesignRunObserverProps,
 } from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
 import type {
-  DesignRunSettlement,
+  AgentRunSettlement,
   RunSubscription,
-} from "@/hooks/use-design-run"
+} from "@/hooks/use-agent-run"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import {
@@ -35,6 +36,7 @@ import {
   type ChatMessage,
 } from "@/lib/ai-chat"
 import { selectAiActivityTimeline } from "@/lib/ai-timeline"
+import { selectSpecAttachments } from "@/lib/spec-attachments"
 import type { AiStatusMessage } from "@/types/tasks"
 
 interface AiChatTranscriptProps {
@@ -44,8 +46,10 @@ interface AiChatTranscriptProps {
   status: AiStatusMessage | null
   isRoomActive: boolean
   emptyState: React.ReactNode
+  /** The project generated specs belong to — a room ID *is* one (lib/room-id.ts). */
+  projectId: string
   subscription: RunSubscription | null
-  onRunSettled: (settlement: DesignRunSettlement) => void
+  onRunSettled: (settlement: AgentRunSettlement) => void
   hasOlderMessages: boolean
   isFetchingOlder: boolean
   onFetchOlder: () => void
@@ -70,6 +74,7 @@ export function AiChatTranscript({
   status,
   isRoomActive,
   emptyState,
+  projectId,
   subscription,
   onRunSettled,
   hasOlderMessages,
@@ -287,6 +292,7 @@ export function AiChatTranscript({
                   liveAvatar={liveAvatars.get(message.senderId)}
                   turn={turn}
                   hasPersistedRun={persistedRunPromptIds.has(message.id)}
+                  projectId={projectId}
                 />
               )
             })}
@@ -331,16 +337,22 @@ function MessageWithRun({
   liveAvatar,
   turn,
   hasPersistedRun,
+  projectId,
 }: {
   message: ChatMessage
   isOwn: boolean
   liveAvatar?: string
   turn?: AiRunTurn
   hasPersistedRun: boolean
+  projectId: string
 }) {
   const showLocalActivity = Boolean(
     turn && shouldShowLocalAiRunActivity(turn, hasPersistedRun)
   )
+  // Read straight off the durable run rather than off the local stream: a spec
+  // outlives the session that generated it, and every collaborator's transcript
+  // has to show the same document.
+  const attachments = selectSpecAttachments(message.run?.activity)
 
   return (
     <>
@@ -349,6 +361,15 @@ function MessageWithRun({
         isOwn={isOwn}
         liveAvatar={liveAvatar}
         activity={message.run ? <PersistedAiRunActivity message={message} /> : undefined}
+        attachments={
+          attachments.length > 0 ? (
+            <SpecAttachmentList
+              attachments={attachments}
+              projectId={projectId}
+              sentAt={message.sentAt}
+            />
+          ) : undefined
+        }
       />
       {turn && showLocalActivity ? (
         <li>

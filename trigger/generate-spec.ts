@@ -4,19 +4,22 @@ import { put } from "@vercel/blob";
 import { generateText } from "ai";
 
 import { publishAiStatus } from "@/lib/ai-activity";
+import { resolveAiChatRunId } from "@/lib/ai-run-chat";
+import {
+  readCanvas,
+  readChatHistory,
+  type RoomReads,
+} from "@/lib/canvas-read";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { prisma } from "@/lib/prisma";
+import { SPEC_SYSTEM_PROMPT, buildSpecPrompt } from "@/lib/spec-prompt";
 import {
   SPEC_BLOB_ACCESS,
   SPEC_CONTENT_TYPE,
   specBlobPath,
+  specFileName,
 } from "@/lib/spec-storage";
-import {
-  specPayloadSchema,
-  type SpecEdge,
-  type SpecNode,
-  type SpecPayload,
-} from "@/lib/spec-requests";
+import { specPayloadSchema, type SpecPayload } from "@/lib/spec-requests";
 import { DEFAULT_AI_DESIGN_MODEL_ID } from "@/types/tasks";
 
 /**
@@ -27,41 +30,186 @@ import { DEFAULT_AI_DESIGN_MODEL_ID } from "@/types/tasks";
 const SPEC_MODEL_ID = DEFAULT_AI_DESIGN_MODEL_ID;
 
 /**
- * Higher than the design agent's `low`: a spec is prose reasoned over a whole
- * diagram, not a handful of canvas edits. Still a level rather than a numeric
- * budget — these are Gemini 3 models (see `AI_DESIGN_MODELS`).
+ * Higher than the orchestrator's `low`: a spec is prose reasoned over a whole
+ * diagram, not a routing decision or two sentences of summary. Still a level
+ * rather than a numeric budget — these are Gemini 3 models (see
+ * `AI_DESIGN_MODELS`).
  */
 const THINKING_LEVEL = "medium";
 
-const SYSTEM_PROMPT = [
-  "You are a staff engineer writing the technical specification for a system that a team has diagrammed on a shared canvas.",
-  "",
-  "Write the spec in Markdown, and return only the Markdown document — no preamble, no commentary, and no surrounding code fence.",
-  "",
-  "Structure it as:",
-  "# <System name>",
-  "## Overview — what the system is for, in a short paragraph.",
-  "## Architecture — the components from the canvas and how they fit together.",
-  "## Components — one subsection per significant node: responsibility, inputs, outputs.",
-  "## Data Flow — the paths through the system, following the canvas connections.",
-  "## Interfaces & Integrations — boundaries with external systems.",
-  "## Open Questions & Risks — what the canvas and conversation leave undecided.",
-  "",
-  "Node shapes carry meaning: rectangle is a general component, diamond a decision or gateway,",
-  "circle an event or endpoint, pill a service or process, cylinder a datastore, hexagon an external system.",
-  "",
-  "Describe the system the canvas and conversation actually show. Where they are silent, say so under",
-  "Open Questions rather than inventing a component, a technology choice, or a requirement.",
-].join("\n");
+/** The two reads a spec run opens with, when the caller already has them. */
+export interface SpecRunOptions {
+  /** The run narrating this work, used to label the room's status feed. */
+  runId: string;
+  /**
+   * The ID the document is stored under. Defaults to `runId`.
+   *
+   * Separate from `runId` because inline the run is the orchestrator's, and one
+   * turn may write more than one spec — see `specIdForTurn`.
+   */
+  specId?: string;
+  /**
+   * The canvas and transcript, when the caller has already read them.
+   *
+   * The orchestrator has, moments earlier and in this same process. Absent when
+   * the task is triggered directly, and then they are read here.
+   */
+  reads?: RoomReads;
+}
+
+export interface SpecRunResult {
+  markdown: string;
+  specId: string;
+  fileName: string;
+}
 
 /**
- * Spec generation (27-spec-generation-flow).
+ * Spec generation, without the task runtime (27-spec-generation-flow).
  *
- * Reads the canvas graph and chat context the route passed through, asks Gemini
- * for a Markdown technical spec, then stores it: the document in Vercel Blob, a
- * `ProjectSpec` pointer in Prisma (28-spec-persistence-download). Progress is
- * published to the room's shared AI status feed and mirrored onto run metadata,
- * which is what the initiating client subscribes to over its run-scoped token.
+ * Reads the room's canvas and conversation, asks Gemini for a Markdown technical
+ * spec, then stores it: the document in Vercel Blob, a `ProjectSpec` pointer in
+ * Prisma (28-spec-persistence-download). Progress is published to the room's
+ * shared AI status feed.
+ *
+ * The graph used to arrive in the payload from the browser. It does not any more
+ * (35-orchestrator-backend): this reads the room itself, the same way the design
+ * agent does. That is one less client-supplied description of a document the
+ * server can read authoritatively, and it means a spec asked for straight after
+ * a canvas edit describes the canvas as it *now* is rather than as it was when
+ * the request was composed.
+ *
+ * A plain function rather than only a task, for the same reason `runDesign` is:
+ * the orchestrator reached it through `triggerAndWait`, which cost ~31s to queue
+ * and boot the child machine and ~60s to restore the checkpointed parent
+ * afterwards. On a measured spec turn that was about 90 seconds of 2m35s, with
+ * no model call anywhere in it.
+ *
+ * It owns the document and the room's status feed, and nothing else. The chat
+ * row and the work log belong to the caller.
+ */
+export async function runSpec(
+  payload: SpecPayload,
+  { runId, specId = runId, reads }: SpecRunOptions
+): Promise<SpecRunResult> {
+  const { projectId, roomId, promptMessageId, chatRunId, focus } = payload;
+
+  await publishAiStatus(roomId, {
+    kind: "spec",
+    status: "started",
+    runId,
+    text: "Reading the canvas…",
+  });
+
+  try {
+    // Re-reading would cost two round-trips for a canvas that has not moved
+    // since the caller read it seconds ago in this same process.
+    const { context, history } =
+      reads ?? (await readRoom(roomId, promptMessageId, chatRunId, runId));
+
+    logger.info("Spec requested", {
+      projectId,
+      nodes: context.nodes.length,
+      edges: context.edges.length,
+      chatMessages: history.length,
+    });
+
+    // Nothing to write about is a bad request, not a flaky one — retrying it
+    // would spend two model calls arriving at the same empty answer.
+    if (context.nodes.length === 0 && history.length === 0) {
+      throw new AbortTaskRunError(
+        "The canvas is empty and there is no conversation to write a spec from."
+      );
+    }
+
+    await publishAiStatus(roomId, {
+      kind: "spec",
+      status: "processing",
+      runId,
+      text: "Writing the spec…",
+    });
+
+    const { text } = await generateText({
+      model: createGoogleGenerativeAI({ apiKey: getGoogleApiKey() })(
+        SPEC_MODEL_ID
+      ),
+      system: SPEC_SYSTEM_PROMPT,
+      prompt: buildSpecPrompt({ context, history, focus }),
+      providerOptions: {
+        google: { thinkingConfig: { thinkingLevel: THINKING_LEVEL } },
+      },
+    });
+
+    const markdown = stripCodeFence(text.trim());
+
+    // An empty document is a failed run, not a successful one: the caller
+    // would otherwise be handed "" to save as a spec.
+    if (!markdown) {
+      throw new Error("The model returned an empty spec");
+    }
+
+    logger.info("Spec generated", { projectId, characters: markdown.length });
+
+    // Stored before the room is told the spec is ready: "complete" is what the
+    // UI lists specs on, so publishing it ahead of the write would advertise a
+    // document that is not retrievable yet — or at all, if the write fails.
+    const saved = await saveSpec(projectId, specId, markdown);
+
+    logger.info("Spec saved", { projectId, specId });
+
+    await publishAiStatus(roomId, {
+      kind: "spec",
+      status: "complete",
+      runId,
+      text: "Spec ready.",
+    });
+
+    // The blob URL is deliberately not returned. It is a private pointer the
+    // download route resolves with the store token, and the result is read by
+    // the initiating browser — which has no use for one it cannot fetch.
+    // `specId` is what a download URL is built from, and `fileName` is what the
+    // orchestrator attaches to the transcript.
+    return { markdown, specId, fileName: saved.fileName };
+  } catch (error: unknown) {
+    logger.error("Spec generation failed", {
+      projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    await publishAiStatus(roomId, {
+      kind: "spec",
+      status: "error",
+      runId,
+      text: "Spec generation failed.",
+    });
+
+    throw error;
+  }
+}
+
+/** The two reads, when the caller has not already made them. */
+async function readRoom(
+  roomId: string,
+  promptMessageId: string | undefined,
+  chatRunId: string | undefined,
+  runId: string
+): Promise<RoomReads> {
+  // In parallel: neither read depends on the other, and both are pure reads
+  // against the same room.
+  const [context, history] = await Promise.all([
+    readCanvas(roomId),
+    readChatHistory(
+      roomId,
+      promptMessageId ?? "",
+      resolveAiChatRunId(chatRunId, runId)
+    ),
+  ]);
+
+  return { context, history };
+}
+
+/**
+ * The spec writer as a standalone task, for a dashboard replay or a direct
+ * trigger. The orchestrator does not go through this — it calls `runSpec`.
  *
  * Backend code triggers this by ID with a type-only import, never by importing
  * the task instance.
@@ -72,104 +220,30 @@ export const generateSpec = schemaTask({
   // Safe to retry, unlike the design agent: both writes are keyed on this run's
   // own ID (see `saveSpec`), so a second attempt replaces its predecessor rather
   // than adding a duplicate spec. Capped at two because each attempt is a paid
-  // model call, not because it is unsafe.
+  // model call, not because it is unsafe. The inline path has no retry of its
+  // own — the orchestrator is `maxAttempts: 1`, because its turn can also have
+  // written to the canvas.
   retry: { maxAttempts: 2 },
-  // Longer than the design agent's 180s: a spec is several thousand output
-  // tokens of prose, where a design plan is a short structured object.
+  // A direct spec run keeps its own five-minute ceiling. The inline path runs
+  // beneath the orchestrator's ten-minute ceiling alongside routing/design.
   maxDuration: 300,
   run: async (payload: SpecPayload, { ctx }) => {
-    const { projectId, roomId, nodes, edges, chatHistory } = payload;
-    const runId = ctx.run.id;
-
-    logger.info("Spec requested", {
-      projectId,
-      nodes: nodes.length,
-      edges: edges.length,
-      chatMessages: chatHistory.length,
-    });
-
-    // Nothing to write about is a bad request, not a flaky one — retrying it
-    // would spend two model calls arriving at the same empty answer.
-    if (nodes.length === 0 && chatHistory.length === 0) {
-      throw new AbortTaskRunError(
-        "The canvas is empty and there is no conversation to write a spec from."
-      );
-    }
-
+    // Metadata stays in the wrapper rather than in `runSpec`. Inline,
+    // `metadata.set` writes onto whichever run is executing — the orchestrator's
+    // — and would label a whole routed turn `kind: "spec"`. Nothing in the app
+    // reads run metadata; the room's status feed, which `runSpec` publishes to
+    // either way, is what the UI follows. So this is dashboard labelling for a
+    // directly triggered run.
     metadata.set("kind", "spec").set("status", "started");
 
-    await publishAiStatus(roomId, {
-      kind: "spec",
-      status: "started",
-      runId,
-      text: "Reading the canvas…",
-    });
-
     try {
-      metadata.set("status", "processing");
+      const result = await runSpec(payload, { runId: ctx.run.id });
 
-      await publishAiStatus(roomId, {
-        kind: "spec",
-        status: "processing",
-        runId,
-        text: "Writing the spec…",
-      });
-
-      const { text } = await generateText({
-        model: createGoogleGenerativeAI({ apiKey: getGoogleApiKey() })(
-          SPEC_MODEL_ID
-        ),
-        system: SYSTEM_PROMPT,
-        prompt: describeSpecInput(payload),
-        providerOptions: {
-          google: { thinkingConfig: { thinkingLevel: THINKING_LEVEL } },
-        },
-      });
-
-      const markdown = stripCodeFence(text.trim());
-
-      // An empty document is a failed run, not a successful one: the caller
-      // would otherwise be handed "" to save as a spec.
-      if (!markdown) {
-        throw new Error("The model returned an empty spec");
-      }
-
-      logger.info("Spec generated", { projectId, characters: markdown.length });
-
-      // Stored before the room is told the spec is ready: "complete" is what the
-      // UI lists specs on, so publishing it ahead of the write would advertise a
-      // document that is not retrievable yet — or at all, if the write fails.
-      const filePath = await saveSpec(projectId, runId, markdown);
-
-      logger.info("Spec saved", { projectId, specId: runId, filePath });
       metadata.set("status", "complete");
 
-      await publishAiStatus(roomId, {
-        kind: "spec",
-        status: "complete",
-        runId,
-        text: "Spec ready.",
-      });
-
-      // The blob URL is deliberately not returned. It is a private pointer the
-      // download route resolves with the store token, and the run output is
-      // readable by the initiating browser — which has no use for one it cannot
-      // fetch. `specId` is what a download URL is built from.
-      return { markdown, specId: runId };
+      return result;
     } catch (error: unknown) {
-      logger.error("Spec generation failed", {
-        projectId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-
       metadata.set("status", "error");
-
-      await publishAiStatus(roomId, {
-        kind: "spec",
-        status: "error",
-        runId,
-        text: "Spec generation failed.",
-      });
 
       throw error;
     }
@@ -177,7 +251,8 @@ export const generateSpec = schemaTask({
 });
 
 /**
- * Stores the document, then the pointer to it, and answers with the blob URL.
+ * Stores the document, then the pointer to it, and answers with the name the
+ * document saves under.
  *
  * Blob first, row second — the same order as the canvas route, for the same
  * reason: a `ProjectSpec` written ahead of the upload would advertise an
@@ -198,7 +273,7 @@ async function saveSpec(
   projectId: string,
   specId: string,
   markdown: string
-): Promise<string> {
+): Promise<{ fileName: string }> {
   const blob = await put(specBlobPath(projectId, specId), markdown, {
     access: SPEC_BLOB_ACCESS,
     contentType: SPEC_CONTENT_TYPE,
@@ -206,62 +281,16 @@ async function saveSpec(
     addRandomSuffix: false,
   });
 
-  await prisma.projectSpec.upsert({
+  const row = await prisma.projectSpec.upsert({
     where: { id: specId },
     create: { id: specId, projectId, filePath: blob.url },
     update: { filePath: blob.url },
   });
 
-  return blob.url;
-}
-
-/** The canvas and the conversation as text the model can reason about. */
-function describeSpecInput({ nodes, edges, chatHistory }: SpecPayload): string {
-  const sections = [
-    "Canvas components:",
-    nodes.map(describeNode).join("\n") || "- none",
-    "",
-    "Canvas connections:",
-    edges.map((edge) => describeEdge(edge, nodes)).join("\n") || "- none",
-  ];
-
-  if (chatHistory.length > 0) {
-    sections.push(
-      "",
-      "Conversation about this system, oldest first:",
-      chatHistory
-        .map((message) => `- ${message.role}: ${message.content}`)
-        .join("\n")
-    );
-  }
-
-  sections.push("", "Write the technical specification for this system.");
-
-  return sections.join("\n");
-}
-
-function describeNode(node: SpecNode): string {
-  const name = node.data.label || node.id;
-  const shape = node.data.shape ? ` (${node.data.shape})` : "";
-
-  return `- ${name}${shape}`;
-}
-
-/**
- * Connections are named by label, not by node ID: the model is writing prose
- * about components, so a dangling edge into a deleted node is described as
- * "unknown" rather than leaking a slug into the document.
- */
-function describeEdge(edge: SpecEdge, nodes: readonly SpecNode[]): string {
-  const label = edge.data.label ? ` — ${edge.data.label}` : "";
-
-  return `- ${nameOf(edge.source)} -> ${nameOf(edge.target)}${label}`;
-
-  function nameOf(id: string): string {
-    const node = nodes.find((candidate) => candidate.id === id);
-
-    return node?.data.label || node?.id || "unknown";
-  }
+  // Named from the stored row's own `createdAt` by the same helper the download
+  // route puts in `Content-Disposition`, so the name in the transcript is the
+  // name the file saves under rather than a second guess at it.
+  return { fileName: specFileName(row.createdAt) };
 }
 
 /**

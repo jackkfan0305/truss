@@ -62,8 +62,44 @@ export async function upsertServerAiChatMessage(
 }
 
 /**
- * The recovery policy behind the server upsert. Its narrow client dependency
- * makes 404 and deterministic-ID race handling verifiable without a room.
+ * Statuses that mean "asking again differently will not help".
+ *
+ * A bad key or a revoked one is not a missing message, and walking the whole
+ * recovery ladder against it would spend four round trips per flush arriving at
+ * the same refusal. `429` is here for the opposite reason: retrying a rate limit
+ * immediately is the one response guaranteed to make it worse.
+ */
+const UNRECOVERABLE_STATUSES = [401, 403, 429] as const;
+
+/**
+ * The recovery policy behind the server upsert.
+ *
+ * **Liveblocks does not distinguish "missing" from "already exists".** Measured
+ * against the live v2 API on this project's key:
+ *
+ * | request                          | returns                        |
+ * | -------------------------------- | ------------------------------ |
+ * | PATCH a message that is missing  | `500 Internal Room Error`      |
+ * | POST a message ID that exists    | `500 Internal Room Error`      |
+ * | POST into a feed that is missing | `500 Internal Room Error`      |
+ * | POST a feed that exists          | `409` (the one honest answer)  |
+ * | PATCH a message that exists      | `200`                          |
+ * | PATCH in a room that is missing  | `404 ROOM_NOT_FOUND`           |
+ *
+ * So this ladder cannot branch on a status: three different recoverable states
+ * arrive as the same opaque 500, and an earlier version of this function keyed
+ * on `404`/`409` and therefore rethrew on the *first* write of every run — the
+ * assistant row was never created and the whole turn went unrecorded.
+ *
+ * Each rung is attempted in turn and its failure remembered rather than thrown;
+ * only a run out of rungs throws, carrying the first real error so the caller
+ * logs something diagnosable. The order is what encodes the intent — update the
+ * row, else create it, else create the feed it belongs in, else lose the create
+ * race and update after all — and every rung is idempotent, so an attempt that
+ * was not needed costs a round trip and changes nothing.
+ *
+ * The steady state is unaffected: a row that exists is written by rung one, and
+ * only the first write of a run pays for the rest.
  */
 export async function upsertAiChatMessageWithClient(
   client: AiChatFeedClient,
@@ -85,47 +121,39 @@ export async function upsertAiChatMessageWithClient(
       id: messageId,
       data: message,
     });
+  const createFeed = () => client.createFeed({ roomId, feedId: AI_CHAT_FEED_ID });
 
-  try {
-    await update();
-    return;
-  } catch (error: unknown) {
-    if (!hasStatus(error, 404)) {
-      throw error;
+  // `createFeed` is a precondition for the create that follows it, not an
+  // outcome: a 409 there means the feed was already there, which is exactly
+  // what the next rung needs. Its result is deliberately not returned.
+  const rungs = [update, create, createFeed, create, update];
+  let firstError: unknown;
+
+  for (const [index, attempt] of rungs.entries()) {
+    try {
+      await attempt();
+
+      if (attempt !== createFeed) {
+        return;
+      }
+    } catch (error: unknown) {
+      if (isUnrecoverable(error)) {
+        throw error;
+      }
+
+      firstError ??= error;
+
+      // Nothing left to try; report the first failure rather than the last,
+      // because the later ones are consequences of it.
+      if (index === rungs.length - 1) {
+        throw firstError;
+      }
     }
   }
+}
 
-  try {
-    await create();
-    return;
-  } catch (error: unknown) {
-    if (hasStatus(error, 409)) {
-      await update();
-      return;
-    }
-
-    if (!hasStatus(error, 404)) {
-      throw error;
-    }
-  }
-
-  try {
-    await client.createFeed({ roomId, feedId: AI_CHAT_FEED_ID });
-  } catch (error: unknown) {
-    if (!hasStatus(error, 409)) {
-      throw error;
-    }
-  }
-
-  try {
-    await create();
-  } catch (error: unknown) {
-    if (!hasStatus(error, 409)) {
-      throw error;
-    }
-
-    await update();
-  }
+function isUnrecoverable(error: unknown): boolean {
+  return UNRECOVERABLE_STATUSES.some((status) => hasStatus(error, status));
 }
 
 function hasStatus(error: unknown, status: number): boolean {

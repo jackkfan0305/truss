@@ -47,6 +47,29 @@ export interface AiRunTurn {
   completedAt?: number;
 }
 
+/**
+ * The step verb to show above the composer while a run is live, or `null`.
+ *
+ * Steps moved out of the work log and up here (38-live-step-status): they are
+ * status, and status belongs next to the input it is disabling rather than
+ * folded inside a per-turn disclosure that a reader has to open.
+ *
+ * `findLast` on both, because a turn can only be live if it is the newest one
+ * and the current step is the newest step. A live turn with no step yet is
+ * still worth announcing — the run exists, it just has not said anything.
+ */
+export function selectLiveRunStep(turns: readonly AiRunTurn[]): string | null {
+  const live = turns.findLast(
+    (turn) => turn.phase === "starting" || turn.phase === "running"
+  );
+
+  if (!live) {
+    return null;
+  }
+
+  return live.activity.findLast((part) => part.type === "step")?.text ?? "Starting";
+}
+
 export type AiRunTurnEvent =
   | {
       type: "start";

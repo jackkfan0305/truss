@@ -9,6 +9,12 @@ interface ChatEntryProps {
   message: ChatMessage
   isOwn: boolean
   activity?: React.ReactNode
+  /**
+   * Documents this turn produced, rendered *after* the closing message and
+   * outside the work-log disclosure: a spec is the result of the turn, not a
+   * step within it.
+   */
+  attachments?: React.ReactNode
   liveAvatar?: string
 }
 
@@ -17,6 +23,7 @@ export function ChatEntry({
   message,
   isOwn,
   activity,
+  attachments,
   liveAvatar,
 }: ChatEntryProps) {
   const isAssistant = message.role === "assistant"
@@ -41,6 +48,7 @@ export function ChatEntry({
             }}
           />
         ) : null}
+        {attachments}
       </li>
     )
   }

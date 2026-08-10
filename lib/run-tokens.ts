@@ -1,7 +1,7 @@
 import { auth as clerkAuth } from "@clerk/nextjs/server";
 import { auth as triggerAuth } from "@trigger.dev/sdk";
 
-import { parseRunId } from "@/lib/design-requests";
+import { parseRunId } from "@/lib/orchestrate-requests";
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
@@ -23,10 +23,10 @@ const TOKEN_EXPIRATION = "1h";
  * collaborator cannot pull another member's generation, and unknown,
  * unauthorized, and revoked runs deliberately collapse into the same 404.
  *
- * Shared by `/api/ai/design/token` and `/api/ai/spec/token`: the check is about
- * the run record, not about what the run does, so both routes are this function.
- * A per-task copy would be the same code twice with two places to forget the
- * project recheck.
+ * `/api/ai/orchestrate/token` is its only caller now that the design and spec
+ * routes are gone, and it stays a shared helper because the check is about the
+ * run record rather than about what the run does. A per-route copy would be the
+ * same code twice with two places to forget the project recheck.
  */
 export async function issueRunToken(request: Request): Promise<Response> {
   const runId = parseRunId(await readJsonBody(request));

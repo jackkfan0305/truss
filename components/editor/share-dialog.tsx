@@ -1,17 +1,17 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Check, Link2, Trash2 } from "lucide-react"
+import { useState } from "react"
+import { Check, CircleAlert, Link2, Trash2 } from "lucide-react"
 
 import { EditorDialog } from "@/components/editor/editor-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useProjectMembers } from "@/hooks/use-project-members"
 import { cn } from "@/lib/utils"
 import type { ProjectAccess, ProjectMember } from "@/types/project"
 
 const INVITE_FORM_ID = "invite-collaborator-form"
-const COPIED_FEEDBACK_MS = 2000
 
 interface ShareDialogProps {
   project: ProjectAccess
@@ -114,8 +114,7 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
 
 /** Read-only URL plus a copy button that confirms for two seconds. */
 function CopyLinkRow({ projectId }: { projectId: string }) {
-  const [hasCopied, setHasCopied] = useState(false)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { status, copy } = useCopyToClipboard()
 
   /*
    * Read once at first render rather than in an effect, which would cost an
@@ -128,20 +127,6 @@ function CopyLinkRow({ projectId }: { projectId: string }) {
       ? ""
       : `${window.location.origin}/editor/${projectId}`,
   )
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    }
-  }, [])
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(link)
-
-    setHasCopied(true)
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    timeoutRef.current = setTimeout(() => setHasCopied(false), COPIED_FEEDBACK_MS)
-  }
 
   return (
     <div className="grid gap-2">
@@ -159,11 +144,16 @@ function CopyLinkRow({ projectId }: { projectId: string }) {
           readOnly
           onFocus={(event) => event.target.select()}
         />
-        <Button variant="outline" onClick={() => void handleCopy()}>
-          {hasCopied ? (
+        <Button variant="outline" onClick={() => void copy(link)}>
+          {status === "copied" ? (
             <>
               <Check className="h-4 w-4 text-state-success" />
               Copied!
+            </>
+          ) : status === "error" ? (
+            <>
+              <CircleAlert className="h-4 w-4" />
+              Press Ctrl+C
             </>
           ) : (
             <>

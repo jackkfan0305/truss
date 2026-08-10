@@ -81,6 +81,14 @@
 - Every trigger is recorded as a `TaskRun` (`runId`, `projectId`, `userId`). That
   record — not project membership — is what authorizes a run-scoped Trigger.dev
   public token, so a collaborator cannot subscribe to another member's run.
+- The verified human `promptMessageId`, user and room form a global Trigger.dev
+  idempotency key. Replaying the same prompt returns its original run rather than
+  paying for another model turn or applying the same canvas mutation twice;
+  `TaskRun` persistence is an upsert for the same reason.
+- Paid AI starts are capped at 10 verified requests per Clerk user in a rolling
+  minute. `AiRequestRateLimit` holds one window row per user, consumed by a
+  conditional PostgreSQL upsert so concurrent serverless requests cannot race
+  past the cap; rejection is an HTTP 429 before Trigger.dev is called.
 - A room ID *is* its project ID, so a request naming both must have them agree.
   Authorization is checked against the project; a mismatch is rejected rather
   than reconciled.
@@ -164,6 +172,15 @@
   back into. The spec exists whether or not the initiating tab is still open, and
   a "here is the spec I generated" endpoint would be a way to write arbitrary
   Markdown into someone else's project.
+- The orchestrator **calls** the spec writer and the design agent in its own
+  process rather than triggering them as child runs. A `triggerAndWait` costs a
+  machine boot for the child plus a checkpoint and restore of the parent — around
+  90 seconds of a measured 2m35s spec turn, none of it model time. Both remain
+  tasks as well, for dashboard replays and direct triggers.
+- A consequence: the run that produces a spec is usually the orchestrator's, and
+  one turn may write more than one. The first keeps the run's own ID; later ones
+  are suffixed, because the blob write and the row upsert are keyed on that ID
+  and would otherwise overwrite the turn's earlier document.
 - Because that write happens in the worker, deployed Trigger.dev environments
   need `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` set in the dashboard, not only
   in the local `.env`.

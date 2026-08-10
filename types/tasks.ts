@@ -218,7 +218,12 @@ export function getBuildStepMs(actionCount: number): number {
   return Math.min(Math.max(step, MIN_BUILD_STEP_MS), MAX_BUILD_STEP_MS);
 }
 
-export const AI_ACTIVITY_PART_TYPES = ["step", "reasoning", "action"] as const;
+export const AI_ACTIVITY_PART_TYPES = [
+  "step",
+  "reasoning",
+  "action",
+  "artifact",
+] as const;
 
 export type AiActivityPartType = (typeof AI_ACTIVITY_PART_TYPES)[number];
 
@@ -227,13 +232,23 @@ export type AiActivityPartType = (typeof AI_ACTIVITY_PART_TYPES)[number];
  * - `reasoning` — a safe, user-facing summary of the agent's current logic.
  * - `action` — one canvas operation the agent performed, named as the operation
  *   itself (`addNode`, `addEdge`, …) with the thing it acted on as `detail`.
+ * - `artifact` — a generated spec attached to the turn (36-spec-attachment):
+ *   `text` is the file name, `detail` the `ProjectSpec` ID. It reuses the two
+ *   existing fields rather than introducing a differently shaped part so that
+ *   one validator, one 200-part bound and one byte budget still cover
+ *   everything on the feed.
  */
 export type AiActivityPart = {
   type: AiActivityPartType;
   text: string;
-  /** Set on `action` only: the node or edge the operation names. */
+  /** Set on `action` and `artifact`: the thing the part points at. */
   detail?: string;
 };
+
+/** The spec an `artifact` part references, or `null` if it names no document. */
+export function readAiArtifactSpecId(part: AiActivityPart): string | null {
+  return part.type === "artifact" && part.detail ? part.detail : null;
+}
 
 /** Internal marker used to settle only after the final stream chunk arrives. */
 export type AiActivityTerminalPart = {

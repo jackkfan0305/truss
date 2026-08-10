@@ -3,6 +3,8 @@
  * Keeps the handlers thin, per context/code-standards.md.
  */
 
+import { isProjectId } from "@/lib/project-id";
+
 export const DEFAULT_PROJECT_NAME = "Untitled Project";
 
 const MAX_NAME_LENGTH = 120;
@@ -13,10 +15,6 @@ const MAX_NAME_LENGTH = 120;
  * suffix. Lowercase alphanumeric groups joined by single hyphens — never
  * leading, trailing or doubled.
  */
-const PROJECT_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const MIN_ID_LENGTH = 3;
-const MAX_ID_LENGTH = 80;
-
 /**
  * Deliberately loose: one `@`, no whitespace, a dot in the domain. Full RFC 5322
  * validation rejects addresses that really do deliver, and Clerk is the actual
@@ -110,12 +108,7 @@ export function parseProjectId(body: unknown): ProjectIdResult {
     return { ok: false };
   }
 
-  const isValid =
-    raw.length >= MIN_ID_LENGTH &&
-    raw.length <= MAX_ID_LENGTH &&
-    PROJECT_ID_PATTERN.test(raw);
-
-  return isValid ? { ok: true, id: raw } : { ok: false };
+  return isProjectId(raw) ? { ok: true, id: raw } : { ok: false };
 }
 
 /**

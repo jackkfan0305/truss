@@ -10,8 +10,8 @@ import type { AiTimelinePart } from "@/lib/ai-timeline";
 import type { AiDesignModelId, AiThinkingLevel } from "@/types/tasks";
 
 /**
- * Starting a design generation and following it to the end
- * (26-ai-chat-functional).
+ * Starting an agent turn and following it to the end
+ * (26-ai-chat-functional, 35-orchestrator-backend).
  *
  * This controller starts Trigger.dev runs; the keyed observer component owns
  * their realtime subscription. Neither touches the canvas: the agent writes
@@ -19,6 +19,10 @@ import type { AiDesignModelId, AiThinkingLevel } from "@/types/tasks";
  * Liveblocks Storage the canvas already renders from, so the diagram updates on
  * its own — here and in every other client in the room. Manually applying the
  * result would be a second, racing copy of that path.
+ *
+ * Which agent runs is not this hook's business. It posts the prompt to the
+ * orchestrator, which reads the message and decides whether to answer, edit the
+ * canvas, or write a spec.
  */
 
 /** A run plus the token that may read it. Both come from the API, never the client. */
@@ -27,24 +31,24 @@ export interface RunSubscription {
   token: string;
 }
 
-export interface DesignRunSettlement {
+export interface AgentRunSettlement {
   runId: string;
   phase: "complete" | "error";
   activity: AiTimelinePart[];
 }
 
 /** The composer's per-prompt run settings. */
-export interface DesignRunOptions {
+export interface AgentRunOptions {
   modelId: AiDesignModelId;
   thinkingLevel: AiThinkingLevel;
 }
 
-export interface DesignRun {
-  /** Triggers a run for `prompt`. Resolves once it is *started*, not finished. */
+export interface AgentRun {
+  /** Triggers a turn for `prompt`. Resolves once it is *started*, not finished. */
   start: (
     prompt: string,
     promptMessageId: string,
-    options: DesignRunOptions
+    options: AgentRunOptions
   ) => Promise<void>;
   /** True from the request leaving the client until the run settles. */
   isRunning: boolean;
@@ -56,14 +60,14 @@ export interface DesignRun {
   /** The one active run; a keyed observer owns its realtime hook lifecycle. */
   subscription: RunSubscription | null;
   /** Stores the observer's final activity and publishes its short room summary. */
-  settle: (settlement: DesignRunSettlement) => void;
+  settle: (settlement: AgentRunSettlement) => void;
 }
 
 /**
  * @param roomId The room to design into — also the project ID (lib/room-id.ts).
  * @param onSettled Called once per run with the line to put on the chat feed.
  */
-export function useDesignRun(roomId: string): DesignRun {
+export function useAgentRun(roomId: string): AgentRun {
   const [subscription, setSubscription] = useState<RunSubscription | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [storedTurns, dispatchTurn] = useReducer(reduceAiRunTurns, []);
@@ -73,7 +77,7 @@ export function useDesignRun(roomId: string): DesignRun {
   // realtime transport reconnects around the terminal event.
   const reported = useRef(new Set<string>());
 
-  const settle = useCallback((result: DesignRunSettlement) => {
+  const settle = useCallback((result: AgentRunSettlement) => {
     if (reported.current.has(result.runId)) {
       return;
     }
@@ -96,7 +100,7 @@ export function useDesignRun(roomId: string): DesignRun {
     async (
       prompt: string,
       promptMessageId: string,
-      options: DesignRunOptions
+      options: AgentRunOptions
     ): Promise<void> => {
       if (startLock.current) {
         return;
@@ -107,7 +111,7 @@ export function useDesignRun(roomId: string): DesignRun {
       dispatchTurn({ type: "start", promptMessageId, startedAt: Date.now() });
 
       try {
-        const nextSubscription = await triggerDesign(
+        const nextSubscription = await triggerAgent(
           prompt,
           promptMessageId,
           roomId,
@@ -154,20 +158,20 @@ export function useDesignRun(roomId: string): DesignRun {
 }
 
 /**
- * Two calls, because the token is issued separately: `/api/ai/design` answers
- * with a run ID, and `/api/ai/design/token` trades that ID for a token scoped to
- * that one run. Splitting them is what keeps the token route's ownership check
- * meaningful, so it is not worth collapsing into one response.
+ * Two calls, because the token is issued separately: `/api/ai/orchestrate`
+ * answers with a run ID, and `/api/ai/orchestrate/token` trades that ID for a
+ * token scoped to that one run. Splitting them is what keeps the token route's
+ * ownership check meaningful, so it is not worth collapsing into one response.
  */
-async function triggerDesign(
+async function triggerAgent(
   prompt: string,
   promptMessageId: string,
   roomId: string,
-  options: DesignRunOptions
+  options: AgentRunOptions
 ): Promise<RunSubscription> {
   // `projectId` and `roomId` are the same value; the route rejects the request
   // unless both are present and agree, so both are sent.
-  const { runId } = await postJson<{ runId: string }>("/api/ai/design", {
+  const { runId } = await postJson<{ runId: string }>("/api/ai/orchestrate", {
     prompt,
     promptMessageId,
     roomId,
@@ -176,7 +180,7 @@ async function triggerDesign(
     thinkingLevel: options.thinkingLevel,
   });
 
-  const { token } = await postJson<{ token: string }>("/api/ai/design/token", {
+  const { token } = await postJson<{ token: string }>("/api/ai/orchestrate/token", {
     runId,
   });
 

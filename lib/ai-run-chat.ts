@@ -7,6 +7,7 @@ import { upsertServerAiChatMessage } from "@/lib/ai-chat-server";
 import {
   AI_USER_ID,
   AI_USER_NAME,
+  MAX_CHAT_CONTENT_LENGTH,
   type AiActivityPart,
   type AiChatMessage,
   type AiChatRun,
@@ -43,10 +44,40 @@ export interface CreateAiRunChatPublisherOptions {
 export interface AiRunChatPublisher {
   start: () => Promise<void>;
   emit: (part: AiActivityPart) => void;
+  /**
+   * Grows the answer the reader is waiting on, in place. Separate from `emit`
+   * because a text delta is the message itself, not a step in its work log —
+   * routing it through the activity list would print the final answer twice.
+   */
+  appendContent: (delta: string) => void;
+  /**
+   * Writes the pending snapshot now instead of on the debounce.
+   *
+   * Useful at any boundary that needs the pending debounced snapshot to be
+   * durable before continuing. Normal inline orchestration does not need it.
+   */
+  flush: () => Promise<void>;
   finish: (
     phase: Exclude<AiChatRunPhase, "running">,
     content: string
   ) => Promise<void>;
+}
+
+/**
+ * Which run's chat row a task writes into.
+ *
+ * A subagent publishes into its *parent's* row, so one user prompt produces one
+ * assistant message with the delegated work nested inside it. A run with no
+ * parent — a direct trigger, a dashboard replay — owns its own row.
+ *
+ * Not a bare `??`: an empty string is a caller that meant to pass a parent and
+ * did not, and `chat-` is a row every such run would collide on.
+ */
+export function resolveAiChatRunId(
+  chatRunId: string | undefined,
+  runId: string
+): string {
+  return chatRunId ? chatRunId : runId;
 }
 
 /**
@@ -145,6 +176,38 @@ export function createAiRunChatPublisher(
     }
   };
 
+  const appendContent = (delta: string): void => {
+    if (finished || delta.length === 0) {
+      return;
+    }
+
+    // Clamped here rather than at `finish`, because `parseAiChatMessage` slices
+    // on the way back out: a message that grew past the cap would render
+    // truncated while the worker went on appending to something nobody sees.
+    const next = (content + delta).slice(0, MAX_CHAT_CONTENT_LENGTH);
+
+    if (next === content) {
+      return;
+    }
+
+    content = next;
+
+    if (scheduledHandle === undefined) {
+      scheduledHandle = schedule(flush, AI_RUN_CHAT_FLUSH_MS);
+    }
+  };
+
+  const flushNow = async (): Promise<void> => {
+    if (scheduledHandle !== undefined) {
+      cancel(scheduledHandle);
+      scheduledHandle = undefined;
+    }
+
+    if (!finished) {
+      await enqueueSnapshot();
+    }
+  };
+
   const finish = (
     terminalPhase: Exclude<AiChatRunPhase, "running">,
     terminalContent: string
@@ -170,13 +233,18 @@ export function createAiRunChatPublisher(
     return finishPromise;
   };
 
-  return { start, emit, finish };
+  return { start, emit, appendContent, flush: flushNow, finish };
 }
 
 /**
  * Keeps the durable run anchor even when its optional detail exceeds the feed
  * write budget. Reasoning gives way first; if actions alone are still too
- * large, the state and prompt association survive with an empty activity list.
+ * large, the state and prompt association survive on artifacts alone.
+ *
+ * Artifacts are never dropped. Every other part is a description of work that
+ * already happened, but an `artifact` part is the only pointer the transcript
+ * has to a generated document — losing it to a byte budget would strand a spec
+ * that was written, paid for and saved.
  */
 export function fitAiRunToBudget(run: AiChatRun): AiChatRun {
   if (measureRun(run) <= MAX_AI_RUN_SNAPSHOT_BYTES) {
@@ -192,7 +260,10 @@ export function fitAiRunToBudget(run: AiChatRun): AiChatRun {
     return withoutReasoning;
   }
 
-  return { ...run, activity: [] };
+  return {
+    ...run,
+    activity: run.activity.filter((part) => part.type === "artifact"),
+  };
 }
 
 function measureRun(run: AiChatRun): number {

@@ -1,6 +1,6 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { logger, streams, task } from "@trigger.dev/sdk";
+import { logger, task } from "@trigger.dev/sdk";
 import { Output, jsonSchema, streamText } from "ai";
 
 import {
@@ -8,8 +8,16 @@ import {
   publishAiStatus,
   setAiPresence,
 } from "@/lib/ai-activity";
-import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
+import {
+  openActivityStream,
+  type ActivityEmitter,
+} from "@/lib/ai-activity-stream";
 import { createAiRunChatPublisher } from "@/lib/ai-run-chat";
+import {
+  readCanvas,
+  readChatHistory,
+  type RoomReads,
+} from "@/lib/canvas-read";
 import {
   DESIGN_ACTION_TYPES,
   MAX_DESIGN_ACTIONS,
@@ -22,11 +30,7 @@ import {
   type DesignContext,
   type DesignPlan,
 } from "@/lib/design-plan";
-import {
-  SYSTEM_PROMPT,
-  buildDesignPrompt,
-  selectDesignChatHistory,
-} from "@/lib/design-prompt";
+import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
@@ -35,8 +39,6 @@ import {
   type CanvasNode,
 } from "@/types/canvas";
 import {
-  AI_ACTIVITY_STREAM_ID,
-  AI_CHAT_FEED_ID,
   AI_CURSOR_ARRIVAL_PAD_MS,
   AI_CURSOR_SWEEP_MS,
   DEFAULT_AI_DESIGN_MODEL_ID,
@@ -44,15 +46,19 @@ import {
   getBuildStepMs,
   parseAiDesignModelId,
   parseAiThinkingLevel,
-  type AiActivityPart,
   type AiActivityTerminalPart,
+  type AiChatMessage,
   type AiThinkingLevel,
 } from "@/types/tasks";
 
 /**
- * The payload `POST /api/ai/design` sends. `roomId` is the Liveblocks room the
- * generated nodes and edges are written into — which is also the project ID
- * (lib/room-id.ts), so the route validates the two agree before triggering.
+ * What a design run needs. `roomId` is the Liveblocks room the generated nodes
+ * and edges are written into — which is also the project ID (lib/room-id.ts), so
+ * the route validates the two agree before triggering the orchestrator.
+ *
+ * `prompt` is the orchestrator's own self-contained design brief, not the raw
+ * user message. `runDesign` receives the conversation for grounding, but the
+ * brief still resolves references such as "add that too" before it arrives.
  */
 export interface DesignAgentPayload {
   prompt: string;
@@ -70,6 +76,33 @@ export interface DesignAgentPayload {
    * reasons as `modelId`.
    */
   thinkingLevel?: string;
+}
+
+export interface DesignRunOptions {
+  /** The run that owns the chat row this work is narrated into. */
+  runId: string;
+  /** Where the work log goes. Owned by the caller, never closed here. */
+  activity: ActivityEmitter;
+  /**
+   * The canvas and transcript, when the caller has already read them.
+   *
+   * The orchestrator has, moments earlier and in this same process, so passing
+   * them down saves two Liveblocks round-trips per turn. Absent when the task is
+   * triggered directly, and then they are read here.
+   */
+  reads?: RoomReads;
+  /**
+   * Settles the caller's chat row on a design failure, before the error is
+   * rethrown. The orchestrator does not pass one: a failed design has to reach
+   * its model as a tool result it can explain, not end the turn.
+   */
+  onFailure?: (text: string) => Promise<void>;
+}
+
+export interface DesignRunResult {
+  /** The message the room was told, fallbacks already applied. Never empty. */
+  summary: string;
+  applied: number;
 }
 
 /**
@@ -192,83 +225,6 @@ const designPlanSchema = jsonSchema({
 const INCLUDE_THOUGHTS = true;
 
 /**
- * The run's live activity, as a stream the sidebar subscribes to.
- *
- * A `ReadableStream` handed to `streams.pipe` rather than a chain of
- * `streams.append` calls: phases, summaries, and operations can be enqueued
- * synchronously while the pipe batches transport in the background.
- */
-function openActivityStream(onActivity: (part: AiActivityPart) => void) {
-  let controller!: ReadableStreamDefaultController<
-    AiActivityPart | AiActivityTerminalPart
-  >;
-  let isWritable = true;
-  let didClose = false;
-  let didLogTransportError = false;
-
-  const { waitUntilComplete } = streams.pipe(
-    AI_ACTIVITY_STREAM_ID,
-    new ReadableStream<AiActivityPart | AiActivityTerminalPart>({
-      start: (streamController) => {
-        controller = streamController;
-      },
-    })
-  );
-
-  return {
-    // Never throws: activity is commentary, and a closed stream must not be
-    // able to fail the canvas write that is the actual work.
-    emit: (part: AiActivityPart | AiActivityTerminalPart): void => {
-      if (part.type !== "terminal") {
-        onActivity(part);
-      }
-
-      if (!isWritable) {
-        return;
-      }
-
-      try {
-        controller.enqueue(part);
-      } catch (error: unknown) {
-        isWritable = false;
-        logActivityTransportError(error);
-      }
-    },
-    close: async (): Promise<void> => {
-      if (didClose) {
-        return;
-      }
-
-      didClose = true;
-      isWritable = false;
-
-      try {
-        controller.close();
-      } catch (error: unknown) {
-        logActivityTransportError(error);
-      }
-
-      try {
-        await waitUntilComplete();
-      } catch (error: unknown) {
-        logActivityTransportError(error);
-      }
-    },
-  };
-
-  function logActivityTransportError(error: unknown): void {
-    if (didLogTransportError) {
-      return;
-    }
-
-    didLogTransportError = true;
-    logger.warn("AI activity stream transport failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
  * Design generation (23-design-agent-logic).
  *
  * Reads the room's current diagram, asks Gemini for a set of canvas edits,
@@ -276,8 +232,199 @@ function openActivityStream(onActivity: (part: AiActivityPart) => void) {
  * edits through — so a generated node is indistinguishable from a dragged one.
  * Progress is announced as AI presence plus messages on the room's status feed.
  *
- * Backend code triggers this by ID with a type-only import, never by importing
- * the task instance.
+ * ## Why this is a function, not only a task
+ *
+ * The orchestrator used to reach this through `triggerAndWait`, and paid for the
+ * hop twice over: ~27s to queue and boot the child machine, then a checkpoint of
+ * the parent and a restore once the child returned. Measured on a real run, that
+ * was around a minute of a three-and-a-half minute turn with no model call in
+ * it. The orchestrator now calls `runDesign` inline, so the work happens in the
+ * process that is already running and already streaming to the sidebar.
+ *
+ * It owns the canvas and the AI presence, and nothing else. The chat row — who
+ * opens it, who settles it, who closes the activity stream — belongs to the
+ * caller, which is what lets one turn produce exactly one assistant message
+ * whether the work was routed or triggered directly.
+ */
+export async function runDesign(
+  payload: DesignAgentPayload,
+  { runId, activity, reads, onFailure }: DesignRunOptions
+): Promise<DesignRunResult> {
+  const { roomId, prompt, promptMessageId } = payload;
+  // An unknown id falls back rather than failing the run: the canvas edit is
+  // the work, and refusing to design because a model name was stale would be
+  // a worse answer than designing with the default one.
+  const parsedModelId = parseAiDesignModelId(payload.modelId);
+  const modelId =
+    parsedModelId === null || parsedModelId === "invalid"
+      ? DEFAULT_AI_DESIGN_MODEL_ID
+      : parsedModelId;
+  const parsedThinkingLevel = parseAiThinkingLevel(payload.thinkingLevel);
+  const thinkingLevel =
+    parsedThinkingLevel === null || parsedThinkingLevel === "invalid"
+      ? DEFAULT_AI_THINKING_LEVEL
+      : parsedThinkingLevel;
+
+  logger.info("Design requested", {
+    roomId,
+    promptLength: prompt.length,
+    modelId,
+    thinkingLevel,
+  });
+
+  // Paced writes flush as they go, so a failure can leave part of the plan on
+  // the canvas. Both are read by the error path, so both are declared out
+  // here rather than inside the `try` that assigns them.
+  let applied = 0;
+  let planned = 0;
+
+  await Promise.all([
+    setAiPresence(roomId, { cursor: null, isThinking: true }),
+    publishAiStatus(roomId, {
+      kind: "design",
+      status: "started",
+      runId,
+      text: "Reading the canvas…",
+    }),
+  ]);
+
+  try {
+    let context: DesignContext;
+    let history: readonly AiChatMessage[];
+
+    if (reads) {
+      // The orchestrator read both seconds ago in this same process. Reading
+      // them again would cost two round-trips for a canvas that has not moved,
+      // and would emit a second "Reading the canvas" into a log that already
+      // has one.
+      ({ context, history } = reads);
+    } else {
+      activity.emit({ type: "step", text: "Reading the canvas" });
+
+      // In parallel: neither read depends on the other, and both are pure reads
+      // against the same room.
+      [context, history] = await Promise.all([
+        readCanvas(roomId),
+        readChatHistory(roomId, promptMessageId, runId),
+      ]);
+    }
+
+    activity.emit({
+      type: "reasoning",
+      text:
+        context.nodes.length === 0
+          ? "The canvas is empty, so I’ll build the requested system from a clean layout."
+          : `I found ${context.nodes.length} nodes and ${context.edges.length} connections to preserve or extend.`,
+    });
+
+    await publishAiStatus(roomId, {
+      kind: "design",
+      status: "processing",
+      runId,
+      text: "Designing…",
+    });
+
+    activity.emit({ type: "step", text: "Designing" });
+
+    const object = await generateDesign({
+      modelId,
+      thinkingLevel,
+      prompt: buildDesignPrompt({ context, history, prompt }),
+      activity,
+    });
+
+    activity.emit({ type: "step", text: "Validating the proposed changes" });
+
+    const plan = parseDesignPlan(object, context);
+
+    planned = plan.actions.length;
+
+    logger.info("Design plan parsed", {
+      roomId,
+      actions: plan.actions.length,
+    });
+
+    activity.emit({
+      type: "reasoning",
+      text:
+        plan.actions.length === 0
+          ? "The current canvas already satisfies the request; no safe edits are needed."
+          : `I validated ${plan.actions.length} canvas changes and will apply them together.`,
+    });
+
+    if (plan.actions.length === 0) {
+      const summary = plan.summary || "No canvas changes to make.";
+
+      await publishAiStatus(roomId, {
+        kind: "design",
+        status: "complete",
+        runId,
+        text: "No canvas changes to make.",
+      });
+
+      return { summary, applied: 0 };
+    }
+
+    // Park the AI cursor where the work is landing, so collaborators watching
+    // the canvas see it happen somewhere rather than nowhere.
+    await setAiPresence(roomId, {
+      cursor: getPlanFocus(plan),
+      isThinking: true,
+    });
+
+    activity.emit({ type: "step", text: "Applying to the canvas" });
+
+    applied = await buildCanvas(roomId, plan, context, activity);
+
+    const summary =
+      plan.summary || `Applied ${plan.actions.length} canvas changes.`;
+
+    await publishAiStatus(roomId, {
+      kind: "design",
+      status: "complete",
+      runId,
+      text: summary,
+    });
+
+    return { summary, applied };
+  } catch (error: unknown) {
+    logger.error("Design generation failed", {
+      roomId,
+      applied,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // The build writes incrementally, so "the canvas is unchanged" stops
+    // being true the moment the first action flushes. Report what landed.
+    const failureText =
+      applied === 0
+        ? "Generation failed. The canvas is unchanged."
+        : `Generation failed partway. ${applied} of ${planned} changes were applied.`;
+
+    await publishAiStatus(roomId, {
+      kind: "design",
+      status: "error",
+      runId,
+      text: failureText,
+    });
+
+    await onFailure?.(failureText);
+
+    throw error;
+  } finally {
+    // Runs on the success and failure paths alike — a ghost AI avatar left
+    // thinking forever is worse than no avatar at all. The activity stream is
+    // the caller's, and is closed there.
+    await clearAiPresence(roomId);
+  }
+}
+
+/**
+ * The design agent as a standalone task, for a dashboard replay or a direct
+ * trigger. The orchestrator does not go through this — it calls `runDesign`.
+ *
+ * This wrapper is the chat-row ownership `runDesign` deliberately does not have:
+ * it opens the row, settles it, and closes the activity stream.
  */
 export const designAgent = task({
   id: "design-agent",
@@ -285,187 +432,44 @@ export const designAgent = task({
   // design and adds a second copy of it. One shot, and a failure is reported to
   // the room rather than retried.
   retry: { maxAttempts: 1 },
-  // Room for the three phases that actually take time: a high-thinking
+  // Room for the two phases that actually take time: a high-thinking
   // generation, and a paced build that spends `AI_BUILD_BUDGET_MS` plus a cursor
-  // sweep per action on purpose. A run that overruns this is killed mid-build,
+  // sweep per action on purpose. Those sleeps are plain timers, not `wait.for`,
+  // so they do count against this. A run that overruns is killed mid-build,
   // which leaves a half-drawn canvas — the expensive failure, so the ceiling is
   // generous rather than tight.
   maxDuration: 300,
   run: async (payload: DesignAgentPayload, { ctx }) => {
-    const { roomId, prompt, promptMessageId } = payload;
     const runId = ctx.run.id;
-    // An unknown id falls back rather than failing the run: the canvas edit is
-    // the work, and refusing to design because a model name was stale would be
-    // a worse answer than designing with the default one.
-    const parsedModelId = parseAiDesignModelId(payload.modelId);
-    const modelId =
-      parsedModelId === null || parsedModelId === "invalid"
-        ? DEFAULT_AI_DESIGN_MODEL_ID
-        : parsedModelId;
-    const parsedThinkingLevel = parseAiThinkingLevel(payload.thinkingLevel);
-    const thinkingLevel =
-      parsedThinkingLevel === null || parsedThinkingLevel === "invalid"
-        ? DEFAULT_AI_THINKING_LEVEL
-        : parsedThinkingLevel;
-
-    logger.info("Design requested", {
-      roomId,
-      promptLength: prompt.length,
-      modelId,
-      thinkingLevel,
-    });
-
     const publisher = createAiRunChatPublisher({
-      roomId,
+      roomId: payload.roomId,
       runId,
-      promptMessageId,
+      promptMessageId: payload.promptMessageId,
     });
     const activity = openActivityStream(publisher.emit);
     let activityOutcome: AiActivityTerminalPart["phase"] = "error";
-    // Paced writes flush as they go, so a failure can leave part of the plan on
-    // the canvas. Both are read by the error path, so both are declared out
-    // here rather than inside the `try` that assigns them.
-    let applied = 0;
-    let planned = 0;
 
     await publisher.start();
 
-    await Promise.all([
-      setAiPresence(roomId, { cursor: null, isThinking: true }),
-      publishAiStatus(roomId, {
-        kind: "design",
-        status: "started",
-        runId,
-        text: "Reading the canvas…",
-      }),
-    ]);
-
     try {
-      activity.emit({ type: "step", text: "Reading the canvas" });
-
-      // In parallel: neither read depends on the other, and both are pure reads
-      // against the same room.
-      const [context, history] = await Promise.all([
-        readCanvas(roomId),
-        readChatHistory(roomId, promptMessageId, runId),
-      ]);
-
-      activity.emit({
-        type: "reasoning",
-        text:
-          context.nodes.length === 0
-            ? "The canvas is empty, so I’ll build the requested system from a clean layout."
-            : `I found ${context.nodes.length} nodes and ${context.edges.length} connections to preserve or extend.`,
-      });
-
-      await publishAiStatus(roomId, {
-        kind: "design",
-        status: "processing",
+      const result = await runDesign(payload, {
         runId,
-        text: "Designing…",
-      });
-
-      activity.emit({ type: "step", text: "Designing" });
-
-      const object = await generateDesign({
-        modelId,
-        thinkingLevel,
-        prompt: buildDesignPrompt({ context, history, prompt }),
         activity,
+        onFailure: (text) => publisher.finish("error", text),
       });
 
-      activity.emit({ type: "step", text: "Validating the proposed changes" });
-
-      const plan = parseDesignPlan(object, context);
-
-      planned = plan.actions.length;
-
-      logger.info("Design plan parsed", {
-        roomId,
-        actions: plan.actions.length,
-      });
-
-      activity.emit({
-        type: "reasoning",
-        text:
-          plan.actions.length === 0
-            ? "The current canvas already satisfies the request; no safe edits are needed."
-            : `I validated ${plan.actions.length} canvas changes and will apply them together.`,
-      });
-
-      if (plan.actions.length === 0) {
-        await publishAiStatus(roomId, {
-          kind: "design",
-          status: "complete",
-          runId,
-          text: "No canvas changes to make.",
-        });
-
-        await publisher.finish("complete", plan.summary || "No canvas changes to make.");
-        activityOutcome = "complete";
-        return { summary: plan.summary, applied: 0 };
-      }
-
-      // Park the AI cursor where the work is landing, so collaborators watching
-      // the canvas see it happen somewhere rather than nowhere.
-      await setAiPresence(roomId, {
-        cursor: getPlanFocus(plan),
-        isThinking: true,
-      });
-
-      activity.emit({ type: "step", text: "Applying to the canvas" });
-
-      applied = await buildCanvas(roomId, plan, context, activity);
-
-      await publishAiStatus(roomId, {
-        kind: "design",
-        status: "complete",
-        runId,
-        text: plan.summary || `Applied ${plan.actions.length} canvas changes.`,
-      });
-
-      await publisher.finish("complete", plan.summary || `Applied ${plan.actions.length} canvas changes.`);
-
+      await publisher.finish("complete", result.summary);
       activityOutcome = "complete";
-      return { summary: plan.summary, applied };
-    } catch (error: unknown) {
-      logger.error("Design generation failed", {
-        roomId,
-        applied,
-        error: error instanceof Error ? error.message : String(error),
-      });
 
-      // The build writes incrementally, so "the canvas is unchanged" stops
-      // being true the moment the first action flushes. Report what landed.
-      const failureText =
-        applied === 0
-          ? "Generation failed. The canvas is unchanged."
-          : `Generation failed partway. ${applied} of ${planned} changes were applied.`;
-
-      await publishAiStatus(roomId, {
-        kind: "design",
-        status: "error",
-        runId,
-        text: failureText,
-      });
-
-      await publisher.finish("error", failureText);
-
-      throw error;
+      return result;
     } finally {
-      // Runs on the success and failure paths alike — a ghost AI avatar left
-      // thinking forever is worse than no avatar at all, and a stream left open
-      // keeps the sidebar waiting for chunks that will never come.
+      // A stream left open keeps the sidebar waiting for chunks that will never
+      // come, so this runs on the success and failure paths alike.
       activity.emit({ type: "terminal", phase: activityOutcome });
-      await Promise.all([clearAiPresence(roomId), activity.close()]);
+      await activity.close();
     }
   },
 });
-
-/** `openActivityStream`'s emitter, as much of it as a phase needs. */
-type ActivityEmitter = {
-  emit: (part: AiActivityPart | AiActivityTerminalPart) => void;
-};
 
 /**
  * Asks for the plan, and forwards the model's thinking to the sidebar while it
@@ -574,11 +578,20 @@ async function buildCanvas(
 
         // Emitted with the write rather than ahead of the whole batch, so the
         // sidebar list and the canvas describe the same moment.
-        activity.emit({
-          type: "action",
-          text: action.type,
-          detail: describeDesignAction(action),
-        });
+        //
+        // Except a move. A layout pass emits one per node and they are the bulk
+        // of a large plan, all saying a node is now at some coordinates the
+        // reader cannot picture and would not check — while crowding out the
+        // adds, deletes and connections, which are what actually changed about
+        // the system. The move still happens and still counts toward `applied`;
+        // it is only not worth a line in a log that is kept forever.
+        if (action.type !== "moveNode") {
+          activity.emit({
+            type: "action",
+            text: action.type,
+            detail: describeDesignAction(action),
+          });
+        }
 
         applied += 1;
 
@@ -592,60 +605,4 @@ async function buildCanvas(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Reads the diagram without changing it. `mutateFlow` is the read path as well
- * as the write path: it is the only thing that knows how `@liveblocks/react-flow`
- * lays nodes and edges out in Storage, and a callback that mutates nothing
- * flushes nothing.
- */
-async function readCanvas(roomId: string): Promise<DesignContext> {
-  let context: DesignContext = { nodes: [], edges: [] };
-
-  await mutateFlow<CanvasNode, CanvasEdge>(
-    { client: getLiveblocks(), roomId },
-    (flow) => {
-      context = flow.toJSON();
-    }
-  );
-
-  return context;
-}
-
-/**
- * The room's chat transcript, so a run can see the turns before it.
- *
- * Read from the shared feed rather than taken from the request payload: the feed
- * is the authoritative record every client already renders, it includes what
- * *other* collaborators asked for, and it cannot be forged by whoever posted the
- * prompt. `selectAiChatMessages` is the same validator the sidebar reads it with.
- *
- * Never throws. A run that cannot fetch history is a run with less context, not
- * a failed one — the canvas edit is still the work.
- */
-async function readChatHistory(
-  roomId: string,
-  promptMessageId: string,
-  runId: string,
-): Promise<ChatMessage[]> {
-  try {
-    const { data } = await getLiveblocks().getFeedMessages({
-      roomId,
-      feedId: AI_CHAT_FEED_ID,
-    });
-
-    return selectDesignChatHistory(
-      selectAiChatMessages(data),
-      promptMessageId,
-      runId,
-    );
-  } catch (error: unknown) {
-    logger.warn("Chat history unavailable; designing without it", {
-      roomId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    return [];
-  }
 }

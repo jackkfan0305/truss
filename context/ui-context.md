@@ -65,6 +65,15 @@ The page background is exposed as `bg-page`, not `bg-base`. Registering a color 
 
 Both fonts are loaded via `next/font/google` and applied as CSS variables on the `<html>` element. The base `body` uses Geist Sans with `antialiased`.
 
+### Agent Launch Capture
+
+`/agent/new` shows one compact, centred status surface while it captures an
+agent-supplied diagram request, signs the user in, or creates the project. The
+surface names only the requested title; the launch description never renders on
+this page. Status uses the neutral page, surface, border, and copy tokens. A
+recoverable failure uses an accessible alert and a real Retry button, rather
+than exposing transport details.
+
 ## Border Radius
 
 Radius increases with surface depth — smaller for inner elements, larger for outer containers.

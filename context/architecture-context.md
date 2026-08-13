@@ -70,6 +70,10 @@
   fragment, and keeps the captured launch only in tab-scoped `sessionStorage`.
 - The editor query state receives only the opaque launch UUID, never the launch
   title, description, or encoded fragment.
+- Project IDs are persisted before the launch page posts. A `409` first reads
+  the same ID through the owner-only project route and resumes only when both
+  its ID and title match; an inaccessible or mismatched collision gets one new
+  suffix and one replacement POST.
 - Project, prompt, and run mutations remain authenticated server boundaries;
   the launch record does not grant mutation authority.
 

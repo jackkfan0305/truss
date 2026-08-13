@@ -1,5 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
+import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
+
 const SIGN_IN_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
 const SIGN_UP_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL;
 
@@ -15,9 +17,9 @@ if (!SIGN_IN_URL || !SIGN_UP_URL) {
 // routes cannot drift out of sync with the middleware.
 // ponytail: `createRouteMatcher` is deprecated in @clerk/nextjs 7.x, and its
 // glob patterns cannot read from env anyway — a prefix check covers both.
-const PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
+const PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL, AGENT_LAUNCH_PATH];
 
-function isPublicPath(pathname: string): boolean {
+export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
     (publicPath) =>
       pathname === publicPath || pathname.startsWith(`${publicPath}/`)

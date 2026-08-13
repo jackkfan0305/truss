@@ -8,6 +8,16 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 3 complete. `/agent/new` is public only
+  long enough to synchronously capture and scrub its fragment into tab-scoped
+  session storage, then resumes with Clerk through a fixed same-origin UUID
+  return URL. Project creation persists a precomputed ID, recovers a lost POST
+  response through an owner-only matching read, and makes one replacement
+  attempt for an inaccessible collision. `npx tsx
+  scripts/verify-agent-launch-page.tsx`, `npx tsx scripts/verify-project-api.ts`,
+  and `npx tsx scripts/verify-editor-controls.tsx` pass; full typecheck remains
+  blocked by the missing generated Prisma client and `DATABASE_URL`.
+
 - `agent-invoked-diagram-skill` Task 1 complete. The shared versioned launch
   contract validates bounded base64url fragments and persisted records, keeps
   an immutable retry-stage transition graph, and exposes the project-name bound

@@ -3,20 +3,17 @@
 import { useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 
-import { buildRoomId, getRetryRoomIdSuffix } from "@/lib/room-id"
+import {
+  buildRoomId,
+  createRoomIdSuffix,
+  getRetryRoomIdSuffix,
+} from "@/lib/room-id"
 import type { ProjectSummary } from "@/types/project"
 
 export type ProjectDialog =
   | { kind: "create" }
   | { kind: "rename"; project: ProjectSummary }
   | { kind: "delete"; project: ProjectSummary }
-
-/** Hex characters taken off a UUID — enough to keep slugs apart, short enough to read. */
-const ROOM_ID_SUFFIX_LENGTH = 6
-
-function createRoomIdSuffix(): string {
-  return crypto.randomUUID().replace(/-/g, "").slice(0, ROOM_ID_SUFFIX_LENGTH)
-}
 
 class ProjectMutationError extends Error {
   readonly status: number

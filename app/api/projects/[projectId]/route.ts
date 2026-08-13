@@ -15,6 +15,27 @@ interface RouteParams {
 // Both handlers here are owner-only. The gate moved to lib/project-access.ts in
 // 09-share-dialog once the collaborator routes needed it too.
 
+export async function GET(
+  _request: Request,
+  { params }: RouteParams,
+): Promise<Response> {
+  const { projectId } = await params;
+  const access = await authorizeProject(projectId, { requireOwner: true });
+
+  if (!access.ok) {
+    return access.response;
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, name: true },
+  });
+
+  return project
+    ? Response.json({ project })
+    : jsonError("Project not found", 404);
+}
+
 export async function PATCH(
   request: Request,
   { params }: RouteParams,

@@ -19,11 +19,13 @@ Update this file whenever the current phase, active feature, or implementation s
   jackkfan0305/truss@render-truss-diagram` and a launcher-name check.
   - Browser QA found and fixed a real privacy failure: Clerk's server handshake and client
     initialization could act before a valid launch fragment was captured. Exact `/agent/new` now
-    bypasses only the server handshake; a constant `beforeInteractive` bootstrap validates and
-    stores the fragment in tab-scoped storage, scrubs the URL, and lets the Clerk provider gate
-    reload the fixed opaque resume route before mounting Clerk. The focused verifier, typecheck,
-    lint, unit suite, integration suite, production build, and changed-scope React Doctor all pass
-    after the fix. A signed-out browser probe confirmed one stored launch record, an empty launch
+    bypasses only the server handshake; a constant `beforeInteractive` bootstrap copies only a
+    bounded base64url fragment into tab-scoped storage and scrubs the URL. The Clerk provider gate
+    then uses the canonical capture contract before reloading the fixed opaque resume route; a
+    canonical rejection clears the pending value and mounts Clerk normally rather than remaining
+    on its capture status. The focused verifier, typecheck, lint, unit suite, integration suite,
+    production build, and changed-scope React Doctor all pass after the fix. A signed-out browser
+    probe confirmed one stored launch record, an empty launch
     hash, canonical opaque resume query, and no raw description or encoded payload in observed
     resource URLs. A nonempty Clerk-owned sign-in hash did not parse as a launch payload.
   - Full authenticated project/prompt/run/canvas refresh-dedupe and transcript-count checks remain

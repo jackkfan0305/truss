@@ -34,9 +34,28 @@ workspace root due to another lockfile. Neither affected exit status.
 - RED: signed-out browser probing showed Clerk could redirect before capture, leaving no stored
   launch record. A first server-handshake bypass established capture but exposed the client-init
   ordering issue. GREEN: exact `/agent/new` bypasses only Clerk's server handshake, and a
-  `beforeInteractive` validator captures the bounded launch fragment before Clerk code mounts;
-  the provider gate reloads the fixed opaque resume URL. The focused launch verifier, full suite,
+  `beforeInteractive` bootstrap copies a bounded base64url fragment before Clerk code mounts; the
+  provider gate applies the canonical capture contract before reloading the fixed opaque resume
+  URL. The focused launch verifier, full suite,
   production build, and browser capture probe pass. Commit: `a9e1bdb`.
+
+### Review remediation, round 1
+
+- RED: the review identified that the bootstrap duplicated canonical payload limits and the live
+  invalid-fragment probe remained on the capture status. The new focused verifier initially failed
+  because the requested pending-handoff module did not exist.
+- GREEN: the bootstrap now copies and scrubs only a bounded base64url fragment, deriving the bound
+  from `MAX_AGENT_LAUNCH_FRAGMENT_LENGTH`. `consumePendingAgentLaunch` delegates decoding and
+  validation to `captureAgentLaunch`; it always clears the pending value. The gate uses a local
+  reducer so a canonical rejection transitions to normal Clerk mounting, while a valid record
+  reloads only the opaque UUID resume route. Regressions cover valid pending capture with one
+  record and opaque route, canonical rejection without a permanent capture status, absent pending
+  data, and exact nested/auth/API bypass boundaries.
+- Focused GREEN checks: `npx tsx scripts/verify-agent-launch-page.tsx`, `npm run typecheck`, and
+  `npm run lint` each exited 0. Final configured-environment commands `npm test`,
+  `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and `npm run build` each
+  exited 0. The final isolated-cache React Doctor command exited 0 with 100/100 and no findings
+  (temporary cache `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.SYKuzMkzla`).
 
 ## Browser evidence
 
@@ -54,6 +73,12 @@ workspace root due to another lockfile. Neither affected exit status.
 - Full sign-in, project creation, human transcript once-only rendering, Trigger run, progressive
   canvas changes, and refresh/retry dedupe could not be exercised without completing the
   development instance's CAPTCHA. No opaque project or run IDs were recorded.
+- Round 1 browser retest: an invalid bounded fragment was immediately scrubbed, left no pending
+  record, and rendered the normal missing-request state rather than the capture status. In a fresh
+  browser context, a valid synthetic fragment produced one canonical session record, scrubbed the
+  launch-shaped hash, and reached Clerk sign-in without the capture status. The opaque return-path
+  construction is asserted deterministically; the development CAPTCHA prevents completing its
+  authenticated return.
 
 ## R5 deterministic review
 
@@ -73,6 +98,11 @@ exited 0 for `render-truss-diagram`; the generated prompt contained the skill an
 path is `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/skills-use-DqD3Mn`.
 
 The launcher completed a local synthetic `--stdin-json` validation against the running app.
+
+After the round-1 remediation, the same local flow and launcher validation were rerun successfully
+from `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.FWWd1xBSEW`; its generated-use prompt
+was `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.wBE8S4Yyrz` and again named the skill and
+bundled launcher.
 
 R2 pending post-merge, do not run before the public default branch contains this work:
 

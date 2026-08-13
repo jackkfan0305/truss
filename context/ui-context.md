@@ -74,6 +74,12 @@ this page. Status uses the neutral page, surface, border, and copy tokens. A
 recoverable failure uses an accessible alert and a real Retry button, rather
 than exposing transport details.
 
+An authorized editor URL carrying a canonical opaque launch UUID opens the AI
+sidebar automatically. The request begins only after the joined room can send;
+its description is never shown in editor UI. A launch failure appears above the
+composer as a compact monochrome alert with a small Retry action, separate from
+ordinary chat-send errors.
+
 ## Border Radius
 
 Radius increases with surface depth — smaller for inner elements, larger for outer containers.

@@ -8,6 +8,20 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 6 complete. The editor now accepts only
+  the canonical opaque launch query, opens AI for an authorized launch, and
+  waits for the mounted Liveblocks room's send-ready state before calling the
+  Task 5 submission controller. The tab-scoped launch record persists the
+  prompt/run lifecycle, resumes safely from each durable stage, shares one
+  in-flight Promise across Strict Mode effects, and removes session/query state
+  only after the idempotent run accepts. Failed launches retain a neutral Retry
+  row above the composer without rendering the description. `npx tsx
+  scripts/verify-agent-launch-editor.tsx`, focused submission/chat/editor
+  checks, `npm run verify:unit`, focused ESLint, and `git diff --check` pass.
+  `npm test` / `npm run typecheck` remain blocked before/at Prisma type setup by
+  the missing generated client and `DATABASE_URL`; the new editor files add no
+  TypeScript errors.
+
 - `agent-invoked-diagram-skill` Task 5 complete. `submitAiPrompt` is now the
   single client submission controller: it obtains (or reuses) the server-owned
   prompt ID, permits launch IDs only on the authenticated chat write, invokes

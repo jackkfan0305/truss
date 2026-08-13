@@ -15,6 +15,10 @@ import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
+import {
+  initialEditorSidebar,
+  type EditorSidebar,
+} from "@/lib/editor-sidebar-state"
 import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
 interface EditorShellProps {
@@ -25,9 +29,11 @@ interface EditorShellProps {
    * switches the shell from the create prompt to the workspace layout.
    */
   activeProject?: ProjectAccess
+  /** An opaque launch UUID, only accepted for an already-authorized project. */
+  launchId?: string
 }
 
-type OpenSidebar = "projects" | "ai" | null
+type OpenSidebar = EditorSidebar
 
 /**
  * Owns the sidebar open/close state for the editor workspace and the project
@@ -38,8 +44,11 @@ export function EditorShell({
   ownedProjects,
   sharedProjects,
   activeProject,
+  launchId,
 }: EditorShellProps) {
-  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(null)
+  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
+    () => initialEditorSidebar(launchId)
+  )
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
@@ -116,7 +125,7 @@ export function EditorShell({
                 />
               </main>
 
-              <AiSidebar isOpen={isAiSidebarOpen} />
+              <AiSidebar isOpen={isAiSidebarOpen} launchId={launchId} />
             </>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">

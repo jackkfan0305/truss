@@ -83,6 +83,14 @@
   therefore returns the same prompt ID without trusting a client-selected feed
   ID; the existing prompt/user/room Trigger idempotency then reuses the same
   downstream run.
+- The editor accepts only `?launch=<canonical UUID>` for the already-authorized
+  project. It waits for the mounted Liveblocks room to become sendable, then
+  advances the tab-scoped record through `sending-prompt`, `prompt-sent`,
+  `starting-run`, and `run-started`. A module-scoped in-tab promise shares
+  Strict Mode replays; durable prompt IDs skip a second chat write and reuse the
+  existing Trigger idempotency path. The session record and opaque query are
+  removed only after a run is accepted. Failed records keep a safe retry message
+  and select their retry boundary from whether a durable prompt ID exists.
 
 ## Starter System Designs
 

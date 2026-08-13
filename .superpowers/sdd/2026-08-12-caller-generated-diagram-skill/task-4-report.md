@@ -28,6 +28,30 @@ collision retry fixture with the graph lifecycle.
 - `git diff --cached --check` — PASS
 - `npx react-doctor@latest --verbose --scope changed` — PASS, 100/100, no issues
 
+## Narrow fix round 2
+
+### RED
+
+Added a readiness regression to the editor verifier: no import request may
+occur while the canvas suspense branch is unresolved, and import begins only
+when the resolved canvas child mounts. Added a progress-render assertion that
+rejects a full-canvas veil.
+
+### GREEN
+
+Moved `AgentLaunchImportController` into the `CanvasSurface` child slot rendered
+inside `ClientSideSuspense`, so it mounts only with the room-backed canvas
+content. Replaced the `inset-0` opaque overlay with a compact pointer-transparent
+top status pill; the retry alert remains available over the canvas.
+
+### Exact gates
+
+- `npx tsx scripts/verify-agent-launch-editor.tsx` — PASS
+- `npm run verify:unit` — PASS (exit 0)
+- `npm run typecheck` — PASS (exit 0)
+- `npm run lint` — PASS (exit 0)
+- `npx react-doctor@latest --verbose --scope changed` — PASS, 100/100, no issues
+
 React Doctor was run with an isolated npm cache after the default npm cache
 attempt failed with an external `EEXIST/EACCES` cache error.
 

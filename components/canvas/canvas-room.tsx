@@ -52,6 +52,8 @@ interface CanvasSurfaceProps {
   /** Owned by the editor shell, since the navbar is what opens the picker. */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
+  /** Mounted only after the room-backed canvas suspense content resolves. */
+  children?: ReactNode;
 }
 
 /** The canvas itself, with the room's connection and loading states around it. */
@@ -59,6 +61,7 @@ export function CanvasSurface({
   projectId,
   isTemplatesOpen,
   onTemplatesOpenChange,
+  children,
 }: CanvasSurfaceProps) {
   return (
     // The guard sits *outside* the suspense boundary on purpose: a room that
@@ -73,6 +76,7 @@ export function CanvasSurface({
           isTemplatesOpen={isTemplatesOpen}
           onTemplatesOpenChange={onTemplatesOpenChange}
         />
+        {children}
       </ClientSideSuspense>
     </ConnectionGuard>
   );

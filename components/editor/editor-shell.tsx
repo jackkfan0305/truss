@@ -8,7 +8,7 @@ import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AiSidebar } from "@/components/editor/ai-sidebar"
-import { AgentLaunchImportFailure } from "@/components/editor/agent-launch-import-status"
+import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
@@ -16,7 +16,6 @@ import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
-import { useAgentLaunchImport } from "@/hooks/use-agent-launch-import"
 import {
   initialEditorSidebar,
   type EditorSidebar,
@@ -54,11 +53,6 @@ export function EditorShell({
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
-  const launchImport = useAgentLaunchImport({
-    launchId,
-    roomId: activeProject?.id ?? "",
-    canStart: Boolean(activeProject),
-  })
   const isSidebarOpen = openSidebar === "projects"
   const isAiSidebarOpen = openSidebar === "ai"
 
@@ -129,21 +123,12 @@ export function EditorShell({
                   projectId={activeProject.id}
                   isTemplatesOpen={isTemplatesOpen}
                   onTemplatesOpenChange={setIsTemplatesOpen}
-                />
-                {launchImport.isImporting ? (
-                  <div
-                    role="status"
-                    className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-page/70 px-6 text-center text-sm text-copy-muted"
-                  >
-                    Importing diagram…
-                  </div>
-                ) : null}
-                {launchImport.error ? (
-                  <AgentLaunchImportFailure
-                    message={launchImport.error}
-                    onRetry={launchImport.retry}
+                >
+                  <AgentLaunchImportController
+                    launchId={launchId}
+                    roomId={activeProject.id}
                   />
-                ) : null}
+                </CanvasSurface>
               </main>
 
               <AiSidebar isOpen={isAiSidebarOpen} />

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AgentLaunchImportFailure } from "../components/editor/agent-launch-import-status";
+import {
+  AgentLaunchImportController,
+  AgentLaunchImportFailure,
+  AgentLaunchImportProgress,
+} from "../components/editor/agent-launch-import-status";
 import { useAgentLaunchImport } from "../hooks/use-agent-launch-import";
 import type { AgentLaunchImportDependencies } from "../lib/agent-launch-import-runner";
 import {
@@ -272,6 +276,48 @@ async function checkHookUsesOnlyTheOwnerImportRoute(): Promise<void> {
   }
 }
 
+async function checkImportWaitsForResolvedCanvasContent(): Promise<void> {
+  const entries = new Map([[agentLaunchStorageKey(launchId), JSON.stringify(record())]]);
+  let fetchCalls = 0;
+  const previousWindow = globalThis.window;
+  Object.assign(globalThis, {
+    window: {
+      sessionStorage: {
+        getItem: (key: string) => entries.get(key) ?? null,
+        setItem: (key: string, value: string) => entries.set(key, value),
+        removeItem: (key: string) => entries.delete(key),
+      },
+      fetch: async () => {
+        fetchCalls += 1;
+        return Response.json({ imported: true }, { status: 200 });
+      },
+      history: { replaceState: () => undefined },
+      location: { href: `https://truss.example/editor/${roomId}?launch=${launchId}` },
+    },
+  });
+  const controller = createReactHookHarness(AgentLaunchImportController);
+
+  try {
+    // The unresolved suspense branch renders only CanvasStatus, so the import
+    // controller has not mounted and cannot send a request yet.
+    await controller.flush();
+    assert.equal(fetchCalls, 0, "unresolved canvas content does not import");
+
+    // ClientSideSuspense resolves and mounts this child alongside the canvas.
+    controller.render({ launchId, roomId });
+    await controller.flush();
+    assert.equal(fetchCalls, 1, "resolved canvas content starts one import");
+
+    const progress = renderToStaticMarkup(<AgentLaunchImportProgress />);
+    assert.match(progress, /role="status"/);
+    assert.doesNotMatch(progress, /inset-0|bg-page\/70/);
+    assert.match(progress, /Importing diagram/);
+  } finally {
+    controller.unmount();
+    Object.assign(globalThis, { window: previousWindow });
+  }
+}
+
 async function checkStorageFailuresBecomeSafeRetryableState(): Promise<void> {
   let sessionStorageReads = 0;
   let fetchCalls = 0;
@@ -435,6 +481,7 @@ async function main(): Promise<void> {
   await checkTerminalAndMismatchedLaunchesDoNothing();
   await checkImportHookWaitsForRoomAndRetries();
   await checkHookUsesOnlyTheOwnerImportRoute();
+  await checkImportWaitsForResolvedCanvasContent();
   await checkStorageFailuresBecomeSafeRetryableState();
   await checkStorageMethodsAreGuardedAndNoLaunchDoesNotTouchStorage();
   await checkNeutralFailureUiAndUnchangedManualSidebar();

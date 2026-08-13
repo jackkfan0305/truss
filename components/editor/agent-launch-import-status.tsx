@@ -1,6 +1,40 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useAgentLaunchImport } from "@/hooks/use-agent-launch-import";
+
+export function AgentLaunchImportController({
+  launchId,
+  roomId,
+}: {
+  launchId?: string;
+  roomId: string;
+}) {
+  const { error, isImporting, retry } = useAgentLaunchImport({
+    launchId,
+    roomId,
+    canStart: true,
+  });
+
+  return (
+    <>
+      {isImporting ? <AgentLaunchImportProgress /> : null}
+      {error ? <AgentLaunchImportFailure message={error} onRetry={retry} /> : null}
+    </>
+  );
+}
+
+export function AgentLaunchImportProgress() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-surface-border bg-surface/90 px-3 py-1 text-xs text-copy-secondary shadow-lg"
+    >
+      Importing diagram…
+    </div>
+  );
+}
 
 export function AgentLaunchImportFailure({
   message,

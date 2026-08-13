@@ -17,6 +17,10 @@ import {
   agentLaunchStorageKey,
   createAgentLaunchRecord,
 } from "../lib/agent-launch";
+import {
+  AGENT_LAUNCH_PENDING_FRAGMENT_KEY,
+  agentLaunchBootstrapScript,
+} from "../lib/agent-launch-bootstrap";
 
 process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??= "/sign-in";
 process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??= "/sign-up";
@@ -87,6 +91,15 @@ function checkCaptureAndResume(): void {
     null,
     "a resume record must match its opaque query UUID",
   );
+}
+
+function checkBootstrapScriptKeepsPayloadOutOfTheURL(): void {
+  const script = agentLaunchBootstrapScript();
+
+  assert.match(script, new RegExp(AGENT_LAUNCH_PENDING_FRAGMENT_KEY));
+  assert.match(script, /sessionStorage\.setItem/);
+  assert.match(script, /history\.replaceState/);
+  assert.doesNotMatch(script, /console\./);
 }
 
 async function checkStrictModeDeduplication(): Promise<void> {
@@ -241,16 +254,24 @@ function checkStatusMarkup(): void {
 }
 
 async function checkPublicPathBoundary(): Promise<void> {
-  const { isPublicPath } = await import("../proxy");
+  const { isPublicPath, isClerkHandshakeBypassPath } = await import("../proxy");
 
   assert.equal(isPublicPath("/agent/new"), true);
   assert.equal(isPublicPath("/agent/new/extra"), false);
   assert.equal(isPublicPath("/editor"), false);
   assert.equal(isPublicPath("/api/projects"), false);
+  assert.equal(
+    isClerkHandshakeBypassPath("/agent/new"),
+    true,
+    "the launch capture page bypasses Clerk's redirecting server handshake",
+  );
+  assert.equal(isClerkHandshakeBypassPath("/agent/new/extra"), false);
+  assert.equal(isClerkHandshakeBypassPath("/editor"), false);
 }
 
 async function main(): Promise<void> {
   checkCaptureAndResume();
+  checkBootstrapScriptKeepsPayloadOutOfTheURL();
   await checkStrictModeDeduplication();
   await checkRecovery();
   await checkPostResponseLossRecovery();

@@ -8,6 +8,22 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 5 complete. `submitAiPrompt` is now the
+  single client submission controller: it obtains (or reuses) the server-owned
+  prompt ID, permits launch IDs only on the authenticated chat write, invokes
+  lifecycle callbacks in prompt-then-run order, and returns `message-error`,
+  `run-error`, or the started subscription. `useAgentRun.start` records and
+  rethrows a start failure so the controller keeps the visible local error
+  path while preventing an event-handler rejection. The manual composer keeps
+  its trim/reject-empty and disabled-while-running behavior through
+  `useAiPromptSubmission`. `npx tsx scripts/verify-ai-prompt-submission.ts`,
+  `npx tsx scripts/verify-ai-chat.ts`, `npx tsx
+  scripts/verify-ai-run-chat.ts`, `npx tsx scripts/verify-ai-chat-ui.tsx`,
+  `npx tsx scripts/verify-editor-controls.tsx`, focused ESLint, `git diff
+  --check`, and the changed-scope local React Doctor scan (100/100, no issues)
+  pass. `npm run typecheck` remains blocked by the pre-existing missing
+  generated Prisma client and `DATABASE_URL` setup.
+
 - `agent-invoked-diagram-skill` Task 4 complete. The authenticated chat parser
   accepts an absent launch ID as manual chat and otherwise requires the shared
   canonical lowercase UUID v4. After authorization, the write controller hashes

@@ -14,10 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useAiChat } from "@/hooks/use-ai-chat"
+import { useAiPromptSubmission } from "@/hooks/use-ai-prompt-submission"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
-import { useAgentRun } from "@/hooks/use-agent-run"
 import { selectLiveRunStep } from "@/lib/ai-run-turns"
 import { cn } from "@/lib/utils"
 import {
@@ -58,17 +57,19 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const roomId = useRoom().id
   const { message: status, isGenerating } = useAiStatus()
   const {
-    messages,
-    send,
-    error,
-    isSending,
-    canSend,
-    selfId,
-    hasOlderMessages,
-    isFetchingOlder,
-    fetchOlderMessages,
-  } = useAiChat()
-  const { start, isRunning, turns, subscription, settle } = useAgentRun(roomId)
+    chat: {
+      messages,
+      error,
+      isSending,
+      canSend,
+      selfId,
+      hasOlderMessages,
+      isFetchingOlder,
+      fetchOlderMessages,
+    },
+    run: { isRunning, turns, subscription, settle },
+    submit: submitPrompt,
+  } = useAiPromptSubmission(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
   /*
    * This client's own run when there is one, and the room's shared status when
@@ -84,12 +85,11 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const submit = async (text: string) => {
     if (isComposerDisabled) return
 
-    const promptMessageId = await send(text)
+    const result = await submitPrompt(text, { modelId, thinkingLevel })
 
-    if (!promptMessageId) return
-
-    setDraft("")
-    await start(text, promptMessageId, { modelId, thinkingLevel })
+    if (result.status !== "message-error") {
+      setDraft("")
+    }
   }
 
   return (

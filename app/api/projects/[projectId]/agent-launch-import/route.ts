@@ -4,7 +4,6 @@ import {
   handleAgentGraphImportPost,
   type AgentGraphImportDependencies,
 } from "@/lib/agent-graph-import-server";
-import { AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS } from "@/lib/agent-graph-import-config";
 import { clearAiPresence, setAiPresence } from "@/lib/ai-activity";
 import { saveCanvasSnapshot } from "@/lib/canvas-persistence";
 import { getLiveblocks } from "@/lib/liveblocks";
@@ -15,7 +14,9 @@ interface RouteParams {
   params: Promise<{ projectId: string }>;
 }
 
-export const maxDuration = AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS;
+// Next.js statically analyzes route segment configs at build time; keep this
+// literal here while the shared constant remains available to the verifier.
+export const maxDuration = 120;
 
 const dependencies: AgentGraphImportDependencies = {
   authorizeProject,

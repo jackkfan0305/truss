@@ -8,7 +8,7 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- `caller-generated-diagram-skill` Task 3 complete. The new owner-only graph
+- `caller-generated-diagram-skill` Task 5 complete. The new owner-only graph
   import route authorizes before reading JSON, strictly validates the opaque
   launch ID and compact graph, and uses one paced Liveblocks `mutateFlow` to
   draw canonical nodes then edges with the same shared native AI cursor loop
@@ -24,8 +24,22 @@ Update this file whenever the current phase, active feature, or implementation s
   - Review fix: existing duplicate node or edge IDs now make the live room
     divergent (409), never an exact replay. Native design runs again clear AI
     presence around the entire run, including zero-action and pre-build failure
-    paths; direct imports declare a 120-second Next route duration so the shared
-    maximum 76-second native drawing loop has safe headroom.
+    paths; direct imports declare a literal 120-second Next route duration so
+    the shared maximum 76-second native drawing loop has safe headroom.
+
+- Final Task 5 verification: fresh configured `npm test`, integration,
+  typecheck, lint, and production build gates pass. The first build caught and
+  the bounded fix addressed Next 16's requirement that route segment config be
+  statically analyzable; the import route now exports literal `120`, while the
+  shared duration constant remains covered by the verifier. Changed-scope React
+  Doctor passes 100/100 with an isolated npm cache after the default cache hit
+  an external `EEXIST/EACCES` collision. The official skill validator,
+  launcher verifier, clean-project `npx skills add/list/use`, and a 40-node /
+  60-edge fixture (8,454 encoded characters) pass. A fresh signed-out browser
+  probe confirms fragment scrubbing before Clerk, cleared pending storage,
+  retained opaque graph record, and `/sign-in` handoff. Authenticated native
+  drawing/no-chat/no-Trigger/refresh-dedupe and public GitHub install remain
+  manual/post-merge follow-ups.
 
 - `agent-invoked-diagram-skill` Task 7 verification recorded. Fresh configured-environment
   commands `npm test`, `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and

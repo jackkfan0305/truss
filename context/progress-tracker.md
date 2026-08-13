@@ -21,6 +21,11 @@ Update this file whenever the current phase, active feature, or implementation s
   `scripts/verify-agent-graph-import.ts` covers pre-body authorization, strict
   rejection, paced presence/delay ordering, full/exact/partial idempotency,
   conflicts, and persistence retry.
+  - Review fix: existing duplicate node or edge IDs now make the live room
+    divergent (409), never an exact replay. Native design runs again clear AI
+    presence around the entire run, including zero-action and pre-build failure
+    paths; direct imports declare a 120-second Next route duration so the shared
+    maximum 76-second native drawing loop has safe headroom.
 
 - `agent-invoked-diagram-skill` Task 7 verification recorded. Fresh configured-environment
   commands `npm test`, `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and

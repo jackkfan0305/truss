@@ -49,3 +49,21 @@ git diff --check
 `npm run typecheck` still fails only in the pre-existing obsolete
 description-launch runner/editor verifier (`agent-launch-runner` and
 `verify-agent-launch-{page,editor}`); no Task 3 file appears in its errors.
+
+## Review fix round 1
+
+- Current Liveblocks state with duplicate node or edge IDs now returns `409`;
+  duplicated canonical data cannot be treated as a replay.
+- `runDesign` now uses the shared whole-run presence cleanup wrapper, so both
+  zero-action outcomes and failures before drawing retire AI presence.
+- The direct-import route declares `maxDuration = 120`, which exceeds the
+  maximum 76-second native cursor/drawing cadence with headroom for auth and
+  persistence. The verifier asserts the duration covers the complete graph cap.
+
+Focused import, shared drawing, native design-agent, and orchestrator checks
+pass for this round. The two concurrently edited plan/design documents remain
+unstaged and were not changed by this fix.
+
+The configured integration suite and full lint also pass. Full typecheck remains
+blocked only by the existing obsolete description-launch runner/editor errors;
+the review-fix files are absent from its output.

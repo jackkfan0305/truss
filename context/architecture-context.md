@@ -90,6 +90,8 @@
   differing item conflicts without overwrite. After empty, resumed, or exact
   import it persists the canonical requested snapshot Blob-first then Prisma
   pointer-second. A persistence failure is retryable through exact replay.
+  The import route declares `maxDuration = 120`, leaving execution headroom for
+  that maximum native draw plus authorization and persistence.
 - Project IDs are persisted before the launch page posts. A `409` first reads
   the same ID through the owner-only project route and resumes only when both
   its ID and title match; an inaccessible or mismatched collision gets one new

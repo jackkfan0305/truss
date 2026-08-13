@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai-activity";
 import {
   drawPacedCanvasActions,
+  runWithAiPresenceCleanup,
   type PacedCanvasAction,
 } from "@/lib/canvas-drawing";
 import {
@@ -248,6 +249,17 @@ const INCLUDE_THOUGHTS = true;
  * whether the work was routed or triggered directly.
  */
 export async function runDesign(
+  payload: DesignAgentPayload,
+  options: DesignRunOptions,
+): Promise<DesignRunResult> {
+  return runWithAiPresenceCleanup(
+    payload.roomId,
+    () => runDesignWithoutPresenceCleanup(payload, options),
+    { clearAiPresence },
+  );
+}
+
+async function runDesignWithoutPresenceCleanup(
   payload: DesignAgentPayload,
   { runId, activity, reads, onFailure }: DesignRunOptions
 ): Promise<DesignRunResult> {

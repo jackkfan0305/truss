@@ -20,6 +20,19 @@ export interface CanvasDrawingDependencies {
   sleep: (milliseconds: number) => Promise<void>;
 }
 
+/** Cleans the native AI presence across the full run, including pre-build work. */
+export async function runWithAiPresenceCleanup<T>(
+  roomId: string,
+  operation: () => Promise<T>,
+  dependencies: Pick<CanvasDrawingDependencies, "clearAiPresence">,
+): Promise<T> {
+  try {
+    return await operation();
+  } finally {
+    await dependencies.clearAiPresence(roomId);
+  }
+}
+
 /**
  * The native server drawing loop used by both AI plans and caller-supplied
  * graph imports. Call this inside one `mutateFlow` callback: each wait lets

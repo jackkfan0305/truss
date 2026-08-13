@@ -80,6 +80,23 @@ function findMissingCanonicalItems(
   existing: CanvasSnapshot,
   requested: CanvasSnapshot,
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } | null {
+  const existingNodeIds = new Set<string>();
+  const existingEdgeIds = new Set<string>();
+
+  for (const node of existing.nodes) {
+    if (existingNodeIds.has(node.id)) {
+      return null;
+    }
+    existingNodeIds.add(node.id);
+  }
+
+  for (const edge of existing.edges) {
+    if (existingEdgeIds.has(edge.id)) {
+      return null;
+    }
+    existingEdgeIds.add(edge.id);
+  }
+
   const requestedNodes = new Map(requested.nodes.map((node) => [node.id, node]));
   const requestedEdges = new Map(requested.edges.map((edge) => [edge.id, edge]));
 
@@ -98,9 +115,6 @@ function findMissingCanonicalItems(
       return null;
     }
   }
-
-  const existingNodeIds = new Set(existing.nodes.map((node) => node.id));
-  const existingEdgeIds = new Set(existing.edges.map((edge) => edge.id));
 
   return {
     nodes: requested.nodes.filter((node) => !existingNodeIds.has(node.id)),

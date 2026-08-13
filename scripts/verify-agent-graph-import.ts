@@ -11,6 +11,7 @@ import {
   AI_CURSOR_SWEEP_MS,
   getBuildStepMs,
 } from "../types/tasks";
+import { AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS } from "../lib/agent-graph-import-config";
 
 const launchId = "7a4b4d2e-2f28-4f91-8fbc-5622ee2b9451";
 const graph: AgentGraph = {
@@ -264,6 +265,47 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
   assert.equal(divergent.nodes[0].data.label, "Human edit", "a divergent room is never overwritten");
 }
 
+/** Duplicate IDs in Liveblocks Storage are corrupt, not an idempotent replay. */
+async function checkDuplicateLiveFlowIdsConflict(): Promise<void> {
+  const canonical = materializeAgentGraph(graph);
+
+  for (const canvas of [
+    {
+      nodes: [canonical.nodes[0], structuredClone(canonical.nodes[0])],
+      edges: [],
+    },
+    {
+      nodes: canonical.nodes,
+      edges: [canonical.edges[0], structuredClone(canonical.edges[0])],
+    },
+  ] satisfies CanvasSnapshot[]) {
+    const duplicate = createDependencies(canvas);
+    const response = await handleAgentGraphImportPost(
+      request({ launchId, graph }),
+      "project-1",
+      duplicate.dependencies,
+    );
+
+    assert.equal(response.status, 409, "duplicate live IDs are never accepted as an exact replay");
+    assert.equal(duplicate.getFlowWriteCount(), 0, "corrupt state is never reconciled");
+    assert.equal(duplicate.getPersistenceCount(), 0);
+  }
+}
+
+/** A paced import needs enough route runtime to complete its native drawing loop. */
+function checkRouteDurationCoversMaximumNativeImport(): void {
+  const maximumItems = 40 + 60;
+  const maximumDrawingMilliseconds = maximumItems * (
+    AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS + getBuildStepMs(maximumItems)
+  );
+
+  assert.equal(AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS, 120);
+  assert.ok(
+    AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS * 1_000 > maximumDrawingMilliseconds,
+    "route duration leaves headroom above the maximum native drawing cadence",
+  );
+}
+
 /** Server-side pacing makes the mounted room observe an intentional drawing sequence. */
 async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
   const canvas: CanvasSnapshot = {
@@ -316,7 +358,9 @@ async function main(): Promise<void> {
   await checkEmptyCanvasImportsAndPersistsCanonicalSnapshot();
   await checkExactReplayDoesNotWriteFlowAndRetriesPersistence();
   await checkSemanticReplayAndDivergentConflict();
+  await checkDuplicateLiveFlowIdsConflict();
   await checkPacedCursorDrawingAndPartialResume();
+  checkRouteDurationCoversMaximumNativeImport();
 
   console.log("✅ Agent graph import endpoint verified");
 }

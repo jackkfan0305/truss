@@ -40,7 +40,10 @@ export function createReactHookHarness<Input, Output>(
   render: (input: Input) => Output;
   unmount: () => void;
 } {
-  const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as unknown as ReactInternals;
+  const reactWithInternals = React as unknown as {
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: ReactInternals;
+  };
+  const internals = reactWithInternals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
   const states: unknown[] = [];
   const callbacks: CallbackSlot[] = [];
   const effects: EffectSlot[] = [];

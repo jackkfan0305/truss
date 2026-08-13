@@ -8,6 +8,20 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `caller-generated-diagram-skill` Task 3 complete. The new owner-only graph
+  import route authorizes before reading JSON, strictly validates the opaque
+  launch ID and compact graph, and uses one paced Liveblocks `mutateFlow` to
+  draw canonical nodes then edges with the same shared native AI cursor loop
+  (540ms cursor arrival plus `getBuildStepMs`, bounded to 76 seconds for the
+  graph cap). Exact replays do not write;
+  exact interrupted subsets resume only missing canonical items; divergent
+  rooms return 409 untouched. The shared `saveCanvasSnapshot` keeps Blob-first,
+  Prisma-pointer-second storage for both generic collaborator canvas saves and
+  graph imports, so a post-Liveblocks persistence failure safely retries.
+  `scripts/verify-agent-graph-import.ts` covers pre-body authorization, strict
+  rejection, paced presence/delay ordering, full/exact/partial idempotency,
+  conflicts, and persistence retry.
+
 - `agent-invoked-diagram-skill` Task 7 verification recorded. Fresh configured-environment
   commands `npm test`, `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and
   `npm run build` each exit 0. Changed-scope React Doctor reports 100/100 with no findings when

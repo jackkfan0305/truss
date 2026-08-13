@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "npm run generate",
     "test": "npm run verify:unit",
-    "verify:unit": "tsx scripts/verify-ai-prompt-submission.ts && tsx scripts/verify-ai-chat.ts && tsx scripts/verify-ai-run-chat.ts && tsx scripts/verify-canvas.ts && tsx scripts/verify-design-agent.ts && tsx scripts/verify-orchestrate-api.ts && tsx scripts/verify-orchestrator.ts && tsx scripts/verify-project-api.ts && tsx scripts/verify-spec-api.ts && tsx scripts/verify-spec-prompt.ts && tsx scripts/verify-ai-chat-ui.tsx && tsx scripts/verify-editor-controls.tsx && tsx scripts/verify-agent-graph.ts && tsx scripts/verify-agent-launch.ts && tsx scripts/verify-agent-launch-page.tsx && tsx scripts/verify-agent-launch-editor.tsx && node scripts/verify-render-truss-skill.mjs",
+    "verify:unit": "tsx scripts/verify-ai-prompt-submission.ts && tsx scripts/verify-ai-chat.ts && tsx scripts/verify-ai-run-chat.ts && tsx scripts/verify-canvas.ts && tsx scripts/verify-canvas-drawing.ts && tsx scripts/verify-design-agent.ts && tsx scripts/verify-orchestrate-api.ts && tsx scripts/verify-orchestrator.ts && tsx scripts/verify-project-api.ts && tsx scripts/verify-spec-api.ts && tsx scripts/verify-spec-prompt.ts && tsx scripts/verify-ai-chat-ui.tsx && tsx scripts/verify-editor-controls.tsx && tsx scripts/verify-agent-graph.ts && tsx scripts/verify-agent-graph-import.ts && tsx scripts/verify-agent-launch.ts && tsx scripts/verify-agent-launch-page.tsx && tsx scripts/verify-agent-launch-editor.tsx && node scripts/verify-render-truss-skill.mjs",
     "verify:integration": "tsx scripts/verify-ai-rate-limit.ts && tsx scripts/verify-liveblocks.ts && tsx scripts/verify-prisma.ts && tsx scripts/verify-project-data.ts",
     "doctor": "npx react-doctor@latest"
   },

@@ -78,6 +78,18 @@
   default dimensions.
 - Graph launches use the `truss.agent-launch.graph.v1:` session-storage prefix,
   so an unpublished description-driven record cannot resume as a graph launch.
+- `POST /api/projects/:projectId/agent-launch-import` is owner-only and checks
+  authorization before consuming its JSON body. It accepts only a canonical
+  launch UUID plus a strict compact graph, then writes through one server-side
+  Liveblocks `mutateFlow` callback. Empty rooms draw canonical nodes before
+  edges through the same native AI-drawing loop: a 540ms cursor-arrival wait
+  then `getBuildStepMs` between items (at most 76 seconds for 100 items), so
+  mounted editors receive progressive native canvas updates. Exact full replays
+  make no flow writes;
+  an exact canonical partial subset resumes only missing items; any extra or
+  differing item conflicts without overwrite. After empty, resumed, or exact
+  import it persists the canonical requested snapshot Blob-first then Prisma
+  pointer-second. A persistence failure is retryable through exact replay.
 - Project IDs are persisted before the launch page posts. A `409` first reads
   the same ID through the owner-only project route and resumes only when both
   its ID and title match; an inaccessible or mismatched collision gets one new

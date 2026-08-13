@@ -8,6 +8,7 @@ import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AiSidebar } from "@/components/editor/ai-sidebar"
+import { AgentLaunchImportFailure } from "@/components/editor/agent-launch-import-status"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
@@ -176,31 +177,5 @@ export function EditorShell({
         </div>
       </CanvasSaveProvider>
     </CanvasRoom>
-  )
-}
-
-export function AgentLaunchImportFailure({
-  message,
-  onRetry,
-}: {
-  message: string
-  onRetry: () => void
-}) {
-  return (
-    <div
-      role="alert"
-      className="absolute inset-x-4 top-20 z-30 mx-auto flex max-w-md items-center justify-between gap-3 border border-surface-border bg-surface px-3 py-2 text-xs text-copy-primary shadow-lg"
-    >
-      <span>{message}</span>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-6 shrink-0 px-2 text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary"
-        onClick={onRetry}
-      >
-        Retry
-      </Button>
-    </div>
   )
 }

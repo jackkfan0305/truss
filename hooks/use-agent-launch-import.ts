@@ -34,6 +34,8 @@ function readLaunch(launchId: string): AgentLaunchRecord | null {
     return null;
   }
 
+  // Accessing sessionStorage itself can throw in privacy-restricted contexts;
+  // callers deliberately catch this and render only a generic retry state.
   return parseAgentLaunchRecord(
     window.sessionStorage.getItem(agentLaunchStorageKey(launchId)),
   );
@@ -59,14 +61,20 @@ export function useAgentLaunchImport({
   canStart,
 }: UseAgentLaunchImportInput): AgentLaunchImportState {
   const [error, setError] = useState<string | null>(() => {
-    if (!launchId) {
+    if (!launchId || !canStart) {
       return null;
     }
 
-    const record = readLaunch(launchId);
-    return record?.projectId === roomId && record.stage === "failed"
-      ? UNKNOWN_IMPORT_FAILURE
-      : null;
+    try {
+      const record = readLaunch(launchId);
+      return record?.launchId === launchId &&
+        record.projectId === roomId &&
+        record.stage === "failed"
+        ? UNKNOWN_IMPORT_FAILURE
+        : null;
+    } catch {
+      return UNKNOWN_IMPORT_FAILURE;
+    }
   });
   const [isImporting, setIsImporting] = useState(false);
 
@@ -106,11 +114,32 @@ export function useAgentLaunchImport({
   }, []);
 
   useEffect(() => {
+    if (!launchId || !canStart) {
+      return;
+    }
+
+    let storedRecord: AgentLaunchRecord | null;
+    try {
+      storedRecord = readLaunch(launchId);
+    } catch {
+      queueMicrotask(() => setError(UNKNOWN_IMPORT_FAILURE));
+      return;
+    }
+
     if (
-      !launchId ||
-      !canStart ||
-      !isImportable(readLaunch(launchId), roomId)
+      !storedRecord ||
+      storedRecord.launchId !== launchId ||
+      storedRecord.projectId !== roomId
     ) {
+      return;
+    }
+
+    if (storedRecord.stage === "failed") {
+      queueMicrotask(() => setError(UNKNOWN_IMPORT_FAILURE));
+      return;
+    }
+
+    if (!isImportable(storedRecord, roomId)) {
       return;
     }
 

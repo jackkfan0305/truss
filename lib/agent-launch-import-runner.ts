@@ -39,7 +39,12 @@ function fail(
   const failed = withAgentLaunchStage(record, "failed", {
     error: IMPORT_FAILURE_MESSAGE,
   });
-  dependencies.save(failed);
+  try {
+    dependencies.save(failed);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts. The
+    // caller still receives a safe retry state and never receives graph data.
+  }
   return { status: "failed", message: IMPORT_FAILURE_MESSAGE };
 }
 
@@ -61,7 +66,12 @@ export async function runAgentLaunchImport(input: {
   dependencies: AgentLaunchImportDependencies;
 }): Promise<AgentLaunchImportResult> {
   const { dependencies, launchId, roomId } = input;
-  const loadedRecord = dependencies.load();
+  let loadedRecord: AgentLaunchRecord | null;
+  try {
+    loadedRecord = dependencies.load();
+  } catch {
+    return { status: "failed", message: IMPORT_FAILURE_MESSAGE };
+  }
 
   if (!loadedRecord || !canImport(loadedRecord, roomId, launchId)) {
     return { status: "ignored" };
@@ -70,7 +80,11 @@ export async function runAgentLaunchImport(input: {
   let record = loadedRecord;
 
   if (record.stage !== "importing-graph") {
-    record = persist(record, "importing-graph", dependencies);
+    try {
+      record = persist(record, "importing-graph", dependencies);
+    } catch {
+      return fail(record, dependencies);
+    }
   }
 
   let response: Response;

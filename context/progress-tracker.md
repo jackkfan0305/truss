@@ -8,6 +8,31 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 7 verification recorded. Fresh configured-environment
+  commands `npm test`, `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and
+  `npm run build` each exit 0. Changed-scope React Doctor reports 100/100 with no findings when
+  run with an isolated temporary npm cache (the shared cache could not rename an existing entry).
+  The local clean-project `npx skills` add/list/use flow installed `render-truss-diagram` for
+  Codex and its generated prompt named the bundled launcher; the launcher also completed a local
+  synthetic invocation. The public-source R2 command remains pending merge to the public default
+  branch: `npx skills add jackkfan0305/truss --list`, followed by `npx skills use
+  jackkfan0305/truss@render-truss-diagram` and a launcher-name check.
+  - Browser QA found and fixed a real privacy failure: Clerk's server handshake and client
+    initialization could act before a valid launch fragment was captured. Exact `/agent/new` now
+    bypasses only the server handshake; a constant `beforeInteractive` bootstrap validates and
+    stores the fragment in tab-scoped storage, scrubs the URL, and lets the Clerk provider gate
+    reload the fixed opaque resume route before mounting Clerk. The focused verifier, typecheck,
+    lint, unit suite, integration suite, production build, and changed-scope React Doctor all pass
+    after the fix. A signed-out browser probe confirmed one stored launch record, an empty launch
+    hash, canonical opaque resume query, and no raw description or encoded payload in observed
+    resource URLs. A nonempty Clerk-owned sign-in hash did not parse as a launch payload.
+  - Full authenticated project/prompt/run/canvas refresh-dedupe and transcript-count checks remain
+    blocked by the development Clerk instance's interactive sign-in/CAPTCHA. The signed-out browser
+    reaches the native sign-in form and retains the resume record, but no session can be completed
+    safely by automation. Deterministic checks cover launch parsing, scrub/storage, launch editor
+    retry/dedupe, description exclusion from status/editor chrome, and escaped chat rendering;
+    they cannot prove the live authenticated transcript count.
+
 - `agent-invoked-diagram-skill` Task 6 complete. The editor now accepts only
   the canonical opaque launch query, opens AI for an authorized launch, and
   waits for the mounted Liveblocks room's send-ready state before calling the

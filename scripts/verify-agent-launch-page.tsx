@@ -21,6 +21,11 @@ import {
   AGENT_LAUNCH_PENDING_FRAGMENT_KEY,
   agentLaunchBootstrapScript,
 } from "../lib/agent-launch-bootstrap";
+import {
+  agentLaunchResumePath,
+  consumePendingAgentLaunch,
+  hasPendingAgentLaunchFragment,
+} from "../lib/agent-launch-bootstrap-client";
 
 process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??= "/sign-in";
 process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??= "/sign-up";
@@ -61,6 +66,11 @@ function checkCaptureAndResume(): void {
   });
 
   assert.deepEqual(captured, createAgentLaunchRecord(payload));
+  assert.equal(
+    captured && agentLaunchResumePath(captured),
+    `/agent/new?launch=${launchId}`,
+    "a valid pending capture reloads only the canonical opaque resume route",
+  );
   assert.deepEqual(events.slice(0, 2), ["scrub", `set:${agentLaunchStorageKey(launchId)}`]);
 
   const invalidEvents: string[] = [];
@@ -100,6 +110,64 @@ function checkBootstrapScriptKeepsPayloadOutOfTheURL(): void {
   assert.match(script, /sessionStorage\.setItem/);
   assert.match(script, /history\.replaceState/);
   assert.doesNotMatch(script, /console\./);
+  assert.doesNotMatch(script, /description/);
+  assert.doesNotMatch(script, /launchId/);
+  assert.doesNotMatch(script, /TextDecoder/);
+}
+
+function checkBootstrapPendingCapture(): void {
+  const events: string[] = [];
+  const storage = createStorage(events);
+  storage.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, fragment);
+
+  assert.equal(hasPendingAgentLaunchFragment("/agent/new", storage), true);
+  const captured = consumePendingAgentLaunch(storage, () => {
+    events.push("scrub");
+  });
+
+  assert.deepEqual(captured, createAgentLaunchRecord(payload));
+  assert.equal(
+    getStoredAgentLaunch(launchId, storage)?.launchId,
+    launchId,
+    "a valid pending fragment creates exactly one canonical launch record",
+  );
+  assert.equal(
+    storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY),
+    null,
+    "a valid capture consumes the raw pending fragment",
+  );
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/new", storage),
+    false,
+    "the gate can mount Clerk after handling the pending fragment",
+  );
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/new/extra", storage),
+    false,
+    "nested paths cannot enter the launch capture gate",
+  );
+  assert.equal(
+    events.filter((event) => event === `set:${agentLaunchStorageKey(launchId)}`).length,
+    1,
+    "pending capture writes one canonical record",
+  );
+
+  const invalidStorage = createStorage();
+  invalidStorage.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, "#not-a-canonical-launch");
+  assert.equal(hasPendingAgentLaunchFragment("/agent/new", invalidStorage), true);
+  assert.equal(consumePendingAgentLaunch(invalidStorage, () => undefined), null);
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/new", invalidStorage),
+    false,
+    "canonical rejection clears the pending fragment so Clerk mounts normally",
+  );
+
+  const noFragmentStorage = createStorage();
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/new", noFragmentStorage),
+    false,
+    "without a pending fragment the gate mounts Clerk immediately",
+  );
 }
 
 async function checkStrictModeDeduplication(): Promise<void> {
@@ -267,11 +335,14 @@ async function checkPublicPathBoundary(): Promise<void> {
   );
   assert.equal(isClerkHandshakeBypassPath("/agent/new/extra"), false);
   assert.equal(isClerkHandshakeBypassPath("/editor"), false);
+  assert.equal(isClerkHandshakeBypassPath("/sign-in"), false);
+  assert.equal(isClerkHandshakeBypassPath("/api/projects"), false);
 }
 
 async function main(): Promise<void> {
   checkCaptureAndResume();
   checkBootstrapScriptKeepsPayloadOutOfTheURL();
+  checkBootstrapPendingCapture();
   await checkStrictModeDeduplication();
   await checkRecovery();
   await checkPostResponseLossRecovery();

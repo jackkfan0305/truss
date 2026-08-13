@@ -2,14 +2,14 @@
 
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
-import { useLayoutEffect, useSyncExternalStore } from "react";
+import { useLayoutEffect, useReducer } from "react";
 
+import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
 import {
-  AGENT_LAUNCH_PATH,
-  AGENT_LAUNCH_QUERY_KEY,
-} from "@/lib/agent-launch";
-import { captureAgentLaunch } from "@/lib/agent-launch-browser";
-import { AGENT_LAUNCH_PENDING_FRAGMENT_KEY } from "@/lib/agent-launch-bootstrap";
+  agentLaunchResumePath,
+  consumePendingAgentLaunch,
+  hasPendingAgentLaunchFragment,
+} from "@/lib/agent-launch-bootstrap-client";
 
 interface ClerkProviderGateProps {
   children: React.ReactNode;
@@ -37,18 +37,6 @@ const clerkAppearance = {
   },
 };
 
-function subscribeToBootstrapRecord(): () => void {
-  return () => undefined;
-}
-
-function hasPendingAgentLaunchRecord(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.location.pathname === AGENT_LAUNCH_PATH &&
-    window.sessionStorage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY) !== null
-  );
-}
-
 function AgentLaunchCaptureStatus(): React.ReactNode {
   return (
     <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
@@ -64,14 +52,16 @@ function AgentLaunchCaptureStatus(): React.ReactNode {
 
 /**
  * Clerk initializes before route children and can redirect a document request.
- * Capture a valid launch fragment before mounting it, then reload at the
+ * Capture the bounded launch fragment before mounting it, then reload at the
  * fixed opaque resume route where Clerk can safely take over.
  */
 export function ClerkProviderGate({ children }: ClerkProviderGateProps): React.ReactNode {
-  const isCapturingLaunch = useSyncExternalStore(
-    subscribeToBootstrapRecord,
-    hasPendingAgentLaunchRecord,
+  const [isCapturingLaunch, finishCapture] = useReducer(
     () => false,
+    undefined,
+    () =>
+      typeof window !== "undefined" &&
+      hasPendingAgentLaunchFragment(window.location.pathname, window.sessionStorage),
   );
 
   useLayoutEffect(() => {
@@ -79,26 +69,19 @@ export function ClerkProviderGate({ children }: ClerkProviderGateProps): React.R
       return;
     }
 
-    const pendingFragment = window.sessionStorage.getItem(
-      AGENT_LAUNCH_PENDING_FRAGMENT_KEY,
-    );
-    const fragment = window.location.hash || pendingFragment || "";
-
-    const captured = captureAgentLaunch(
-      fragment,
-      null,
+    const captured = consumePendingAgentLaunch(
       window.sessionStorage,
       () => {
         window.history.replaceState(window.history.state, "", AGENT_LAUNCH_PATH);
       },
     );
-    window.sessionStorage.removeItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
 
     if (captured) {
-      window.location.replace(
-        `${AGENT_LAUNCH_PATH}?${AGENT_LAUNCH_QUERY_KEY}=${captured.launchId}`,
-      );
+      window.location.replace(agentLaunchResumePath(captured));
+      return;
     }
+
+    finishCapture();
   }, [isCapturingLaunch]);
 
   if (isCapturingLaunch) {

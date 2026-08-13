@@ -7,17 +7,26 @@ import {
   AiSidebar,
 } from "../components/editor/ai-sidebar";
 import { EditorNavbar } from "../components/editor/editor-navbar";
+import {
+  useAgentLaunchPrompt,
+} from "../hooks/use-agent-launch-prompt";
+import type { AiPromptSubmit } from "../hooks/use-ai-prompt-submission";
 import { initialEditorSidebar } from "../lib/editor-sidebar-state";
 import {
   runAgentLaunchPrompt,
   startAgentLaunchPromptOnce,
   type AgentLaunchPromptDependencies,
 } from "../lib/agent-launch-runner";
-import { createAgentLaunchRecord, type AgentLaunchRecord } from "../lib/agent-launch";
+import {
+  agentLaunchStorageKey,
+  createAgentLaunchRecord,
+  type AgentLaunchRecord,
+} from "../lib/agent-launch";
 import {
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
 } from "../types/tasks";
+import { createReactHookHarness } from "./testing/react-hook-harness";
 
 const launchId = "00000000-0000-4a00-8000-000000000006";
 const roomId = "global-checkout-a1b2c3";
@@ -249,6 +258,133 @@ async function checkTerminalLaunchDoesNoWork(): Promise<void> {
   assert.equal(harness.getEvents().length, 0);
 }
 
+interface SessionStorageProbe {
+  storage: Storage;
+  setCount: () => number;
+  removeCount: () => number;
+}
+
+function createSessionStorageProbe(initial: AgentLaunchRecord): SessionStorageProbe {
+  const entries = new Map([[agentLaunchStorageKey(initial.launchId), JSON.stringify(initial)]]);
+  let setCalls = 0;
+  let removeCalls = 0;
+
+  return {
+    storage: {
+      clear: () => entries.clear(),
+      getItem: (key) => entries.get(key) ?? null,
+      key: () => null,
+      get length() {
+        return entries.size;
+      },
+      removeItem: (key) => {
+        removeCalls += 1;
+        entries.delete(key);
+      },
+      setItem: (key, value) => {
+        setCalls += 1;
+        entries.set(key, value);
+      },
+    },
+    setCount: () => setCalls,
+    removeCount: () => removeCalls,
+  };
+}
+
+function installBrowser(storage: Storage): () => void {
+  const previousWindow = globalThis.window;
+  const browser = {
+    history: { replaceState: () => undefined },
+    location: { href: `https://truss.example/editor/${roomId}?launch=${launchId}` },
+    sessionStorage: storage,
+  };
+  Object.assign(globalThis, { window: browser });
+
+  return () => {
+    Object.assign(globalThis, { window: previousWindow });
+  };
+}
+
+async function checkLaunchHookWaitsForTheMountedRoom(): Promise<void> {
+  const mountedRoomId = roomId;
+  const storage = createSessionStorageProbe(record());
+  const restoreBrowser = installBrowser(storage.storage);
+  let submitCount = 0;
+  const submit: AiPromptSubmit = async (text, runOptions, options) => {
+    submitCount += 1;
+    assert.equal(text, "Design a global checkout service.");
+    assert.deepEqual(runOptions, {
+      modelId: DEFAULT_AI_DESIGN_MODEL_ID,
+      thinkingLevel: DEFAULT_AI_THINKING_LEVEL,
+    });
+    options?.onPromptSent?.("prompt-hook");
+    options?.onRunStarting?.("prompt-hook");
+    return {
+      status: "started" as const,
+      promptMessageId: "prompt-hook",
+      subscription: { runId: "run-hook", token: "token-hook" },
+    };
+  };
+  const hook = createReactHookHarness(useAgentLaunchPrompt);
+
+  try {
+    hook.render({
+      launchId,
+      roomId: mountedRoomId,
+      canStart: false,
+      submit,
+    });
+    await hook.flush();
+    assert.equal(storage.setCount(), 0, "a room that cannot send does not persist launch progress");
+    assert.equal(submitCount, 0, "a room that cannot send does not submit a prompt");
+
+    hook.render({
+      launchId,
+      roomId: mountedRoomId,
+      canStart: true,
+      submit,
+    });
+    await hook.flush();
+    assert.equal(submitCount, 1, "the mounted send-ready room starts one launch operation");
+    assert.equal(storage.setCount(), 4, "the launch lifecycle persists in the send-ready room");
+    assert.equal(storage.removeCount(), 1, "only the accepted mounted-room run clears session state");
+  } finally {
+    hook.unmount();
+    restoreBrowser();
+  }
+}
+
+async function checkLaunchHookRejectsTheWrongMountedRoom(): Promise<void> {
+  const storage = createSessionStorageProbe(record({ projectId: "other-project-a1b2c3" }));
+  const restoreBrowser = installBrowser(storage.storage);
+  let submitCount = 0;
+  const hook = createReactHookHarness(useAgentLaunchPrompt);
+
+  try {
+    hook.render({
+      launchId,
+      roomId,
+      canStart: true,
+      submit: async () => {
+        submitCount += 1;
+        return {
+          status: "started" as const,
+          promptMessageId: "unreachable",
+          subscription: { runId: "unreachable", token: "unreachable" },
+        };
+      },
+    });
+    await hook.flush();
+
+    assert.equal(submitCount, 0, "a project record never starts inside another mounted room");
+    assert.equal(storage.setCount(), 0, "a room mismatch makes no launch storage writes");
+    assert.equal(storage.removeCount(), 0, "a room mismatch retains the stored launch");
+  } finally {
+    hook.unmount();
+    restoreBrowser();
+  }
+}
+
 async function checkLaunchUiKeepsTheSidebarOpenAndFailureRetryNeutral(): Promise<void> {
   assert.equal(initialEditorSidebar(), null, "normal editor URLs start closed");
   assert.equal(initialEditorSidebar(launchId), "ai");
@@ -304,6 +440,8 @@ async function main(): Promise<void> {
   await checkSendingPromptResumesTheServerIdempotentPromptWrite();
   await checkFailedLaunchUsesDurableIdsToChooseItsRetryStage();
   await checkTerminalLaunchDoesNoWork();
+  await checkLaunchHookWaitsForTheMountedRoom();
+  await checkLaunchHookRejectsTheWrongMountedRoom();
   await checkLaunchUiKeepsTheSidebarOpenAndFailureRetryNeutral();
 
   console.info("Agent launch editor checks passed");

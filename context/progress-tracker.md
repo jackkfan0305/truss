@@ -21,6 +21,11 @@ Update this file whenever the current phase, active feature, or implementation s
   `npm test` / `npm run typecheck` remain blocked before/at Prisma type setup by
   the missing generated client and `DATABASE_URL`; the new editor files add no
   TypeScript errors.
+  - Fix Round 1 adds an actual hook-effect harness (not a source grep or
+    runner-only test): a launch waits through `canStart: false` without a write
+    or submission, starts exactly once once its mounted room is send-ready, and
+    ignores a stored project/room mismatch. The normal durable chat transcript
+    remains unchanged and continues to render the accepted launch prompt once.
 
 - `agent-invoked-diagram-skill` Task 5 complete. `submitAiPrompt` is now the
   single client submission controller: it obtains (or reuses) the server-owned

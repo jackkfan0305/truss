@@ -139,6 +139,21 @@ That starts `next dev` **and** the Trigger.dev dev worker together. Open
 Without the Trigger worker running, the canvas and chat still load but every AI
 turn hangs — the tasks have nowhere to execute.
 
+## Render diagrams from an agent
+
+Install the distributable skill after this change reaches the public default
+branch:
+
+```bash
+npx skills add jackkfan0305/truss \
+  --skill render-truss-diagram \
+  --agent codex
+```
+
+The launcher uses `http://localhost:3000` by default. To open another Truss
+deployment, set `TRUSS_APP_URL=https://your-truss-host.example`; it must be an
+HTTP(S) origin without a path.
+
 ## Scripts
 
 | Command | What it does |

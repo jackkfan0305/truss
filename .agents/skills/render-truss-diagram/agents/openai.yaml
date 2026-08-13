@@ -1,0 +1,4 @@
+interface:
+  display_name: "Render Truss Diagram"
+  short_description: "Create architecture diagrams in Truss"
+  default_prompt: "Use $render-truss-diagram to create a new titled Truss architecture diagram from my description."

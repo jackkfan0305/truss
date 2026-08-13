@@ -15,6 +15,18 @@ Update this file whenever the current phase, active feature, or implementation s
   scripts/verify-agent-launch.ts` and `npx tsx scripts/verify-project-api.ts`
   pass.
 
+- `agent-invoked-diagram-skill` Task 2 complete. The tracked
+  `render-truss-diagram` skill packages a no-shell-interpolation Node launcher
+  that validates the v1 title/description bounds and origin-only base URL,
+  sends the payload only in a base64url fragment, and opens the platform browser
+  command detached. `quick_validate.py`, `node
+  scripts/verify-render-truss-skill.mjs`, and `npx skills add . --list` pass;
+  a clean copied Codex install passed at
+  `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.OzdyiPK2jh` (left in
+  place). Public installation verification remains pending merge to the public
+  default branch: `npx skills add jackkfan0305/truss --skill
+  render-truss-diagram --agent codex`.
+
 - `38-live-step-status` complete. The AI panel says what it is doing in one
   place, and the work log is what it thought and what it changed.
   - **One thing thinks at a time.** `ThinkingDisclosure` decided "am I

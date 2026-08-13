@@ -150,9 +150,11 @@ npx skills add jackkfan0305/truss \
   --agent codex
 ```
 
-The launcher uses `http://localhost:3000` by default. To open another Truss
-deployment, set `TRUSS_APP_URL=https://your-truss-host.example`; it must be an
-HTTP(S) origin without a path.
+The skill turns the supplied description into a compact positioned graph, then
+sends only the title and graph to its launcher over stdin. The launcher uses
+`http://localhost:3000` by default. To open another Truss deployment, set
+`TRUSS_APP_URL=https://your-truss-host.example`; it must be an HTTP(S) origin
+without a path.
 
 ## Scripts
 

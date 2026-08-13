@@ -1161,3 +1161,12 @@ Update this file whenever the current phase, active feature, or implementation s
   cardinality, strictness, graph topology, and immutability. The launch verifier
   covers the new payload transport and every allowed and rejected lifecycle
   transition.
+
+## Caller-generated diagram skill launcher
+
+- Task 2 packages the caller-generated graph flow in `render-truss-diagram`.
+  The skill keeps the user title and description, creates a compact positioned
+  graph using its bundled contract reference, and sends only `{ title, graph }`
+  through launcher stdin. The dependency-free launcher rejects malformed or
+  oversized graphs, including encoded fragments over 16,384 characters, before
+  opening the browser; it retains origin validation and privacy-safe output.

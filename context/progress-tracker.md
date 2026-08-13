@@ -26,6 +26,11 @@ Update this file whenever the current phase, active feature, or implementation s
   place). Public installation verification remains pending merge to the public
   default branch: `npx skills add jackkfan0305/truss --skill
   render-truss-diagram --agent codex`.
+  - Fix Round 1 rejects raw empty query/fragment delimiters that URL parsing
+    normalizes away, waits for the child `spawn` event, and reports asynchronous
+    child errors through a generic non-sensitive rejection. The launcher
+    verifier also decodes the exact v1 payload and proves inclusive/over-limit
+    title and description bounds.
 
 - `38-live-step-status` complete. The AI panel says what it is doing in one
   place, and the work log is what it thought and what it changed.

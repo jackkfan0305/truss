@@ -127,7 +127,12 @@ export function parseLauncherInput(argv, stdinJson) {
 }
 
 export function normalizeBaseUrl(rawUrl) {
-  if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+  if (
+    typeof rawUrl !== "string" ||
+    !rawUrl.trim() ||
+    rawUrl.includes("?") ||
+    rawUrl.includes("#")
+  ) {
     throw new Error("The Truss base URL must be an HTTP(S) origin.");
   }
 
@@ -194,13 +199,28 @@ export function browserCommand(url, platform) {
 
 export async function openLaunchUrl(url, platform, spawnImpl = spawn) {
   const { command, args } = browserCommand(url, platform);
-  const child = spawnImpl(command, args, {
-    detached: true,
-    shell: false,
-    stdio: "ignore",
-  });
+  let child;
 
-  child.unref();
+  try {
+    child = spawnImpl(command, args, {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error("Unable to open Truss in a browser.");
+  }
+
+  return new Promise((resolve, reject) => {
+    child.once("error", () => {
+      child.unref();
+      reject(new Error("Unable to open Truss in a browser."));
+    });
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 export function formatLauncherSuccess(baseUrl, launchId) {

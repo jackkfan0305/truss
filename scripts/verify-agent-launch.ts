@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   AGENT_LAUNCH_VERSION,
+  MAX_AGENT_LAUNCH_FRAGMENT_LENGTH,
   agentLaunchStorageKey,
   createAgentLaunchRecord,
   isAgentLaunchId,
@@ -20,10 +21,40 @@ const payload = {
 const fragment = Buffer.from(JSON.stringify(payload)).toString("base64url");
 
 assert.deepEqual(parseAgentLaunchFragment(`#${fragment}`), payload);
-assert.equal(agentLaunchStorageKey(launchId), `truss:agent-launch:v1:${launchId}`);
+assert.equal(agentLaunchStorageKey(launchId), `truss.agent-launch.v1:${launchId}`);
 assert.equal(isAgentLaunchId(launchId), true);
 assert.equal(isAgentLaunchId(launchId.toUpperCase()), false);
+assert.equal(parseAgentLaunchFragment(""), null, "blank fragment");
+assert.equal(parseAgentLaunchFragment("#"), null, "blank hash fragment");
+assert.equal(
+  parseAgentLaunchFragment(`#${"a".repeat(MAX_AGENT_LAUNCH_FRAGMENT_LENGTH + 1)}`),
+  null,
+  "oversized fragment",
+);
 assert.equal(parseAgentLaunchFragment("#not-base64url"), null);
+assert.equal(parseAgentLaunchFragment(`#${fragment}=`), null, "padded base64url");
+
+const urlSafePayload = { ...payload, description: "x࠾" };
+const urlSafeFragment = Buffer.from(JSON.stringify(urlSafePayload)).toString(
+  "base64url",
+);
+assert.equal(urlSafeFragment.includes("-"), true, "test fixture uses base64url");
+assert.equal(
+  parseAgentLaunchFragment(`#${urlSafeFragment.replace("-", "+")}`),
+  null,
+  "standard base64 alphabet",
+);
+assert.equal(parseAgentLaunchFragment("#a*bc"), null, "invalid base64 character");
+assert.equal(
+  parseAgentLaunchFragment(`#${Buffer.from([0xff]).toString("base64url")}`),
+  null,
+  "invalid UTF-8",
+);
+assert.equal(
+  parseAgentLaunchFragment(`#${Buffer.from("{").toString("base64url")}`),
+  null,
+  "invalid JSON",
+);
 assert.equal(
   parseAgentLaunchFragment(
     `#${Buffer.from(JSON.stringify({ ...payload, version: 2 })).toString("base64url")}`,
@@ -69,5 +100,37 @@ assert.throws(() =>
     "captured",
   ),
 );
+
+const projectCreated = withAgentLaunchStage(creating, "project-created");
+const promptSent = withAgentLaunchStage(
+  withAgentLaunchStage(projectCreated, "sending-prompt"),
+  "prompt-sent",
+);
+const runStarted = withAgentLaunchStage(
+  withAgentLaunchStage(promptSent, "starting-run"),
+  "run-started",
+);
+assert.throws(() => withAgentLaunchStage(runStarted, "failed"));
+
+const collided = withAgentLaunchStage(creating, "creating-project", {
+  projectId: "global-checkout-d4e5f6",
+});
+assert.equal(collided.projectId, "global-checkout-d4e5f6");
+assert.equal(
+  withAgentLaunchStage(withAgentLaunchStage(captured, "failed"), "creating-project")
+    .stage,
+  "creating-project",
+);
+assert.equal(
+  withAgentLaunchStage(withAgentLaunchStage(projectCreated, "failed"), "sending-prompt")
+    .stage,
+  "sending-prompt",
+);
+assert.equal(
+  withAgentLaunchStage(withAgentLaunchStage(promptSent, "failed"), "starting-run")
+    .stage,
+  "starting-run",
+);
+assert.equal(withAgentLaunchStage(withAgentLaunchStage(captured, "failed"), "failed").stage, "failed");
 
 console.info("Agent launch contract checks passed");

@@ -6,11 +6,12 @@ import { MAX_CHAT_CONTENT_LENGTH } from "@/types/tasks";
 export const AGENT_LAUNCH_VERSION = 1 as const;
 export const AGENT_LAUNCH_PATH = "/agent/new";
 export const AGENT_LAUNCH_QUERY_KEY = "launch";
-export const AGENT_LAUNCH_STORAGE_PREFIX = "truss:agent-launch:v1:";
+export const AGENT_LAUNCH_STORAGE_PREFIX = "truss.agent-launch.v1:";
 export const MAX_AGENT_LAUNCH_FRAGMENT_LENGTH = 16_384;
 
 const AGENT_LAUNCH_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export interface AgentLaunchPayloadV1 {
   version: typeof AGENT_LAUNCH_VERSION;
@@ -76,6 +77,10 @@ const agentLaunchTransitions: Record<
 };
 
 function decodeBase64Url(value: string): string | null {
+  if (!BASE64URL_PATTERN.test(value)) {
+    return null;
+  }
+
   try {
     const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");

@@ -26,7 +26,9 @@ Update this file whenever the current phase, active feature, or implementation s
     to normal Clerk mounting rather than leaving a capture status. The focused verifier includes a
     JSDOM hydration check (no mismatch and no pre-capture Clerk mount), typecheck, lint, unit suite,
     integration suite, production build, and changed-scope React Doctor all pass after the fix. A
-    signed-out browser probe confirmed one stored launch record, an empty launch
+    guarded accessor now defers every `sessionStorage` property access until after the exact route
+    check, so a privacy-mode getter failure fails open and irrelevant routes never touch storage.
+    A signed-out browser probe confirmed one stored launch record, an empty launch
     hash, canonical opaque resume query, and no raw description or encoded payload in observed
     resource URLs. A nonempty Clerk-owned sign-in hash did not parse as a launch payload.
   - Full authenticated project/prompt/run/canvas refresh-dedupe and transcript-count checks remain

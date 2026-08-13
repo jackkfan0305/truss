@@ -78,6 +78,23 @@ workspace root due to another lockfile. Neither affected exit status.
   Changed-scope React Doctor exited 0 at 100/100 with no findings using isolated cache
   `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.YngnQRTx84`.
 
+### Review remediation, round 3
+
+- RED: the gate passed `window.sessionStorage` as a helper argument before the helper's guard, so
+  a privacy-mode property getter could throw on any route. The getter-level regression first
+  failed because the guarded accessor did not exist.
+- GREEN: `getAgentLaunchSessionStorage` checks the exact `/agent/new` path before invoking a
+  storage accessor, then catches a property-getter exception. Both snapshot and capture-effect
+  code use it, so failures select the normal Clerk snapshot and cannot remain in the capture
+  status. The regression hydrates both `/editor` and `/agent/new` with a throwing getter: the
+  ordinary route records zero storage accesses, while the capture route mounts Clerk normally
+  without a crash or permanent Preparing state.
+- Final focused checks `npx tsx scripts/verify-agent-launch-page.tsx`, `npm run typecheck`, and
+  `npm run lint` exited 0. Configured-environment `npm test`, `npm run verify:integration`,
+  `npm run typecheck`, `npm run lint`, and `npm run build` each exited 0. Changed-scope React
+  Doctor exited 0 at 100/100 with no findings using isolated cache
+  `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.nQj4mYZcFi`.
+
 ## Browser evidence
 
 - `npm run dev` started the app and Trigger worker. Port 3000 was already occupied, so this
@@ -133,6 +150,10 @@ bundled launcher.
 The round-2 local rerun also passed from
 `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.uhc3IKp2In`; its generated-use prompt was
 `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.TBhFmKgJjJ` and the local launcher exited 0.
+
+The round-3 local rerun passed from
+`/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.IJOeRZBwi0`; its generated-use prompt was
+`/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.gU8xJ5ngy6` and the local launcher exited 0.
 
 R2 pending post-merge, do not run before the public default branch contains this work:
 

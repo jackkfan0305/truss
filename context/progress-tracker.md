@@ -8,6 +8,13 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 1 complete. The shared versioned launch
+  contract validates bounded base64url fragments and persisted records, keeps
+  an immutable retry-stage transition graph, and exposes the project-name bound
+  to prevent launch and project parsing from drifting. `npx tsx
+  scripts/verify-agent-launch.ts` and `npx tsx scripts/verify-project-api.ts`
+  pass.
+
 - `38-live-step-status` complete. The AI panel says what it is doing in one
   place, and the work log is what it thought and what it changed.
   - **One thing thinks at a time.** `ThinkingDisclosure` decided "am I

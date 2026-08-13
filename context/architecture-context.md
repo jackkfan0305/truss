@@ -63,6 +63,16 @@
   summaries and status are worker-authored; room clients cannot forge roles or
   delete durable feed entries.
 
+## Agent Skill Launches
+
+- `/agent/new` is the sole public capture page for an agent skill launch.
+- The page parses a versioned launch payload from the URL fragment, scrubs that
+  fragment, and keeps the captured launch only in tab-scoped `sessionStorage`.
+- The editor query state receives only the opaque launch UUID, never the launch
+  title, description, or encoded fragment.
+- Project, prompt, and run mutations remain authenticated server boundaries;
+  the launch record does not grant mutation authority.
+
 ## Starter System Designs
 
 - Prebuilt templates are static canvas snapshots stored in the codebase.

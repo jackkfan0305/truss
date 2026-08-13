@@ -7,7 +7,7 @@ import { isProjectId } from "@/lib/project-id";
 
 export const DEFAULT_PROJECT_NAME = "Untitled Project";
 
-const MAX_NAME_LENGTH = 120;
+export const MAX_PROJECT_NAME_LENGTH = 120;
 
 /**
  * A project ID doubles as the /editor/[roomId] segment and the Liveblocks room
@@ -78,7 +78,7 @@ export function parseProjectName(
     return fallback;
   }
 
-  return name.length > MAX_NAME_LENGTH ? null : name;
+  return name.length > MAX_PROJECT_NAME_LENGTH ? null : name;
 }
 
 export type ProjectIdResult =

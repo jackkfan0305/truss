@@ -1174,3 +1174,6 @@ Update this file whenever the current phase, active feature, or implementation s
   makes app and launcher boundaries both reject padded transport values rather
   than silently trimming them, and proves the exact 16,384-character fragment
   acceptance boundary plus the next valid encoded length rejection.
+- Review fix round 2 reuses one deterministic test-only fixture to verify the
+  app fragment parser itself accepts exactly 16,384 encoded characters and
+  rejects the next constructible valid length, matching the launcher.

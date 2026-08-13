@@ -92,3 +92,32 @@ Reviewed the fix diff after the focused checks. No critical or high-severity
 issues found: the documented JSON is parsed through the real launcher, the app
 and launcher now agree on canonical whitespace rejection, and the cap fixture
 measures the actual base64url fragment rather than a proxy size.
+
+## Review fix round 2
+
+### RED
+
+Added app-side `parseAgentLaunchFragment` assertions for the exact fragment cap
+and imported the shared boundary-fixture module from both verifiers. The focused
+checks first failed with `ERR_MODULE_NOT_FOUND`, proving the new test dependency
+was active before its fixture implementation existed.
+
+### GREEN
+
+- Added `scripts/testing/agent-launch-fragment-fixtures.mjs`, a test-only,
+  deterministic valid graph generator used by both the launcher and app
+  verifiers.
+- The launcher and `parseAgentLaunchFragment` both now prove acceptance at
+  exactly 16,384 base64url characters and rejection at the next constructible
+  valid length, 16,386 characters.
+
+### Review verification
+
+```text
+node scripts/verify-render-truss-skill.mjs
+npx tsx scripts/verify-agent-launch.ts
+npx tsx scripts/verify-agent-graph.ts
+npx eslint scripts/testing/agent-launch-fragment-fixtures.mjs scripts/verify-render-truss-skill.mjs scripts/verify-agent-launch.ts scripts/verify-agent-graph.ts
+```
+
+All focused checks passed.

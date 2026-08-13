@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import { createAgentLaunchFragmentBoundaryInput } from "./testing/agent-launch-fragment-fixtures.mjs";
+
 import {
   AGENT_LAUNCH_VERSION,
   MAX_AGENT_LAUNCH_FRAGMENT_LENGTH,
@@ -34,8 +36,28 @@ const payload = {
   },
 } satisfies AgentLaunchPayloadV1;
 const fragment = Buffer.from(JSON.stringify(payload)).toString("base64url");
+const atFragmentCap = createAgentLaunchFragmentBoundaryInput(12_288, launchId);
+const atFragmentCapFragment = Buffer.from(
+  JSON.stringify({ version: AGENT_LAUNCH_VERSION, launchId, ...atFragmentCap }),
+).toString("base64url");
+const aboveFragmentCap = createAgentLaunchFragmentBoundaryInput(12_289, launchId);
+const aboveFragmentCapFragment = Buffer.from(
+  JSON.stringify({ version: AGENT_LAUNCH_VERSION, launchId, ...aboveFragmentCap }),
+).toString("base64url");
 
 assert.deepEqual(parseAgentLaunchFragment(`#${fragment}`), payload);
+assert.equal(atFragmentCapFragment.length, MAX_AGENT_LAUNCH_FRAGMENT_LENGTH);
+assert.deepEqual(
+  parseAgentLaunchFragment(`#${atFragmentCapFragment}`),
+  { version: AGENT_LAUNCH_VERSION, launchId, ...atFragmentCap },
+  "accepts exactly 16,384 encoded characters",
+);
+assert.equal(aboveFragmentCapFragment.length, MAX_AGENT_LAUNCH_FRAGMENT_LENGTH + 2);
+assert.equal(
+  parseAgentLaunchFragment(`#${aboveFragmentCapFragment}`),
+  null,
+  "rejects the smallest constructible valid encoded fragment over the cap",
+);
 assert.equal(
   agentLaunchStorageKey(launchId),
   `truss.agent-launch.graph.v1:${launchId}`,

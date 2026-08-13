@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import { createAgentLaunchFragmentBoundaryInput } from "./testing/agent-launch-fragment-fixtures.mjs";
 
 const {
   browserCommand,
@@ -290,58 +291,7 @@ assert.throws(
   "rejects padded titles",
 );
 
-function createFragmentBoundaryInput(targetJsonLength) {
-  const nodeId = (index) => `node-${index}-${"x".repeat(40)}`;
-  const edgeId = (index) => `edge-${index}-${"x".repeat(40)}`;
-  const nodes = Array.from({ length: 20 }, (_, index) => ({
-    id: nodeId(index),
-    label: "n",
-    shape: "rectangle",
-    color: "blue",
-    x: index * 240,
-    y: 0,
-  }));
-  const edges = Array.from({ length: 40 }, (_, index) => {
-    const sourceIndex = Math.floor(index / 19);
-    const offset = index % 19;
-    const targetIndex = offset >= sourceIndex ? offset + 1 : offset;
-
-    return {
-      id: edgeId(index),
-      source: nodeId(sourceIndex),
-      target: nodeId(targetIndex),
-      label: "",
-    };
-  });
-  const boundedInput = {
-    title: "T",
-    graph: { version: 1, nodes, edges },
-  };
-  const payload = { version: 1, launchId, ...boundedInput };
-  let remaining = targetJsonLength - JSON.stringify(payload).length;
-
-  for (const field of [boundedInput, ...nodes, ...edges]) {
-    const maximumAddition =
-      field === boundedInput
-        ? 119
-        : "shape" in field
-          ? 80 - field.label.length
-          : 40 - field.label.length;
-    const addition = Math.min(remaining, maximumAddition);
-
-    if (field === boundedInput) {
-      field.title += "x".repeat(addition);
-    } else {
-      field.label += "x".repeat(addition);
-    }
-    remaining -= addition;
-  }
-
-  assert.equal(remaining, 0, "the fixture can reach the requested JSON length");
-  return boundedInput;
-}
-
-const atFragmentCap = createFragmentBoundaryInput(12_288);
+const atFragmentCap = createAgentLaunchFragmentBoundaryInput(12_288, launchId);
 const atFragmentCapUrl = buildLaunchUrl(atFragmentCap, {
   baseUrl: "https://truss.example",
   launchId,
@@ -351,7 +301,7 @@ assert.equal(
   16_384,
   "accepts exactly 16,384 encoded characters",
 );
-const aboveFragmentCap = createFragmentBoundaryInput(12_289);
+const aboveFragmentCap = createAgentLaunchFragmentBoundaryInput(12_289, launchId);
 assert.throws(
   () =>
     buildLaunchUrl(aboveFragmentCap, {

@@ -1147,3 +1147,17 @@ Update this file whenever the current phase, active feature, or implementation s
   down on overlap and knows nothing about the edges the same plan adds, so a
   long label on a short edge can still collide. A real router (dagre/elk) is the
   upgrade path if that shows up in practice.
+
+## Caller-generated diagram graph contract
+
+- Task 1 introduced `lib/agent-graph.ts`: launch graphs are strict,
+  all-or-nothing compact documents with 1..40 nodes and 0..60 edges. Accepted
+  data is materialized into the canonical canvas node/edge constants and
+  per-shape default dimensions; graph launch payloads remain version 1.
+- Agent-launch session records now carry `{ version, launchId, title, graph }`,
+  live under the `truss.agent-launch.graph.v1:` namespace, and follow the graph
+  import lifecycle instead of creating an AI chat prompt or Trigger run.
+- `scripts/verify-agent-graph.ts` covers graph parsing, materialization,
+  cardinality, strictness, graph topology, and immutability. The launch verifier
+  covers the new payload transport and every allowed and rejected lifecycle
+  transition.

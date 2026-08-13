@@ -1,12 +1,12 @@
 import { z } from "zod";
 
+import { agentGraphSchema, type AgentGraph } from "@/lib/agent-graph";
 import { MAX_PROJECT_NAME_LENGTH } from "@/lib/project-requests";
-import { MAX_CHAT_CONTENT_LENGTH } from "@/types/tasks";
 
 export const AGENT_LAUNCH_VERSION = 1 as const;
 export const AGENT_LAUNCH_PATH = "/agent/new";
 export const AGENT_LAUNCH_QUERY_KEY = "launch";
-export const AGENT_LAUNCH_STORAGE_PREFIX = "truss.agent-launch.v1:";
+export const AGENT_LAUNCH_STORAGE_PREFIX = "truss.agent-launch.graph.v1:";
 export const MAX_AGENT_LAUNCH_FRAGMENT_LENGTH = 16_384;
 
 const AGENT_LAUNCH_ID_PATTERN =
@@ -17,48 +17,46 @@ export interface AgentLaunchPayloadV1 {
   version: typeof AGENT_LAUNCH_VERSION;
   launchId: string;
   title: string;
-  description: string;
+  graph: AgentGraph;
 }
 
 export type AgentLaunchStage =
   | "captured"
   | "creating-project"
   | "project-created"
-  | "sending-prompt"
-  | "prompt-sent"
-  | "starting-run"
-  | "run-started"
+  | "importing-graph"
+  | "graph-imported"
   | "failed";
 
 export interface AgentLaunchRecord extends AgentLaunchPayloadV1 {
   stage: AgentLaunchStage;
   projectId?: string;
-  promptMessageId?: string;
   error?: string;
 }
 
-const agentLaunchPayloadSchema = z.object({
+const agentLaunchPayloadSchema = z.strictObject({
   version: z.literal(AGENT_LAUNCH_VERSION),
   launchId: z.string().regex(AGENT_LAUNCH_ID_PATTERN),
   title: z.string().trim().min(1).max(MAX_PROJECT_NAME_LENGTH),
-  description: z.string().trim().min(1).max(MAX_CHAT_CONTENT_LENGTH),
+  graph: agentGraphSchema,
 });
 
 const agentLaunchStageSchema = z.enum([
   "captured",
   "creating-project",
   "project-created",
-  "sending-prompt",
-  "prompt-sent",
-  "starting-run",
-  "run-started",
+  "importing-graph",
+  "graph-imported",
   "failed",
 ]);
 
-const agentLaunchRecordSchema = agentLaunchPayloadSchema.extend({
+const agentLaunchRecordSchema = z.strictObject({
+  version: z.literal(AGENT_LAUNCH_VERSION),
+  launchId: z.string().regex(AGENT_LAUNCH_ID_PATTERN),
+  title: z.string().trim().min(1).max(MAX_PROJECT_NAME_LENGTH),
+  graph: agentGraphSchema,
   stage: agentLaunchStageSchema,
   projectId: z.string().optional(),
-  promptMessageId: z.string().optional(),
   error: z.string().optional(),
 });
 
@@ -67,13 +65,11 @@ const agentLaunchTransitions: Record<
   readonly AgentLaunchStage[]
 > = {
   captured: ["creating-project", "failed"],
-  "creating-project": ["creating-project", "project-created", "failed"],
-  "project-created": ["sending-prompt", "failed"],
-  "sending-prompt": ["prompt-sent", "failed"],
-  "prompt-sent": ["starting-run", "failed"],
-  "starting-run": ["run-started", "failed"],
-  "run-started": [],
-  failed: ["creating-project", "sending-prompt", "starting-run", "failed"],
+  "creating-project": ["project-created", "failed"],
+  "project-created": ["importing-graph", "failed"],
+  "importing-graph": ["graph-imported", "failed"],
+  "graph-imported": [],
+  failed: ["creating-project", "importing-graph", "failed"],
 };
 
 function decodeBase64Url(value: string): string | null {
@@ -97,6 +93,14 @@ function parseAgentLaunchPayload(raw: unknown): AgentLaunchPayloadV1 | null {
   const parsed = agentLaunchPayloadSchema.safeParse(raw);
 
   return parsed.success ? { ...parsed.data } : null;
+}
+
+function copyAgentGraph(graph: AgentGraph): AgentGraph {
+  return {
+    version: graph.version,
+    nodes: graph.nodes.map((node) => ({ ...node })),
+    edges: graph.edges.map((edge) => ({ ...edge })),
+  };
 }
 
 export function isAgentLaunchId(value: unknown): value is string {
@@ -140,7 +144,9 @@ export function parseAgentLaunchRecord(raw: string | null): AgentLaunchRecord | 
 export function createAgentLaunchRecord(
   payload: AgentLaunchPayloadV1,
 ): AgentLaunchRecord {
-  return { ...payload, stage: "captured" };
+  const parsed = agentLaunchPayloadSchema.parse(payload);
+
+  return { ...parsed, graph: copyAgentGraph(parsed.graph), stage: "captured" };
 }
 
 export function agentLaunchStorageKey(launchId: string): string {
@@ -150,11 +156,11 @@ export function agentLaunchStorageKey(launchId: string): string {
 export function withAgentLaunchStage(
   record: AgentLaunchRecord,
   stage: AgentLaunchStage,
-  fields?: Pick<AgentLaunchRecord, "projectId" | "promptMessageId" | "error">,
+  fields?: Pick<AgentLaunchRecord, "projectId" | "error">,
 ): AgentLaunchRecord {
   if (!agentLaunchTransitions[record.stage].includes(stage)) {
     throw new Error(`Cannot transition agent launch from ${record.stage} to ${stage}`);
   }
 
-  return { ...record, ...fields, stage };
+  return { ...record, ...fields, graph: copyAgentGraph(record.graph), stage };
 }

@@ -69,28 +69,24 @@
 - The page parses a versioned launch payload from the URL fragment, scrubs that
   fragment, and keeps the captured launch only in tab-scoped `sessionStorage`.
 - The editor query state receives only the opaque launch UUID, never the launch
-  title, description, or encoded fragment.
+  title, graph, or encoded fragment.
+- Launch payload version 1 contains a canonical lowercase UUID v4, a bounded
+  title, and a strict compact graph. The graph boundary rejects the entire
+  document for any unknown key, malformed value, duplicate ID or endpoint pair,
+  dangling edge, self-loop, or cardinality breach; it never repairs caller data.
+  Accepted graphs materialize only the canonical canvas fields and per-shape
+  default dimensions.
+- Graph launches use the `truss.agent-launch.graph.v1:` session-storage prefix,
+  so an unpublished description-driven record cannot resume as a graph launch.
 - Project IDs are persisted before the launch page posts. A `409` first reads
   the same ID through the owner-only project route and resumes only when both
   its ID and title match; an inaccessible or mismatched collision gets one new
   suffix and one replacement POST.
-- Project, prompt, and run mutations remain authenticated server boundaries;
-  the launch record does not grant mutation authority.
-- A launch prompt carries only a canonical lowercase UUID v4 to the
-  authenticated chat route. After project authorization and Clerk identity
-  resolution, the server hashes `[userId, projectId, launchId]` to select its
-  human feed row and upserts that server-authored row. Replaying the same launch
-  therefore returns the same prompt ID without trusting a client-selected feed
-  ID; the existing prompt/user/room Trigger idempotency then reuses the same
-  downstream run.
 - The editor accepts only `?launch=<canonical UUID>` for the already-authorized
-  project. It waits for the mounted Liveblocks room to become sendable, then
-  advances the tab-scoped record through `sending-prompt`, `prompt-sent`,
-  `starting-run`, and `run-started`. A module-scoped in-tab promise shares
-  Strict Mode replays; durable prompt IDs skip a second chat write and reuse the
-  existing Trigger idempotency path. The session record and opaque query are
-  removed only after a run is accepted. Failed records keep a safe retry message
-  and select their retry boundary from whether a durable prompt ID exists.
+  project. Its record advances through `captured`, `creating-project`,
+  `project-created`, `importing-graph`, and `graph-imported`; only the first
+  four stages may fail. Failed records retain their graph and safe retry error.
+  `graph-imported` is terminal.
 
 ## Starter System Designs
 

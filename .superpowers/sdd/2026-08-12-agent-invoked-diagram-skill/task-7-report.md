@@ -34,7 +34,7 @@ workspace root due to another lockfile. Neither affected exit status.
 - RED: signed-out browser probing showed Clerk could redirect before capture, leaving no stored
   launch record. A first server-handshake bypass established capture but exposed the client-init
   ordering issue. GREEN: exact `/agent/new` bypasses only Clerk's server handshake, and a
-  `beforeInteractive` bootstrap copies a bounded base64url fragment before Clerk code mounts; the
+  parser-time bootstrap copies a bounded base64url fragment before Clerk code mounts; the
   provider gate applies the canonical capture contract before reloading the fixed opaque resume
   URL. The focused launch verifier, full suite,
   production build, and browser capture probe pass. Commit: `a9e1bdb`.
@@ -56,6 +56,27 @@ workspace root due to another lockfile. Neither affected exit status.
   `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and `npm run build` each
   exited 0. The final isolated-cache React Doctor command exited 0 with 100/100 and no findings
   (temporary cache `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.SYKuzMkzla`).
+
+### Review remediation, round 2
+
+- RED: the gate's client-only reducer initializer disagreed with its server render when a pending
+  launch existed, which could hydrate the capture subtree over a server-rendered Clerk subtree.
+  The bootstrap and pending-storage helpers could also throw on privacy-mode storage failures.
+- GREEN: the gate now uses one cached `useSyncExternalStore` snapshot: its server/hydration
+  snapshot renders a neutral shell, then its post-hydration snapshot selects either canonical
+  capture or Clerk. A valid pending launch cannot mount Clerk before record capture and the opaque
+  resume attempt; ordinary routes mount Clerk after hydration. `jsdom` and its types were added as
+  development-only verification dependencies so `verify-agent-launch-page.tsx` can run actual
+  `hydrateRoot` coverage rather than only static checks.
+- GREEN: the parser-time constant head script stores only a bounded base64url fragment and scrubs
+  in `finally`, so a storage write failure still removes the fragment. All client pending storage
+  lookup, canonical record write, and cleanup exceptions fail open without logging, URL payloads,
+  or a permanent capture state. The bootstrap has no decoded fields or dynamic inline data.
+- Focused checks `npx tsx scripts/verify-agent-launch-page.tsx`, `npm run typecheck`, and
+  `npm run lint` exited 0. Final configured-environment commands `npm test`,
+  `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and `npm run build` exited 0.
+  Changed-scope React Doctor exited 0 at 100/100 with no findings using isolated cache
+  `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.YngnQRTx84`.
 
 ## Browser evidence
 
@@ -79,6 +100,11 @@ workspace root due to another lockfile. Neither affected exit status.
   launch-shaped hash, and reached Clerk sign-in without the capture status. The opaque return-path
   construction is asserted deterministically; the development CAPTCHA prevents completing its
   authenticated return.
+- Round 2 valid browser retest: a fresh signed-out launch immediately removed the launch-shaped
+  hash, created one tab-scoped canonical record, and reached the Clerk sign-in return flow without
+  capture or hydration errors; only an opaque resume identifier appeared in the return route. An
+  automated invalid-fragment browser session was unreliable after the Clerk handoff, but the
+  deterministic JSDOM hydration and storage-failure cases cover its fail-open behavior.
 
 ## R5 deterministic review
 
@@ -103,6 +129,10 @@ After the round-1 remediation, the same local flow and launcher validation were 
 from `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.FWWd1xBSEW`; its generated-use prompt
 was `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.wBE8S4Yyrz` and again named the skill and
 bundled launcher.
+
+The round-2 local rerun also passed from
+`/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.uhc3IKp2In`; its generated-use prompt was
+`/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.TBhFmKgJjJ` and the local launcher exited 0.
 
 R2 pending post-merge, do not run before the public default branch contains this work:
 

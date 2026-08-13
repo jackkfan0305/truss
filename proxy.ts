@@ -17,10 +17,14 @@ if (!SIGN_IN_URL || !SIGN_UP_URL) {
 // routes cannot drift out of sync with the middleware.
 // ponytail: `createRouteMatcher` is deprecated in @clerk/nextjs 7.x, and its
 // glob patterns cannot read from env anyway — a prefix check covers both.
-const PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL, AGENT_LAUNCH_PATH];
+const AUTH_PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
+  if (pathname === AGENT_LAUNCH_PATH) {
+    return true;
+  }
+
+  return AUTH_PUBLIC_PATHS.some(
     (publicPath) =>
       pathname === publicPath || pathname.startsWith(`${publicPath}/`)
   );

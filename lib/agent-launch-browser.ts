@@ -106,6 +106,18 @@ function projectCreated(
   );
 }
 
+async function recoverPendingProject(
+  record: AgentLaunchRecord,
+  dependencies: AgentLaunchProjectDependencies,
+): Promise<boolean> {
+  try {
+    const response = await dependencies.fetch(`/api/projects/${record.projectId}`);
+    return readMatchingProject(response, record);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Captures an unlogged URL fragment before Clerk can redirect. Resume is scoped
  * to one canonical UUID and one tab's session storage record.
@@ -158,20 +170,30 @@ export async function createAgentLaunchProject(
     }
 
     pending = prepared;
-    let response = await postProject(pending, dependencies);
+    let response: Response;
+    try {
+      response = await postProject(pending, dependencies);
+    } catch {
+      return (await recoverPendingProject(pending, dependencies))
+        ? projectCreated(pending, dependencies.storage)
+        : failProjectCreation(pending, dependencies.storage);
+    }
 
     if (await readMatchingProject(response, pending)) {
       return projectCreated(pending, dependencies.storage);
+    }
+
+    if (response.ok) {
+      return (await recoverPendingProject(pending, dependencies))
+        ? projectCreated(pending, dependencies.storage)
+        : failProjectCreation(pending, dependencies.storage);
     }
 
     if (response.status !== 409) {
       return failProjectCreation(pending, dependencies.storage);
     }
 
-    const recoveryResponse = await dependencies.fetch(
-      `/api/projects/${pending.projectId}`,
-    );
-    if (await readMatchingProject(recoveryResponse, pending)) {
+    if (await recoverPendingProject(pending, dependencies)) {
       return projectCreated(pending, dependencies.storage);
     }
 
@@ -187,11 +209,23 @@ export async function createAgentLaunchProject(
       }),
       dependencies.storage,
     );
-    response = await postProject(pending, dependencies);
+    try {
+      response = await postProject(pending, dependencies);
+    } catch {
+      return (await recoverPendingProject(pending, dependencies))
+        ? projectCreated(pending, dependencies.storage)
+        : failProjectCreation(pending, dependencies.storage);
+    }
 
-    return (await readMatchingProject(response, pending))
-      ? projectCreated(pending, dependencies.storage)
-      : failProjectCreation(pending, dependencies.storage);
+    if (await readMatchingProject(response, pending)) {
+      return projectCreated(pending, dependencies.storage);
+    }
+
+    if (response.ok && (await recoverPendingProject(pending, dependencies))) {
+      return projectCreated(pending, dependencies.storage);
+    }
+
+    return failProjectCreation(pending, dependencies.storage);
   } catch {
     return failProjectCreation(pending, dependencies.storage);
   }

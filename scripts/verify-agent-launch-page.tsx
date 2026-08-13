@@ -146,6 +146,43 @@ async function checkRecovery(): Promise<void> {
   ]);
 }
 
+async function checkPostResponseLossRecovery(): Promise<void> {
+  for (const scenario of ["rejected", "unparseable"] as const) {
+    const requests: Array<{ input: string; method: string }> = [];
+    let suffixCalls = 0;
+    const recovered = await createAgentLaunchProject(createAgentLaunchRecord(payload), {
+      storage: createStorage(),
+      createSuffix: () => {
+        suffixCalls += 1;
+        return "a1b2c3";
+      },
+      fetch: async (input, init) => {
+        const method = init?.method ?? "GET";
+        requests.push({ input: String(input), method });
+
+        if (method === "POST") {
+          if (scenario === "rejected") {
+            throw new Error("connection closed after project creation");
+          }
+
+          return new Response("not json", { status: 201 });
+        }
+
+        return Response.json({
+          project: { id: "global-checkout-a1b2c3", name: "Global Checkout" },
+        });
+      },
+    });
+
+    assert.equal(recovered.stage, "project-created", `${scenario} POST recovers`);
+    assert.equal(suffixCalls, 1, `${scenario} recovery does not create a second project`);
+    assert.deepEqual(requests, [
+      { input: "/api/projects", method: "POST" },
+      { input: "/api/projects/global-checkout-a1b2c3", method: "GET" },
+    ]);
+  }
+}
+
 async function checkFailuresAndSingleCollisionRetry(): Promise<void> {
   const storage = createStorage();
   const unauthorized = await createAgentLaunchProject(createAgentLaunchRecord(payload), {
@@ -207,6 +244,7 @@ async function checkPublicPathBoundary(): Promise<void> {
   const { isPublicPath } = await import("../proxy");
 
   assert.equal(isPublicPath("/agent/new"), true);
+  assert.equal(isPublicPath("/agent/new/extra"), false);
   assert.equal(isPublicPath("/editor"), false);
   assert.equal(isPublicPath("/api/projects"), false);
 }
@@ -215,6 +253,7 @@ async function main(): Promise<void> {
   checkCaptureAndResume();
   await checkStrictModeDeduplication();
   await checkRecovery();
+  await checkPostResponseLossRecovery();
   await checkFailuresAndSingleCollisionRetry();
   checkStatusMarkup();
   await checkPublicPathBoundary();

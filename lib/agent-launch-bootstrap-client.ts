@@ -9,6 +9,25 @@ import {
 } from "@/lib/agent-launch-browser";
 import { AGENT_LAUNCH_PENDING_FRAGMENT_KEY } from "@/lib/agent-launch-bootstrap";
 
+/**
+ * Privacy settings may make even the `sessionStorage` property getter throw.
+ * Check the exact capture route first so ordinary routes never access storage.
+ */
+export function getAgentLaunchSessionStorage(
+  pathname: string,
+  getStorage: () => AgentLaunchStorage,
+): AgentLaunchStorage | null {
+  if (pathname !== AGENT_LAUNCH_PATH) {
+    return null;
+  }
+
+  try {
+    return getStorage();
+  } catch {
+    return null;
+  }
+}
+
 export function hasPendingAgentLaunchFragment(
   pathname: string,
   storage: AgentLaunchStorage,

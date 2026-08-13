@@ -30,6 +30,7 @@ import {
 import {
   agentLaunchResumePath,
   consumePendingAgentLaunch,
+  getAgentLaunchSessionStorage,
   hasPendingAgentLaunchFragment,
 } from "../lib/agent-launch-bootstrap-client";
 
@@ -258,6 +259,33 @@ function checkStorageFailuresFailOpen(): void {
   );
 }
 
+function checkSessionStorageGetterFailure(): void {
+  let ordinaryAccesses = 0;
+  const ordinaryWindow = {
+    get sessionStorage(): AgentLaunchStorage {
+      ordinaryAccesses += 1;
+      throw new DOMException("blocked", "SecurityError");
+    },
+  };
+  assert.equal(
+    getAgentLaunchSessionStorage("/editor", () => ordinaryWindow.sessionStorage),
+    null,
+    "ordinary paths must not touch session storage",
+  );
+  assert.equal(ordinaryAccesses, 0);
+
+  const launchWindow = {
+    get sessionStorage(): AgentLaunchStorage {
+      throw new DOMException("blocked", "SecurityError");
+    },
+  };
+  assert.equal(
+    getAgentLaunchSessionStorage("/agent/new", () => launchWindow.sessionStorage),
+    null,
+    "a session-storage getter failure must fail open",
+  );
+}
+
 async function checkHydrationGate(): Promise<void> {
   const globalKeys = ["window", "document", "navigator", "IS_REACT_ACT_ENVIRONMENT"] as const;
   const previousGlobals = new Map(
@@ -367,6 +395,57 @@ async function checkHydrationGate(): Promise<void> {
   } finally {
     restoreGlobals();
     ordinaryDom.window.close();
+  }
+
+  for (const pathname of ["/editor", "/agent/new"] as const) {
+    const storageFailureDom = new JSDOM(`<div id="root">${serverMarkup}</div>`, {
+      url: `https://example.test${pathname}`,
+      virtualConsole: new VirtualConsole(),
+    });
+    let storageAccesses = 0;
+    let clerkMounts = 0;
+    Object.defineProperty(storageFailureDom.window, "sessionStorage", {
+      configurable: true,
+      get() {
+        storageAccesses += 1;
+        throw new DOMException("blocked", "SecurityError");
+      },
+    });
+    setDomGlobals(storageFailureDom);
+
+    try {
+      await act(async () => {
+        hydrateRoot(
+          storageFailureDom.window.document.getElementById("root")!,
+          <AgentLaunchHydrationGate
+            renderClerk={(children) => {
+              clerkMounts += 1;
+              return <div data-clerk-mounted="true">{children}</div>;
+            }}
+          >
+            <p>Child</p>
+          </AgentLaunchHydrationGate>,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.equal(clerkMounts, 1, `${pathname} mounts Clerk after a storage getter failure`);
+      assert.equal(
+        storageFailureDom.window.document.body.textContent?.includes(
+          "Preparing your diagram request.",
+        ) ?? false,
+        false,
+        `${pathname} cannot remain on the capture status`,
+      );
+      if (pathname === "/editor") {
+        assert.equal(storageAccesses, 0, "irrelevant routes never evaluate session storage");
+      } else {
+        assert.ok(storageAccesses > 0, "the exact capture route handles the getter failure");
+      }
+    } finally {
+      restoreGlobals();
+      storageFailureDom.window.close();
+    }
   }
 }
 
@@ -545,6 +624,7 @@ async function main(): Promise<void> {
   checkBootstrapPendingCapture();
   checkBootstrapScrubsWhenStorageFails();
   checkStorageFailuresFailOpen();
+  checkSessionStorageGetterFailure();
   await checkHydrationGate();
   await checkStrictModeDeduplication();
   await checkRecovery();

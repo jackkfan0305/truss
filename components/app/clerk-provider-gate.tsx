@@ -8,6 +8,7 @@ import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
 import {
   agentLaunchResumePath,
   consumePendingAgentLaunch,
+  getAgentLaunchSessionStorage,
   hasPendingAgentLaunchFragment,
 } from "@/lib/agent-launch-bootstrap-client";
 
@@ -92,8 +93,16 @@ const PENDING_GATE_SNAPSHOT: AgentLaunchGateSnapshot = {
 };
 
 function getAgentLaunchGateSnapshot(): AgentLaunchGateSnapshot {
-  return typeof window !== "undefined" &&
-    hasPendingAgentLaunchFragment(window.location.pathname, window.sessionStorage)
+  if (typeof window === "undefined") {
+    return READY_GATE_SNAPSHOT;
+  }
+
+  const storage = getAgentLaunchSessionStorage(
+    window.location.pathname,
+    () => window.sessionStorage,
+  );
+
+  return storage && hasPendingAgentLaunchFragment(window.location.pathname, storage)
     ? PENDING_GATE_SNAPSHOT
     : READY_GATE_SNAPSHOT;
 }
@@ -125,8 +134,17 @@ export function AgentLaunchHydrationGate({
       return;
     }
 
+    const storage = getAgentLaunchSessionStorage(
+      window.location.pathname,
+      () => window.sessionStorage,
+    );
+    if (storage === null) {
+      finishCapture();
+      return;
+    }
+
     const captured = consumePendingAgentLaunch(
-      window.sessionStorage,
+      storage,
       () => {
         window.history.replaceState(window.history.state, "", AGENT_LAUNCH_PATH);
       },

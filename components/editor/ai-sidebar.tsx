@@ -14,7 +14,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useAgentLaunchPrompt } from "@/hooks/use-agent-launch-prompt"
 import { useAiPromptSubmission } from "@/hooks/use-ai-prompt-submission"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
@@ -33,7 +32,6 @@ import {
 
 interface AiSidebarProps {
   isOpen: boolean
-  launchId?: string
   useCollaboratorsSource?: typeof useCollaborators
 }
 
@@ -51,7 +49,6 @@ const STARTER_PROMPTS = [
 /** Monochrome AI workspace with room chat and run-scoped activity streams. */
 export function AiSidebar({
   isOpen,
-  launchId,
   useCollaboratorsSource,
 }: AiSidebarProps) {
   const [draft, setDraft] = useState("")
@@ -78,12 +75,6 @@ export function AiSidebar({
     submit: submitPrompt,
   } = useAiPromptSubmission(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
-  const { error: launchError, retry: retryLaunch } = useAgentLaunchPrompt({
-    launchId,
-    roomId,
-    canStart: canSend && !isSending && !isRunning,
-    submit: submitPrompt,
-  })
   /*
    * This client's own run when there is one, and the room's shared status when
    * the run belongs to somebody else. Local first because it is finer grained
@@ -153,10 +144,6 @@ export function AiSidebar({
           on the panel and the transcript scrolls up to meet it. */}
       <div className="p-3">
         <LiveStepLine step={liveStep} />
-
-        {launchError ? (
-          <AgentLaunchFailure message={launchError} onRetry={retryLaunch} />
-        ) : null}
 
         {error ? (
           <p
@@ -251,32 +238,6 @@ export function AiSidebar({
         </form>
       </div>
     </aside>
-  )
-}
-
-export function AgentLaunchFailure({
-  message,
-  onRetry,
-}: {
-  message: string
-  onRetry: () => void
-}) {
-  return (
-    <div
-      role="alert"
-      className="mb-2 flex items-center justify-between gap-3 border border-surface-border px-2.5 py-2 text-xs text-copy-primary"
-    >
-      <span>{message}</span>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-6 shrink-0 px-2 text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary"
-        onClick={onRetry}
-      >
-        Retry
-      </Button>
-    </div>
   )
 }
 

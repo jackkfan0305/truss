@@ -15,6 +15,7 @@ import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
+import { useAgentLaunchImport } from "@/hooks/use-agent-launch-import"
 import {
   initialEditorSidebar,
   type EditorSidebar,
@@ -47,11 +48,16 @@ export function EditorShell({
   launchId,
 }: EditorShellProps) {
   const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
-    () => initialEditorSidebar(launchId)
+    () => initialEditorSidebar()
   )
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
+  const launchImport = useAgentLaunchImport({
+    launchId,
+    roomId: activeProject?.id ?? "",
+    canStart: Boolean(activeProject),
+  })
   const isSidebarOpen = openSidebar === "projects"
   const isAiSidebarOpen = openSidebar === "ai"
 
@@ -123,9 +129,23 @@ export function EditorShell({
                   isTemplatesOpen={isTemplatesOpen}
                   onTemplatesOpenChange={setIsTemplatesOpen}
                 />
+                {launchImport.isImporting ? (
+                  <div
+                    role="status"
+                    className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-page/70 px-6 text-center text-sm text-copy-muted"
+                  >
+                    Importing diagram…
+                  </div>
+                ) : null}
+                {launchImport.error ? (
+                  <AgentLaunchImportFailure
+                    message={launchImport.error}
+                    onRetry={launchImport.retry}
+                  />
+                ) : null}
               </main>
 
-              <AiSidebar isOpen={isAiSidebarOpen} launchId={launchId} />
+              <AiSidebar isOpen={isAiSidebarOpen} />
             </>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">
@@ -156,5 +176,31 @@ export function EditorShell({
         </div>
       </CanvasSaveProvider>
     </CanvasRoom>
+  )
+}
+
+export function AgentLaunchImportFailure({
+  message,
+  onRetry,
+}: {
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div
+      role="alert"
+      className="absolute inset-x-4 top-20 z-30 mx-auto flex max-w-md items-center justify-between gap-3 border border-surface-border bg-surface px-3 py-2 text-xs text-copy-primary shadow-lg"
+    >
+      <span>{message}</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-6 shrink-0 px-2 text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary"
+        onClick={onRetry}
+      >
+        Retry
+      </Button>
+    </div>
   )
 }

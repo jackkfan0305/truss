@@ -100,7 +100,11 @@
   project. Its record advances through `captured`, `creating-project`,
   `project-created`, `importing-graph`, and `graph-imported`; only the first
   four stages may fail. Failed records retain their graph and safe retry error.
-  `graph-imported` is terminal.
+  `graph-imported` is terminal. The client hook deduplicates same-tab requests,
+  calls only the owner import route after the authorized editor mounts, clears
+  storage and the query only after HTTP 200, and leaves network/5xx/409 errors
+  in a retryable failed state. This path never invokes chat, orchestration, or
+  Trigger and does not alter the manual AI sidebar's closed initial state.
 
 ## Starter System Designs
 

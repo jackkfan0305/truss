@@ -203,10 +203,21 @@ export async function createAgentLaunchProject(
     }
 
     pending = saveAgentLaunch(
-      withAgentLaunchStage(pending, "creating-project", {
-        projectId: replacementId,
-        error: undefined,
-      }),
+      pending.stage === "creating-project"
+        ? {
+            ...pending,
+            projectId: replacementId,
+            error: undefined,
+            graph: {
+              version: pending.graph.version,
+              nodes: pending.graph.nodes.map((node) => ({ ...node })),
+              edges: pending.graph.edges.map((edge) => ({ ...edge })),
+            },
+          }
+        : withAgentLaunchStage(pending, "creating-project", {
+            projectId: replacementId,
+            error: undefined,
+          }),
       dependencies.storage,
     );
     try {

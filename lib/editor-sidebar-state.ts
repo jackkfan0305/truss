@@ -1,6 +1,6 @@
 export type EditorSidebar = "projects" | "ai" | null;
 
-/** A launch opens the AI surface; ordinary editor visits retain the closed chrome. */
-export function initialEditorSidebar(launchId?: string): EditorSidebar {
-  return launchId ? "ai" : null;
+/** Launch imports do not change the ordinary sidebar's closed initial state. */
+export function initialEditorSidebar(): EditorSidebar {
+  return null;
 }

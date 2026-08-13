@@ -42,7 +42,20 @@ const payload = {
   version: AGENT_LAUNCH_VERSION,
   launchId,
   title: "Global Checkout",
-  description: "Show gateways, orders, payments, and failure queues.",
+  graph: {
+    version: 1 as const,
+    nodes: [
+      {
+        id: "checkout",
+        label: "Checkout",
+        shape: "rectangle" as const,
+        color: "blue" as const,
+        x: 0,
+        y: 0,
+      },
+    ],
+    edges: [],
+  },
 };
 const fragment = `#${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
 
@@ -557,7 +570,7 @@ async function checkFailuresAndSingleCollisionRetry(): Promise<void> {
   const collision = await createAgentLaunchProject(
     {
       ...createAgentLaunchRecord(payload),
-      stage: "creating-project",
+      stage: "failed",
       projectId: "global-checkout-a1b2c3",
     },
     {

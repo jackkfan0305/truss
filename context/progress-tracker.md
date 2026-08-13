@@ -1196,3 +1196,17 @@ Update this file whenever the current phase, active feature, or implementation s
 - Review fix round 2 reuses one deterministic test-only fixture to verify the
   app fragment parser itself accepts exactly 16,384 encoded characters and
   rejects the next constructible valid length, matching the launcher.
+
+## Caller-generated diagram editor import
+
+- Task 4 replaces the obsolete prompt launch runner and hook with the direct
+  `useAgentLaunchImport` owner-route flow. Matching project/launch records are
+  deduplicated across Strict Mode, persist `importing-graph` before POST and
+  `graph-imported` before clearing tab storage and `?launch` after HTTP 200.
+  Network, 5xx, and 409 responses retain the graph in a safe failed state for
+  Retry; terminal and mismatched records are no-ops. The editor renders only a
+  neutral canvas status/failure overlay, keeps ordinary AI chat closed, and
+  never passes launch IDs into `AiSidebar` or calls chat/orchestrate/Trigger.
+  `scripts/verify-agent-launch-editor.tsx` covers the lifecycle, same-tab
+  deduplication, retry retention, mismatch/terminal no-ops, hook mount gate,
+  and unchanged manual-sidebar boundary.

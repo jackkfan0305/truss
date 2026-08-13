@@ -29,8 +29,10 @@ sidebar remains unchanged.
    sign-in with only the opaque launch UUID.
 6. Truss creates or recovers one project using the precomputed project ID.
 7. The editor calls an owner-only graph-import endpoint.
-8. The endpoint imports into an empty Liveblocks canvas, accepts an exact
-   replay as a no-op, and rejects a different non-empty canvas.
+8. The endpoint replays the graph through the native Liveblocks drawing path:
+   the AI cursor moves and nodes/connections arrive incrementally with a short,
+   bounded delay. An exact replay is a no-op, an exact partial import resumes,
+   and divergent state is rejected.
 9. Truss persists the canonical snapshot to private Blob storage and its
    project pointer, clears tab launch state, scrubs `?launch=`, and displays the
    graph. No second LLM runs.
@@ -153,9 +155,14 @@ Authorization runs before body parsing. `launchId` is validated but is not an
 authorization token.
 
 The server strictly parses and materializes the graph, then performs one
-server-side `mutateFlow` operation:
+server-side `mutateFlow` operation. As in the native design agent, it updates
+AI presence before each addition and pauses briefly so Liveblocks flushes
+incremental changes while the callback remains open:
 
-- empty nodes and edges: add the complete canonical snapshot;
+- empty nodes and edges: add the canonical snapshot in stable node-then-edge
+  order with a bounded drawing cadence;
+- existing state is an exact canonical subset of the requested snapshot:
+  resume only the missing nodes and edges without duplication;
 - existing canonical snapshot semantically equals the requested snapshot:
   return success without a second write;
 - any different non-empty state: return `409` and preserve it.
@@ -165,10 +172,11 @@ through the existing private Blob/Prisma canvas storage ordering. If persistence
 fails after the Liveblocks write, return a retryable error. The next request
 sees an exact canvas, skips the Liveblocks write, and retries persistence.
 
-This is deliberately idempotent without a new database model: a project is new,
-node and edge IDs are stable, the room is only writable when empty, and exact
-semantic equality is the replay key. A caller cannot overwrite a human-edited
-or otherwise divergent room.
+This is deliberately idempotent without a new database model: node and edge IDs
+are stable, an interrupted import can resume only when every existing item is
+an exact member of the requested graph, and exact semantic equality is the
+replay key. Any extra item or changed position/data is divergent. A caller
+cannot overwrite a human-edited room. AI presence is cleared in `finally`.
 
 ## Editor integration
 
@@ -182,7 +190,8 @@ Retry over the canvas. The AI sidebar keeps its normal closed initial state and
 contains no launch-specific behavior.
 
 Because the endpoint writes the same Liveblocks Storage used by the mounted
-canvas, the graph appears through the normal collaboration path. Canvas
+canvas with paced writes and AI presence, the graph visibly draws through the
+normal collaboration path instead of appearing as one bulk replacement. Canvas
 autosave remains active; the endpoint also persists the canonical snapshot so
 cold restore does not depend on the client remaining open.
 

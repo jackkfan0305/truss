@@ -114,16 +114,21 @@ feat: generate diagram graphs in calling skill
 
 **TDD:** With injected authorization, flow, and persistence dependencies, prove
 401/403 occur before body parse; malformed graphs are 400; empty canvas imports
-all canonical nodes/edges in one mutation; exact replay returns 200 without a
-second flow write; divergent non-empty canvas returns 409 without mutation;
+all canonical nodes/edges in one paced mutation; cursor/presence and injected
+clock prove stable incremental node-then-edge drawing; an exact canonical
+subset resumes only missing items; exact replay returns 200 without a second
+flow write; divergent non-empty canvas returns 409 without mutation;
 same graph with different ordering compares equal; persistence failure is 502
 and exact retry retries persistence; graph/launch contents never enter errors.
 
 Factor the existing private Blob-first/Prisma-pointer-second save into
 `saveCanvasSnapshot`. Keep the generic collaborator canvas PUT behavior intact.
-The new route calls an owner-only controller that uses one server-side
-`mutateFlow`, imports only into an empty room, treats exact state as a no-op,
-then persists the canonical requested snapshot.
+The new route calls an owner-only controller that uses the native server-side
+`mutateFlow` and AI-presence path. Inside one callback, add missing canonical
+nodes then edges with a short bounded delay so Liveblocks broadcasts the graph
+being drawn. Always clear AI presence. Import into an empty room, resume an
+exact partial subset, treat exact state as a no-op, and reject any extra or
+changed state before writing. Then persist the canonical requested snapshot.
 
 Run graph/import/canvas/project verifiers, integration verification, typecheck,
 and lint. Commit:
@@ -189,8 +194,9 @@ Run the official skill validator, launcher verifier, and clean-project
 `npx skills add/list/use`. Verify a 40-node/60-edge fixture fits the fragment.
 
 Browser test the signed-out capture/Clerk handoff and, when interactive auth is
-available, verify one project, immediate graph rendering, refresh/retry with no
-duplicates, empty AI transcript, and no Trigger run/network request. If Orca or
+available, verify one project, the AI cursor visibly drawing nodes and edges
+with a short delay, refresh/retry with no duplicates, empty AI transcript, and
+no Trigger run/network request. If Orca or
 Clerk CAPTCHA blocks the authenticated segment, record it as a manual follow-up
 without claiming pass.
 

@@ -76,6 +76,13 @@
   suffix and one replacement POST.
 - Project, prompt, and run mutations remain authenticated server boundaries;
   the launch record does not grant mutation authority.
+- A launch prompt carries only a canonical lowercase UUID v4 to the
+  authenticated chat route. After project authorization and Clerk identity
+  resolution, the server hashes `[userId, projectId, launchId]` to select its
+  human feed row and upserts that server-authored row. Replaying the same launch
+  therefore returns the same prompt ID without trusting a client-selected feed
+  ID; the existing prompt/user/room Trigger idempotency then reuses the same
+  downstream run.
 
 ## Starter System Designs
 

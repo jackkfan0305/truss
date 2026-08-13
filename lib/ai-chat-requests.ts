@@ -1,8 +1,10 @@
+import { isAgentLaunchId } from "@/lib/agent-launch";
 import { MAX_CHAT_CONTENT_LENGTH } from "@/types/tasks";
 
 export interface AiChatRequest {
   projectId: string;
   content: string;
+  launchId: string | null;
 }
 
 /** Pure parser for the authenticated chat write route. */
@@ -11,10 +13,12 @@ export function parseAiChatRequest(body: unknown): AiChatRequest | null {
     return null;
   }
 
-  const { projectId: rawProjectId, content: rawContent } = body as Record<
-    string,
-    unknown
-  >;
+  const {
+    projectId: rawProjectId,
+    content: rawContent,
+    launchId: rawLaunchId,
+  } = body as Record<string, unknown>;
+  const hasLaunchId = Object.prototype.hasOwnProperty.call(body, "launchId");
   const projectId =
     typeof rawProjectId === "string" ? rawProjectId.trim() : "";
   const content = typeof rawContent === "string" ? rawContent.trim() : "";
@@ -23,5 +27,13 @@ export function parseAiChatRequest(body: unknown): AiChatRequest | null {
     return null;
   }
 
-  return { projectId, content };
+  if (!hasLaunchId) {
+    return { projectId, content, launchId: null };
+  }
+
+  if (!isAgentLaunchId(rawLaunchId)) {
+    return null;
+  }
+
+  return { projectId, content, launchId: rawLaunchId };
 }

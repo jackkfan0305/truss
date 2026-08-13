@@ -8,6 +8,16 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-invoked-diagram-skill` Task 4 complete. The authenticated chat parser
+  accepts an absent launch ID as manual chat and otherwise requires the shared
+  canonical lowercase UUID v4. After authorization, the write controller hashes
+  the authenticated user, project, and launch IDs into a server-owned feed ID,
+  upserts it, and returns 200; manual prompts still create a new row and return
+  201. `npx tsx scripts/verify-ai-chat.ts`, `npx tsx
+  scripts/verify-orchestrate-api.ts`, focused ESLint, and `git diff --check`
+  pass. Full typecheck remains blocked by the missing generated Prisma client
+  and `DATABASE_URL`.
+
 - `agent-invoked-diagram-skill` Task 3 complete. `/agent/new` is public only
   long enough to synchronously capture and scrub its fragment into tab-scoped
   session storage, then resumes with Clerk through a fixed same-origin UUID

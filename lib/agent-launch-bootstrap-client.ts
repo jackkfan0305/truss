@@ -13,10 +13,15 @@ export function hasPendingAgentLaunchFragment(
   pathname: string,
   storage: AgentLaunchStorage,
 ): boolean {
-  return (
-    pathname === AGENT_LAUNCH_PATH &&
-    storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY) !== null
-  );
+  if (pathname !== AGENT_LAUNCH_PATH) {
+    return false;
+  }
+
+  try {
+    return storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY) !== null;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -28,7 +33,13 @@ export function consumePendingAgentLaunch(
   storage: AgentLaunchStorage,
   scrubFragment: () => void,
 ): AgentLaunchRecord | null {
-  const fragment = storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+  let fragment: string | null;
+
+  try {
+    fragment = storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+  } catch {
+    return null;
+  }
 
   if (fragment === null) {
     return null;
@@ -36,8 +47,14 @@ export function consumePendingAgentLaunch(
 
   try {
     return captureAgentLaunch(fragment, null, storage, scrubFragment);
+  } catch {
+    return null;
   } finally {
-    storage.removeItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+    try {
+      storage.removeItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+    } catch {
+      // Storage can be blocked by privacy settings. The gate must fail open.
+    }
   }
 }
 

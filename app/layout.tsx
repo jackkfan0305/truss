@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProviderGate } from "@/components/app/clerk-provider-gate";
 import { agentLaunchBootstrapScript } from "@/lib/agent-launch-bootstrap";
@@ -36,9 +35,12 @@ export default function RootLayout({
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <Script id="agent-launch-fragment-bootstrap" strategy="beforeInteractive">
-          {agentLaunchBootstrapScript()}
-        </Script>
+        <script
+          id="agent-launch-fragment-bootstrap"
+          // This constant script must execute while the document is parsed;
+          // Next's Script loader defers inline content until its runtime loads.
+          dangerouslySetInnerHTML={{ __html: agentLaunchBootstrapScript() }}
+        />
       </head>
       <body className="min-h-full flex flex-col">
         <ClerkProviderGate>{children}</ClerkProviderGate>

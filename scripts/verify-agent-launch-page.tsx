@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
+import { JSDOM, VirtualConsole } from "jsdom";
+import { act } from "react";
+import { hydrateRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AgentLaunchStatus,
 } from "../components/agent/agent-launch-page";
+import { AgentLaunchHydrationGate } from "../components/app/clerk-provider-gate";
 import {
   captureAgentLaunch,
   createAgentLaunchProject,
@@ -105,6 +111,7 @@ function checkCaptureAndResume(): void {
 
 function checkBootstrapScriptKeepsPayloadOutOfTheURL(): void {
   const script = agentLaunchBootstrapScript();
+  const layoutSource = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
 
   assert.match(script, new RegExp(AGENT_LAUNCH_PENDING_FRAGMENT_KEY));
   assert.match(script, /sessionStorage\.setItem/);
@@ -113,6 +120,8 @@ function checkBootstrapScriptKeepsPayloadOutOfTheURL(): void {
   assert.doesNotMatch(script, /description/);
   assert.doesNotMatch(script, /launchId/);
   assert.doesNotMatch(script, /TextDecoder/);
+  assert.match(layoutSource, /dangerouslySetInnerHTML=\{\{ __html: agentLaunchBootstrapScript\(\) \}\}/);
+  assert.doesNotMatch(layoutSource, /from "next\/script"/);
 }
 
 function checkBootstrapPendingCapture(): void {
@@ -168,6 +177,197 @@ function checkBootstrapPendingCapture(): void {
     false,
     "without a pending fragment the gate mounts Clerk immediately",
   );
+}
+
+function checkBootstrapScrubsWhenStorageFails(): void {
+  let scrubCalls = 0;
+  const context = {
+    location: { pathname: "/agent/new", search: "", hash: "#abc" },
+    sessionStorage: {
+      setItem() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    },
+    history: {
+      state: null,
+      replaceState() {
+        scrubCalls += 1;
+      },
+    },
+  };
+
+  vm.runInNewContext(agentLaunchBootstrapScript(), context);
+  assert.equal(scrubCalls, 1, "bootstrap scrubs even when session storage rejects writes");
+}
+
+function createThrowingStorage(
+  operation: "get" | "set" | "remove",
+  pendingFragment: string | null = null,
+): AgentLaunchStorage {
+  const values = new Map<string, string>();
+  if (pendingFragment !== null) {
+    values.set(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, pendingFragment);
+  }
+
+  return {
+    getItem(key) {
+      if (operation === "get") {
+        throw new DOMException("blocked", "SecurityError");
+      }
+
+      return values.get(key) ?? null;
+    },
+    setItem(key, value) {
+      if (operation === "set") {
+        throw new DOMException("blocked", "SecurityError");
+      }
+
+      values.set(key, value);
+    },
+    removeItem(key) {
+      if (operation === "remove") {
+        throw new DOMException("blocked", "SecurityError");
+      }
+
+      values.delete(key);
+    },
+  };
+}
+
+function checkStorageFailuresFailOpen(): void {
+  const lookupFailure = createThrowingStorage("get");
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/new", lookupFailure),
+    false,
+    "storage lookup failures must mount Clerk normally",
+  );
+  assert.equal(consumePendingAgentLaunch(lookupFailure, () => undefined), null);
+
+  const captureWriteFailure = createThrowingStorage("set", fragment);
+  assert.equal(
+    consumePendingAgentLaunch(captureWriteFailure, () => undefined),
+    null,
+    "canonical capture write failures must not keep the capture status mounted",
+  );
+
+  const cleanupFailure = createThrowingStorage("remove", "#not-a-canonical-launch");
+  assert.equal(
+    consumePendingAgentLaunch(cleanupFailure, () => undefined),
+    null,
+    "pending cleanup failures must not crash or block normal Clerk mounting",
+  );
+}
+
+async function checkHydrationGate(): Promise<void> {
+  const globalKeys = ["window", "document", "navigator", "IS_REACT_ACT_ENVIRONMENT"] as const;
+  const previousGlobals = new Map(
+    globalKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
+  );
+  const setDomGlobals = (dom: JSDOM) => {
+    Object.defineProperties(globalThis, {
+      window: { configurable: true, value: dom.window },
+      document: { configurable: true, value: dom.window.document },
+      navigator: { configurable: true, value: dom.window.navigator },
+      IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true },
+    });
+  };
+  const restoreGlobals = () => {
+    for (const key of globalKeys) {
+      const descriptor = previousGlobals.get(key);
+      if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor);
+      } else {
+        delete (globalThis as Record<string, unknown>)[key];
+      }
+    }
+  };
+  const serverMarkup = renderToStaticMarkup(
+    <AgentLaunchHydrationGate renderClerk={(children) => <div>{children}</div>}>
+      <p>Child</p>
+    </AgentLaunchHydrationGate>,
+  );
+  const dom = new JSDOM(`<div id="root">${serverMarkup}</div>`, {
+    url: "https://example.test/agent/new",
+    virtualConsole: new VirtualConsole(),
+  });
+  const errors: string[] = [];
+  const originalConsoleError = console.error;
+  const hydrationEvents: string[] = [];
+
+  setDomGlobals(dom);
+  dom.window.sessionStorage.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, fragment);
+  console.error = (...values: unknown[]) => {
+    errors.push(values.map(String).join(" "));
+  };
+
+  try {
+    await act(async () => {
+      hydrateRoot(
+        dom.window.document.getElementById("root")!,
+        <AgentLaunchHydrationGate
+          renderClerk={(children) => {
+            hydrationEvents.push(
+              dom.window.sessionStorage.getItem(agentLaunchStorageKey(launchId)) === null
+                ? "clerk-before-capture"
+                : "clerk-after-capture",
+            );
+            return <div data-clerk-mounted="true">{children}</div>;
+          }}
+        >
+          <p>Child</p>
+        </AgentLaunchHydrationGate>,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.equal(
+      hydrationEvents.includes("clerk-before-capture"),
+      false,
+      `Clerk must not mount before canonical pending capture (${hydrationEvents.join(",")})`,
+    );
+    assert.equal(
+      dom.window.sessionStorage.getItem(agentLaunchStorageKey(launchId)) !== null,
+      true,
+      "valid pending hydration stores the canonical launch before attempting its opaque resume",
+    );
+    assert.equal(
+      errors.some((error) => /hydration|did not match/i.test(error)),
+      false,
+      "valid pending hydration must not report a mismatch",
+    );
+  } finally {
+    console.error = originalConsoleError;
+    restoreGlobals();
+    dom.window.close();
+  }
+
+  const ordinaryDom = new JSDOM(`<div id="root">${serverMarkup}</div>`, {
+    url: "https://example.test/editor",
+  });
+  let ordinaryClerkMounts = 0;
+  setDomGlobals(ordinaryDom);
+
+  try {
+    await act(async () => {
+      hydrateRoot(
+        ordinaryDom.window.document.getElementById("root")!,
+        <AgentLaunchHydrationGate
+          renderClerk={(children) => {
+            ordinaryClerkMounts += 1;
+            return <div data-clerk-mounted="true">{children}</div>;
+          }}
+        >
+          <p>Child</p>
+        </AgentLaunchHydrationGate>,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.equal(ordinaryClerkMounts, 1, "ordinary routes mount Clerk after hydration");
+  } finally {
+    restoreGlobals();
+    ordinaryDom.window.close();
+  }
 }
 
 async function checkStrictModeDeduplication(): Promise<void> {
@@ -343,6 +543,9 @@ async function main(): Promise<void> {
   checkCaptureAndResume();
   checkBootstrapScriptKeepsPayloadOutOfTheURL();
   checkBootstrapPendingCapture();
+  checkBootstrapScrubsWhenStorageFails();
+  checkStorageFailuresFailOpen();
+  await checkHydrationGate();
   await checkStrictModeDeduplication();
   await checkRecovery();
   await checkPostResponseLossRecovery();

@@ -2,7 +2,7 @@
 
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
-import { useLayoutEffect, useReducer } from "react";
+import { useLayoutEffect, useReducer, useSyncExternalStore } from "react";
 
 import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
 import {
@@ -13,6 +13,11 @@ import {
 
 interface ClerkProviderGateProps {
   children: React.ReactNode;
+}
+
+interface AgentLaunchHydrationGateProps {
+  children: React.ReactNode;
+  renderClerk: (children: React.ReactNode) => React.ReactNode;
 }
 
 const clerkAppearance = {
@@ -50,22 +55,73 @@ function AgentLaunchCaptureStatus(): React.ReactNode {
   );
 }
 
+function AppBootstrapStatus(): React.ReactNode {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
+      <section
+        className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6"
+        role="status"
+      >
+        <p className="text-sm text-copy-secondary">Loading Truss.</p>
+      </section>
+    </main>
+  );
+}
+
+function subscribeAfterHydration(listener: () => void): () => void {
+  queueMicrotask(listener);
+  return () => undefined;
+}
+
+interface AgentLaunchGateSnapshot {
+  hasHydrated: boolean;
+  hasPendingLaunch: boolean;
+}
+
+const SERVER_GATE_SNAPSHOT: AgentLaunchGateSnapshot = {
+  hasHydrated: false,
+  hasPendingLaunch: false,
+};
+const READY_GATE_SNAPSHOT: AgentLaunchGateSnapshot = {
+  hasHydrated: true,
+  hasPendingLaunch: false,
+};
+const PENDING_GATE_SNAPSHOT: AgentLaunchGateSnapshot = {
+  hasHydrated: true,
+  hasPendingLaunch: true,
+};
+
+function getAgentLaunchGateSnapshot(): AgentLaunchGateSnapshot {
+  return typeof window !== "undefined" &&
+    hasPendingAgentLaunchFragment(window.location.pathname, window.sessionStorage)
+    ? PENDING_GATE_SNAPSHOT
+    : READY_GATE_SNAPSHOT;
+}
+
 /**
  * Clerk initializes before route children and can redirect a document request.
  * Capture the bounded launch fragment before mounting it, then reload at the
  * fixed opaque resume route where Clerk can safely take over.
  */
-export function ClerkProviderGate({ children }: ClerkProviderGateProps): React.ReactNode {
-  const [isCapturingLaunch, finishCapture] = useReducer(
-    () => false,
-    undefined,
-    () =>
-      typeof window !== "undefined" &&
-      hasPendingAgentLaunchFragment(window.location.pathname, window.sessionStorage),
+export function AgentLaunchHydrationGate({
+  children,
+  renderClerk,
+}: AgentLaunchHydrationGateProps): React.ReactNode {
+  const snapshot = useSyncExternalStore(
+    subscribeAfterHydration,
+    getAgentLaunchGateSnapshot,
+    () => SERVER_GATE_SNAPSHOT,
   );
+  const [hasFinishedCapture, finishCapture] = useReducer(
+    () => true,
+    undefined,
+    () => false,
+  );
+  const shouldCaptureLaunch =
+    snapshot.hasHydrated && snapshot.hasPendingLaunch && !hasFinishedCapture;
 
   useLayoutEffect(() => {
-    if (!isCapturingLaunch) {
+    if (!shouldCaptureLaunch) {
       return;
     }
 
@@ -82,11 +138,27 @@ export function ClerkProviderGate({ children }: ClerkProviderGateProps): React.R
     }
 
     finishCapture();
-  }, [isCapturingLaunch]);
+  }, [shouldCaptureLaunch]);
 
-  if (isCapturingLaunch) {
+  if (!snapshot.hasHydrated) {
+    return <AppBootstrapStatus />;
+  }
+
+  if (shouldCaptureLaunch) {
     return <AgentLaunchCaptureStatus />;
   }
 
-  return <ClerkProvider appearance={clerkAppearance}>{children}</ClerkProvider>;
+  return renderClerk(children);
+}
+
+export function ClerkProviderGate({ children }: ClerkProviderGateProps): React.ReactNode {
+  return (
+    <AgentLaunchHydrationGate
+      renderClerk={(content) => (
+        <ClerkProvider appearance={clerkAppearance}>{content}</ClerkProvider>
+      )}
+    >
+      {children}
+    </AgentLaunchHydrationGate>
+  );
 }

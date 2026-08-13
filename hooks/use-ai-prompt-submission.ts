@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useMemo } from "react";
 
 import {
   useAgentRun,
@@ -17,31 +17,38 @@ import {
 export interface AiPromptSubmission {
   chat: AiChat;
   run: AgentRun;
-  submit: (
-    text: string,
-    runOptions: AgentRunOptions,
-    options?: AiPromptSubmissionOptions,
-  ) => Promise<AiPromptSubmissionResult>;
+  submit: AiPromptSubmit;
+}
+
+export type AiPromptSubmit = (
+  text: string,
+  runOptions: AgentRunOptions,
+  options?: AiPromptSubmissionOptions,
+) => Promise<AiPromptSubmissionResult>;
+
+export function createAiPromptSubmit(
+  chat: Pick<AiChat, "send">,
+  run: Pick<AgentRun, "start">,
+): AiPromptSubmit {
+  return (text, runOptions, options) =>
+    submitAiPrompt({
+      text,
+      runOptions,
+      options,
+      send: chat.send,
+      start: run.start,
+    });
 }
 
 export function useAiPromptSubmission(roomId: string): AiPromptSubmission {
   const chat = useAiChat();
   const run = useAgentRun(roomId);
+  const { send } = chat;
+  const { start } = run;
 
-  const submit = useCallback(
-    (
-      text: string,
-      runOptions: AgentRunOptions,
-      options?: AiPromptSubmissionOptions,
-    ): Promise<AiPromptSubmissionResult> =>
-      submitAiPrompt({
-        text,
-        runOptions,
-        options,
-        send: chat.send,
-        start: run.start,
-      }),
-    [chat.send, run.start],
+  const submit = useMemo(
+    () => createAiPromptSubmit({ send }, { start }),
+    [send, start],
   );
 
   return { chat, run, submit };

@@ -23,6 +23,15 @@ Update this file whenever the current phase, active feature, or implementation s
   --check`, and the changed-scope local React Doctor scan (100/100, no issues)
   pass. `npm run typecheck` remains blocked by the pre-existing missing
   generated Prisma client and `DATABASE_URL` setup.
+  - Fix Round 1 adds behavior-level coverage through the actual hook-composition
+    factory and manual composer boundary: a started or visible run-error clears
+    the draft, a message error and disabled composer do not, and the selected
+    model/default input reaches the run. It also proves rejecting sends and both
+    lifecycle callbacks propagate rather than being collapsed into `run-error`.
+    The testable manual boundary lives in `lib/ai-sidebar-submission.ts`, keeping
+    `AiSidebar` component-only for Fast Refresh. Focused controller/chat/run/UI
+    checks, `npm run verify:unit`, focused ESLint, `git diff --check`, and the
+    changed-scope React Doctor scan (100/100) pass.
 
 - `agent-invoked-diagram-skill` Task 4 complete. The authenticated chat parser
   accepts an absent launch ID as manual chat and otherwise requires the shared

@@ -18,6 +18,7 @@ import { useAiPromptSubmission } from "@/hooks/use-ai-prompt-submission"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { selectLiveRunStep } from "@/lib/ai-run-turns"
+import { submitAiSidebarPrompt } from "@/lib/ai-sidebar-submission"
 import { cn } from "@/lib/utils"
 import {
   AI_DESIGN_MODELS,
@@ -82,15 +83,15 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const liveStep =
     selectLiveRunStep(turns) ?? (isGenerating ? status?.text ?? "Working" : null)
 
-  const submit = async (text: string) => {
-    if (isComposerDisabled) return
-
-    const result = await submitPrompt(text, { modelId, thinkingLevel })
-
-    if (result.status !== "message-error") {
-      setDraft("")
-    }
-  }
+  const submit = (text: string) =>
+    submitAiSidebarPrompt({
+      text,
+      isComposerDisabled,
+      modelId,
+      thinkingLevel,
+      submitPrompt,
+      clearDraft: () => setDraft(""),
+    })
 
   return (
     <aside

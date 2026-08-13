@@ -138,6 +138,7 @@ rejected({ ...graph, nodes: [{ ...graph.nodes[0], id: "UPPER" }], edges: [] }, "
 rejected({ ...graph, nodes: [{ ...graph.nodes[0], id: "" }], edges: [] }, "rejects empty node IDs");
 rejected({ ...graph, nodes: [{ ...graph.nodes[0], id: "x".repeat(49) }], edges: [] }, "rejects overlong node IDs");
 rejected({ ...graph, nodes: [{ ...graph.nodes[0], label: " " }], edges: [] }, "rejects blank labels");
+rejected({ ...graph, nodes: [{ ...graph.nodes[0], label: " Client " }], edges: [] }, "rejects padded node labels rather than normalizing them");
 rejected({ ...graph, nodes: [{ ...graph.nodes[0], label: "x".repeat(81) }], edges: [] }, "rejects overlong node labels");
 assert.ok(parseAgentGraph({ ...graph, nodes: [{ ...graph.nodes[0], label: "x".repeat(80) }], edges: [] }), "accepts 80-character node labels");
 rejected({ ...graph, nodes: [{ ...graph.nodes[0], shape: "triangle" }], edges: [] }, "rejects unknown shapes");
@@ -151,6 +152,7 @@ rejected({ ...graph, edges: [{ ...graph.edges[0], id: "other" }, graph.edges[0]]
 rejected({ ...graph, edges: [{ ...graph.edges[0], target: "missing" }] }, "rejects dangling endpoints");
 rejected({ ...graph, edges: [{ ...graph.edges[0], target: "client" }] }, "rejects self loops");
 rejected({ ...graph, edges: [{ ...graph.edges[0], label: "x".repeat(41) }] }, "rejects overlong edge labels");
+rejected({ ...graph, edges: [{ ...graph.edges[0], label: " HTTPS " }] }, "rejects padded edge labels rather than normalizing them");
 assert.ok(parseAgentGraph({ ...graph, edges: [{ ...graph.edges[0], label: "x".repeat(40) }] }), "accepts 40-character edge labels");
 assert.ok(parseAgentGraph({ ...graph, edges: [{ ...graph.edges[0], label: "" }] }), "accepts empty edge labels");
 

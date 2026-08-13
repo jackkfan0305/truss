@@ -7,6 +7,14 @@ Send a graph only as the `graph` value in the launcher's stdin JSON object. Emit
   "version": 1,
   "nodes": [
     {
+      "id": "client",
+      "label": "Client",
+      "shape": "circle",
+      "color": "blue",
+      "x": 0,
+      "y": 0
+    },
+    {
       "id": "orders-api",
       "label": "Orders API",
       "shape": "rectangle",

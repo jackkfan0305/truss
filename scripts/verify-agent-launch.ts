@@ -85,6 +85,13 @@ assert.equal(
 );
 assert.equal(
   parseAgentLaunchFragment(
+    `#${Buffer.from(JSON.stringify({ ...payload, title: " Global Checkout Platform " })).toString("base64url")}`,
+  ),
+  null,
+  "rejects padded titles rather than normalizing them",
+);
+assert.equal(
+  parseAgentLaunchFragment(
     `#${Buffer.from(JSON.stringify({ ...payload, description: "old payload" })).toString("base64url")}`,
   ),
   null,

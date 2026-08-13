@@ -28,11 +28,18 @@ const agentGraphIdSchema = z
   .max(MAX_AGENT_GRAPH_ID_LENGTH)
   .regex(AGENT_GRAPH_ID_PATTERN);
 
+function canonicalTrimmedString(minimumLength: number, maximumLength: number) {
+  return z.string().min(minimumLength).max(maximumLength).refine(
+    (value) => value === value.trim(),
+    { message: "Value must already be trimmed." },
+  );
+}
+
 const nodeColorValues = Object.keys(NODE_COLORS) as [NodeColor, ...NodeColor[]];
 
 const agentGraphNodeSchema = z.strictObject({
     id: agentGraphIdSchema,
-    label: z.string().trim().min(1).max(MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
+    label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
     shape: z.enum(NODE_SHAPES),
     color: z.enum(nodeColorValues),
     x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
@@ -43,7 +50,7 @@ const agentGraphEdgeSchema = z.strictObject({
     id: agentGraphIdSchema,
     source: agentGraphIdSchema,
     target: agentGraphIdSchema,
-    label: z.string().trim().max(MAX_AGENT_GRAPH_EDGE_LABEL_LENGTH),
+    label: canonicalTrimmedString(0, MAX_AGENT_GRAPH_EDGE_LABEL_LENGTH),
 });
 
 export const agentGraphSchema = z

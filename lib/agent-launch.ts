@@ -13,6 +13,11 @@ const AGENT_LAUNCH_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+const agentLaunchTitleSchema = z.string().min(1).max(MAX_PROJECT_NAME_LENGTH).refine(
+  (value) => value === value.trim(),
+  { message: "Title must already be trimmed." },
+);
+
 export interface AgentLaunchPayloadV1 {
   version: typeof AGENT_LAUNCH_VERSION;
   launchId: string;
@@ -37,7 +42,7 @@ export interface AgentLaunchRecord extends AgentLaunchPayloadV1 {
 const agentLaunchPayloadSchema = z.strictObject({
   version: z.literal(AGENT_LAUNCH_VERSION),
   launchId: z.string().regex(AGENT_LAUNCH_ID_PATTERN),
-  title: z.string().trim().min(1).max(MAX_PROJECT_NAME_LENGTH),
+  title: agentLaunchTitleSchema,
   graph: agentGraphSchema,
 });
 
@@ -53,7 +58,7 @@ const agentLaunchStageSchema = z.enum([
 const agentLaunchRecordSchema = z.strictObject({
   version: z.literal(AGENT_LAUNCH_VERSION),
   launchId: z.string().regex(AGENT_LAUNCH_ID_PATTERN),
-  title: z.string().trim().min(1).max(MAX_PROJECT_NAME_LENGTH),
+  title: agentLaunchTitleSchema,
   graph: agentGraphSchema,
   stage: agentLaunchStageSchema,
   projectId: z.string().optional(),

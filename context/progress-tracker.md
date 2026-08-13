@@ -1170,3 +1170,7 @@ Update this file whenever the current phase, active feature, or implementation s
   through launcher stdin. The dependency-free launcher rejects malformed or
   oversized graphs, including encoded fragments over 16,384 characters, before
   opening the browser; it retains origin validation and privacy-safe output.
+- Review fix round 1 validates the bundled reference graph through the launcher,
+  makes app and launcher boundaries both reject padded transport values rather
+  than silently trimming them, and proves the exact 16,384-character fragment
+  acceptance boundary plus the next valid encoded length rejection.

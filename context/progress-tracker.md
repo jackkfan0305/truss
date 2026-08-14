@@ -422,6 +422,76 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Completed
 
+- **`truss:diagram` skill — edit and delete** — `render-truss-diagram` (create
+  only, write-only) is replaced by `.agents/skills/truss-diagram/`, a single
+  skill dispatching on the user's phrasing to create, edit, or delete. Create's
+  contract is unchanged. Edit and delete resolve their target from the user's
+  own project list, read in the terminal from a numbered prompt or name match,
+  never guessed between two plausible candidates.
+  - `lib/agent-graph.ts` gained `projectCanvasToAgentGraph` and
+    `canvasFingerprint`: the canvas→compact direction, the reverse of the
+    existing `materializeAgentGraph`. Items the compact contract cannot
+    express (arbitrary human IDs, over-length labels, off-enum colors) are
+    reported as `opaqueNodeIds`/`opaqueEdgeIds` rather than dropped, so an
+    agent can never delete what it could not see. `lib/agent-graph-diff.ts`
+    (`diffAgentGraph`, `collidesWithOpaque`) derives add/update/remove keyed
+    on ID, with removal structurally impossible for anything outside the live
+    graph projection.
+  - `lib/agent-canvas-write.ts` extracts the shared paced drawing/persistence
+    loop out of the import route (`b7ddeda`) with no behavior change, so
+    create and edit share pacing and Blob-first/pointer-second persistence
+    without sharing reconciliation logic.
+  - `GET /api/projects/:id/agent-graph` (owner-only) reads the **live**
+    Liveblocks room via `readCanvas`, not the lagging Blob snapshot, and
+    returns the compact graph, opaque ID sets, and a room fingerprint.
+  - `POST /api/projects/:id/agent-graph-edit` recomputes the fingerprint
+    *inside* the `mutateFlow` callback (checking before it would reopen the
+    read-then-write race), refuses an edit that reuses an opaque ID, batches
+    removals/updates before pacing additions, and sweeps edges anchored to a
+    removed node (opaque ones included) since `removeNodes` does not cascade.
+  - A one-shot `node:http` loopback listener
+    (`.agents/skills/truss-diagram/scripts/loopback.mjs`) carries the
+    browser's answers back to the skill script: loopback-only bind verified
+    off the real socket, one-shot nonce compared with `timingSafeEqual`,
+    exact-origin CORS, Host pin against DNS rebinding. Each exchange is a
+    held-open response, not a poll — Node's `headersTimeout`/`requestTimeout`
+    bound receiving a request, not answering one, so an agent that
+    deliberates for a minute is safe. A rejected callback does not consume
+    the one-shot.
+  - `/agent/pick` (`app/agent/pick/`, `components/agent/agent-pick-page.tsx`,
+    `lib/agent-pick.ts`, `lib/agent-pick-browser.ts`) is the second public
+    entry path, added to `isPublicPath`/`isClerkHandshakeBypassPath` in
+    `proxy.ts` alongside `/agent/new`, and reuses the pre-hydration fragment
+    capture — extended (`8eec984`) to cover this path, since it previously
+    covered only `/agent/new` and Clerk could otherwise redirect a
+    signed-out caller before the fragment was read. Launch and pick fragments
+    use separate per-path `sessionStorage` keys so one payload type can never
+    be decoded as the other.
+  - Undo does **not** cover a server-side edit (open question from the design
+    spec, resolved this task): Liveblocks `history.undo()` only reverts
+    operations made by the current client's own room connection, and
+    `mutateFlow` runs through `@liveblocks/node`'s separate REST connection —
+    confirmed straight from `@liveblocks/core`'s type declarations ("It does
+    not impact operations made by other clients") and matches this app's own
+    `CanvasControls` doc comment ("per-client — undo takes back *your* last
+    change, not a collaborator's"). The terminal's destructive-edit
+    confirmation is therefore the only safety net against an agent removing
+    the wrong nodes, not a convenience; `references/operations.md` and
+    `context/architecture-context.md` both say so explicitly now.
+  - Review rounds caught real defects, not just polish: a literal NUL byte
+    copied into the plan document (`f8e4ac1`); an opaque edge that would have
+    permanently outlived a removed node's endpoint because `removeNodes`
+    doesn't cascade (`f8e4ac1`); a binding assertion that reported the
+    *requested* loopback address instead of the one actually bound, making
+    "loopback-only" a tautology (`a6e6e8e`); argument parsing hoisted outside
+    the launcher's `try`, so a malformed invocation threw uncaught instead of
+    emitting the terminating protocol event an interactive op depends on
+    (`e3ff286`); and `verify-agent-graph-edit` missing from `verify:unit`, so
+    the suite guarding the canvas write path was not running at all
+    (`8eec984`, now fixed).
+  - Manual browser QA (below) is the only thing left unverified — everything
+    else runs in `verify:unit`, `typecheck`, `lint`, and `build`.
+
 - **Liveblocks feed upsert fix** — `upsertAiChatMessageWithClient` branched on
   `404`/`409`, but the live v2 API reports a missing message, a duplicate
   message ID *and* a POST into a missing feed all as `500 Internal Room Error`.
@@ -826,6 +896,58 @@ Update this file whenever the current phase, active feature, or implementation s
 - Presence is broadcast on **every** mousemove over the canvas, throttled only by Liveblocks' own 100ms default. If that reads as jittery in use, the fix is `LiveblocksProvider`'s `throttle` prop or interpolating between updates on the receiving side — not a local debounce, which would only add latency.
 - `isThinking` is now the only Presence field nothing reads or writes. It arrives with the AI panel.
 - `EditorNavbar` now imports `UserButton`, so it can no longer render outside a `ClerkProvider`. Any future harness or story for the navbar must be mounted under the root layout.
+
+## Manual QA — `truss:diagram` edit/delete
+
+None of these can run from a script: they need a real browser and a signed-in
+Clerk session. Perform each and check the box only after the exact expected
+result is observed.
+
+- [ ] **Create still works unchanged.** Ask the skill to create a diagram
+      (e.g. "draw me a simple CI/CD pipeline"). Expected: `/agent/new` opens,
+      the browser signs in if needed, a new project is created with the given
+      title, and the canvas draws paced with the cursor animation exactly as
+      before this task's changes — no behavior difference from the prior
+      create-only skill.
+- [ ] **Edit a diagram with a hand-moved node.** Open an existing diagram in
+      the browser first and drag one node to a new position by hand (leave
+      the tab open or reload after). Then ask the skill to edit that same
+      diagram by adding one new node (a request with no removals). Expected:
+      after the skill applies the edit and the browser redirects to
+      `/editor/:id`, the hand-moved node is still at the position you dragged
+      it to, and the new node draws in with the same paced cursor-arrival
+      animation used by create/import — not an instant appearance.
+- [ ] **Ask to remove a node.** Ask the skill to edit a diagram in a way that
+      removes an existing node (e.g. "remove the caching layer"). Expected:
+      before the skill answers the held `/agent/pick` request, the terminal
+      states exactly what will be removed by name/label and waits for an
+      explicit yes. It does not proceed on its own.
+- [ ] **Delete a diagram.** Ask the skill to delete a specific diagram by
+      name. Expected: the terminal confirms by quoting the full project name
+      it resolved (never a list position/index) and waits for an explicit
+      yes; only after that does the browser open its own native confirm
+      dialog naming the same project before the `DELETE` actually fires. Two
+      separate confirmations, terminal then browser.
+- [ ] **Empty library — edit.** With an account that owns no projects, ask
+      the skill to edit "my diagram" (or any diagram). Expected: the agent
+      reports there are no diagrams yet, asks for a title (never inventing
+      one), reuses the edit request as the description, and falls through to
+      the create branch — producing a new project rather than erroring.
+- [ ] **Empty library — delete.** With an account that owns no projects, ask
+      the skill to delete a diagram. Expected: the agent says there is
+      nothing to delete and stops. It does not open a browser tab, and it
+      does not offer to create one.
+- [ ] **Signed-out cold load of `/agent/pick#<fragment>`.** This is the one no
+      script can prove, and it is where a regression in the pre-hydration
+      fragment capture would appear. Sign out of Truss entirely (or use a
+      fresh private window), then trigger an edit or delete request so the
+      skill opens `/agent/pick#<fragment>` while signed out. Expected: the
+      fragment survives the Clerk sign-in redirect (it is captured into
+      `sessionStorage` and scrubbed from the URL *before* Clerk's client
+      bundle can mount and redirect), the user completes sign-in, and the
+      operation resumes from where it left off — the project list (or the
+      graph read, for edit) still appears, rather than the operation silently
+      losing its target and hanging or erroring.
 
 ## Open Questions
 

@@ -46,7 +46,7 @@ Apply the user's requested change **in place**, against `graph`:
 - Reuse the existing `id` of every node and edge you are keeping or modifying, so the server-side diff can align it with the live canvas.
 - Assign new kebab-case IDs, following the same rules as [graph-schema.md](graph-schema.md), only to genuinely new nodes and edges.
 - Never reuse an ID that appears in `opaqueNodeIds`.
-- **If the result removes any node or edge present in `graph`,** state exactly what will be removed (by label, not ID) and get an explicit yes from the user before sending your reply. This confirmation is the only safety net a destructive edit gets — never skip it, even for a small change.
+- **If the result removes any node or edge present in `graph`,** state exactly what will be removed (by label, not ID) and get an explicit yes from the user before sending your reply. This confirmation is the only safety net a destructive edit gets — never skip it, even for a small change. Liveblocks undo does not cover it: `history.undo()` only reverts operations made by the current browser client, and a server-side `mutateFlow` batch runs through a separate connection, so Cmd+Z cannot bring back anything this removes.
 
 Send the complete desired graph back as one line on stdin:
 

@@ -7,17 +7,19 @@ import {
   captureAgentLaunch,
   type AgentLaunchStorage,
 } from "@/lib/agent-launch-browser";
-import { AGENT_LAUNCH_PENDING_FRAGMENT_KEY } from "@/lib/agent-launch-bootstrap";
+import { agentEntryPendingFragmentKey } from "@/lib/agent-launch-bootstrap";
+import { AGENT_PICK_PATH } from "@/lib/agent-pick";
+import { agentPickResumePath, captureAgentPick } from "@/lib/agent-pick-browser";
 
 /**
  * Privacy settings may make even the `sessionStorage` property getter throw.
- * Check the exact capture route first so ordinary routes never access storage.
+ * Check the exact capture routes first so ordinary routes never access storage.
  */
 export function getAgentLaunchSessionStorage(
   pathname: string,
   getStorage: () => AgentLaunchStorage,
 ): AgentLaunchStorage | null {
-  if (pathname !== AGENT_LAUNCH_PATH) {
+  if (agentEntryPendingFragmentKey(pathname) === null) {
     return null;
   }
 
@@ -32,30 +34,46 @@ export function hasPendingAgentLaunchFragment(
   pathname: string,
   storage: AgentLaunchStorage,
 ): boolean {
-  if (pathname !== AGENT_LAUNCH_PATH) {
+  const key = agentEntryPendingFragmentKey(pathname);
+
+  if (key === null) {
     return false;
   }
 
   try {
-    return storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY) !== null;
+    return storage.getItem(key) !== null;
   } catch {
     return false;
   }
 }
 
 /**
- * The bootstrap retains only an opaque, bounded fragment. Canonical decoding
- * and validation stay in captureAgentLaunch so this handoff cannot drift from
- * the persisted launch contract.
+ * The bootstrap retains only an opaque, bounded fragment. Canonical decoding and
+ * validation stay in the per-path capture functions, so this handoff cannot
+ * drift from either persisted contract.
+ *
+ * Returns the path to reload at, or `null` when there was nothing usable.
+ *
+ * Dispatching on pathname here rather than in the gate is what keeps the two
+ * payload types apart: each path reads only its own storage key and hands the
+ * fragment only to its own validator, so a launch fragment can never be decoded
+ * as a pick or the reverse.
  */
-export function consumePendingAgentLaunch(
+export function consumePendingAgentEntry(
+  pathname: string,
   storage: AgentLaunchStorage,
   scrubFragment: () => void,
-): AgentLaunchRecord | null {
+): string | null {
+  const key = agentEntryPendingFragmentKey(pathname);
+
+  if (key === null) {
+    return null;
+  }
+
   let fragment: string | null;
 
   try {
-    fragment = storage.getItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+    fragment = storage.getItem(key);
   } catch {
     return null;
   }
@@ -65,12 +83,24 @@ export function consumePendingAgentLaunch(
   }
 
   try {
-    return captureAgentLaunch(fragment, null, storage, scrubFragment);
+    if (pathname === AGENT_LAUNCH_PATH) {
+      const captured = captureAgentLaunch(fragment, null, storage, scrubFragment);
+
+      return captured ? agentLaunchResumePath(captured) : null;
+    }
+
+    if (pathname === AGENT_PICK_PATH) {
+      const captured = captureAgentPick(fragment, null, storage, scrubFragment);
+
+      return captured ? agentPickResumePath(captured.pickId) : null;
+    }
+
+    return null;
   } catch {
     return null;
   } finally {
     try {
-      storage.removeItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY);
+      storage.removeItem(key);
     } catch {
       // Storage can be blocked by privacy settings. The gate must fail open.
     }

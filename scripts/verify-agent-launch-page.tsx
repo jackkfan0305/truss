@@ -25,11 +25,12 @@ import {
 } from "../lib/agent-launch";
 import {
   AGENT_LAUNCH_PENDING_FRAGMENT_KEY,
+  AGENT_PICK_PENDING_FRAGMENT_KEY,
   agentLaunchBootstrapScript,
 } from "../lib/agent-launch-bootstrap";
 import {
   agentLaunchResumePath,
-  consumePendingAgentLaunch,
+  consumePendingAgentEntry,
   getAgentLaunchSessionStorage,
   hasPendingAgentLaunchFragment,
 } from "../lib/agent-launch-bootstrap-client";
@@ -144,11 +145,11 @@ function checkBootstrapPendingCapture(): void {
   storage.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, fragment);
 
   assert.equal(hasPendingAgentLaunchFragment("/agent/new", storage), true);
-  const captured = consumePendingAgentLaunch(storage, () => {
+  const captured = consumePendingAgentEntry("/agent/new", storage, () => {
     events.push("scrub");
   });
 
-  assert.deepEqual(captured, createAgentLaunchRecord(payload));
+  assert.equal(captured, agentLaunchResumePath(createAgentLaunchRecord(payload)));
   assert.equal(
     getStoredAgentLaunch(launchId, storage)?.launchId,
     launchId,
@@ -178,7 +179,10 @@ function checkBootstrapPendingCapture(): void {
   const invalidStorage = createStorage();
   invalidStorage.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, "#not-a-canonical-launch");
   assert.equal(hasPendingAgentLaunchFragment("/agent/new", invalidStorage), true);
-  assert.equal(consumePendingAgentLaunch(invalidStorage, () => undefined), null);
+  assert.equal(
+    consumePendingAgentEntry("/agent/new", invalidStorage, () => undefined),
+    null,
+  );
   assert.equal(
     hasPendingAgentLaunchFragment("/agent/new", invalidStorage),
     false,
@@ -190,6 +194,70 @@ function checkBootstrapPendingCapture(): void {
     hasPendingAgentLaunchFragment("/agent/new", noFragmentStorage),
     false,
     "without a pending fragment the gate mounts Clerk immediately",
+  );
+}
+
+/**
+ * `/agent/pick` needs the pre-hydration capture at least as much as
+ * `/agent/new`: its callers are usually signed out, which is exactly when Clerk
+ * redirects the document and takes the fragment with it.
+ */
+function checkPickPathIsGatedAndCannotCrossConsume(): void {
+  const pickId = "00000000-0000-4a00-8000-0000000000aa";
+  const pickFragment = `#${Buffer.from(
+    JSON.stringify({ version: 1, pickId, op: "edit", port: 51789, nonce: pickId }),
+    "utf8",
+  ).toString("base64url")}`;
+
+  // The gate defers Clerk on the pick path too.
+  const pickStorage = createStorage();
+  pickStorage.setItem(AGENT_PICK_PENDING_FRAGMENT_KEY, pickFragment);
+
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/pick", pickStorage),
+    true,
+    "a pending pick fragment holds Clerk back",
+  );
+  assert.equal(
+    consumePendingAgentEntry("/agent/pick", pickStorage, () => undefined),
+    `/agent/pick?pick=${pickId}`,
+    "a pick fragment resumes at the pick path",
+  );
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/pick", pickStorage),
+    false,
+    "consuming clears the pending fragment so Clerk mounts",
+  );
+
+  // Storage is a shared namespace, so the keys must not be interchangeable.
+  const crossed = createStorage();
+  crossed.setItem(AGENT_LAUNCH_PENDING_FRAGMENT_KEY, pickFragment);
+
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/pick", crossed),
+    false,
+    "a fragment stored under the launch key is invisible to the pick path",
+  );
+  assert.equal(
+    consumePendingAgentEntry("/agent/new", crossed, () => undefined),
+    null,
+    "a pick payload is never decoded as a launch",
+  );
+
+  const reversed = createStorage();
+  reversed.setItem(AGENT_PICK_PENDING_FRAGMENT_KEY, fragment);
+
+  assert.equal(
+    consumePendingAgentEntry("/agent/pick", reversed, () => undefined),
+    null,
+    "a launch payload is never decoded as a pick",
+  );
+
+  // An unrelated route never touches storage at all.
+  assert.equal(hasPendingAgentLaunchFragment("/editor/abc", pickStorage), false);
+  assert.equal(
+    consumePendingAgentEntry("/editor/abc", pickStorage, () => undefined),
+    null,
   );
 }
 
@@ -255,20 +323,35 @@ function checkStorageFailuresFailOpen(): void {
     false,
     "storage lookup failures must mount Clerk normally",
   );
-  assert.equal(consumePendingAgentLaunch(lookupFailure, () => undefined), null);
+  assert.equal(
+    consumePendingAgentEntry("/agent/new", lookupFailure, () => undefined),
+    null,
+  );
 
   const captureWriteFailure = createThrowingStorage("set", fragment);
   assert.equal(
-    consumePendingAgentLaunch(captureWriteFailure, () => undefined),
+    consumePendingAgentEntry("/agent/new", captureWriteFailure, () => undefined),
     null,
     "canonical capture write failures must not keep the capture status mounted",
   );
 
   const cleanupFailure = createThrowingStorage("remove", "#not-a-canonical-launch");
   assert.equal(
-    consumePendingAgentLaunch(cleanupFailure, () => undefined),
+    consumePendingAgentEntry("/agent/new", cleanupFailure, () => undefined),
     null,
     "pending cleanup failures must not crash or block normal Clerk mounting",
+  );
+
+  // The pick path must fail open the same way, on its own key.
+  const pickLookupFailure = createThrowingStorage("get");
+  assert.equal(
+    hasPendingAgentLaunchFragment("/agent/pick", pickLookupFailure),
+    false,
+    "storage lookup failures on the pick path must mount Clerk normally",
+  );
+  assert.equal(
+    consumePendingAgentEntry("/agent/pick", pickLookupFailure, () => undefined),
+    null,
   );
 }
 
@@ -635,6 +718,7 @@ async function main(): Promise<void> {
   checkCaptureAndResume();
   checkBootstrapScriptKeepsPayloadOutOfTheURL();
   checkBootstrapPendingCapture();
+  checkPickPathIsGatedAndCannotCrossConsume();
   checkBootstrapScrubsWhenStorageFails();
   checkStorageFailuresFailOpen();
   checkSessionStorageGetterFailure();

@@ -4,10 +4,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
 import { useLayoutEffect, useReducer, useSyncExternalStore } from "react";
 
-import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
 import {
-  agentLaunchResumePath,
-  consumePendingAgentLaunch,
+  consumePendingAgentEntry,
   getAgentLaunchSessionStorage,
   hasPendingAgentLaunchFragment,
 } from "@/lib/agent-launch-bootstrap-client";
@@ -143,15 +141,22 @@ export function AgentLaunchHydrationGate({
       return;
     }
 
-    const captured = consumePendingAgentLaunch(
+    // Scrub back to the current entry path, whichever one this is — hard-coding
+    // the launch path here would rewrite a pick capture onto /agent/new.
+    const resumePath = consumePendingAgentEntry(
+      window.location.pathname,
       storage,
       () => {
-        window.history.replaceState(window.history.state, "", AGENT_LAUNCH_PATH);
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname,
+        );
       },
     );
 
-    if (captured) {
-      window.location.replace(agentLaunchResumePath(captured));
+    if (resumePath) {
+      window.location.replace(resumePath);
       return;
     }
 

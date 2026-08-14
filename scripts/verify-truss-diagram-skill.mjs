@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
+const SKILL_SCRIPT = fileURLToPath(
+  new URL("../.agents/skills/truss-diagram/scripts/truss-diagram.mjs", import.meta.url),
+);
 import { createAgentLaunchFragmentBoundaryInput } from "./testing/agent-launch-fragment-fixtures.mjs";
 
 const {
   browserCommand,
   buildLaunchUrl,
+  buildPickUrl,
   formatLauncherSuccess,
   normalizeBaseUrl,
   openLaunchUrl,
   parseLauncherInput,
 } =
-  await import("../.agents/skills/render-truss-diagram/scripts/open-truss-diagram.mjs");
+  await import("../.agents/skills/truss-diagram/scripts/truss-diagram.mjs");
 
 const graph = {
   version: 1,
@@ -51,7 +58,7 @@ const launchUrl = buildLaunchUrl(input, {
 const parsedUrl = new URL(launchUrl);
 const graphSchemaMarkdown = await readFile(
   new URL(
-    "../.agents/skills/render-truss-diagram/references/graph-schema.md",
+    "../.agents/skills/truss-diagram/references/graph-schema.md",
     import.meta.url,
   ),
   "utf8",
@@ -397,4 +404,150 @@ assert.equal(success.includes(input.title), false);
 assert.equal(success.includes(JSON.stringify(graph)), false);
 assert.equal(success.includes(parsedUrl.hash), false);
 
-console.info("Render Truss skill checks passed");
+// --- truss:diagram: skill packaging (create, edit, delete) ---
+
+const skillMarkdown = await readFile(
+  new URL("../.agents/skills/truss-diagram/SKILL.md", import.meta.url),
+  "utf8",
+);
+assert.match(
+  skillMarkdown,
+  /^---\nname: truss-diagram\n/,
+  "frontmatter name is truss-diagram",
+);
+assert.match(skillMarkdown, /\bcreate\b/i, "SKILL.md references create");
+assert.match(skillMarkdown, /\bedit\b/i, "SKILL.md references edit");
+assert.match(skillMarkdown, /\bdelete\b/i, "SKILL.md references delete");
+assert.match(
+  skillMarkdown,
+  /operations\.md/,
+  "SKILL.md points to references/operations.md",
+);
+
+const operationsMarkdown = await readFile(
+  new URL(
+    "../.agents/skills/truss-diagram/references/operations.md",
+    import.meta.url,
+  ),
+  "utf8",
+);
+assert.match(
+  operationsMarkdown,
+  /empty library, editing/i,
+  "operations.md covers the empty-library branch for edit",
+);
+assert.match(
+  operationsMarkdown,
+  /empty library, deleting/i,
+  "operations.md covers the empty-library branch for delete",
+);
+
+// buildPickUrl round-trips through the real parseAgentPickFragment (lib/agent-pick.ts).
+// That module is TypeScript with a `@/*` path alias, which plain `node` cannot
+// resolve, so shell out to the repo's own tsx binary rather than re-implement
+// (and risk drifting from) the schema it enforces.
+const pickPayload = {
+  op: "edit",
+  port: 54_321,
+  nonce: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  pickId: "00000000-0000-4000-8000-000000000002",
+};
+const pickUrl = buildPickUrl("https://truss.example", pickPayload);
+const parsedPickUrl = new URL(pickUrl);
+assert.equal(parsedPickUrl.origin, "https://truss.example");
+assert.equal(parsedPickUrl.pathname, "/agent/pick");
+assert.ok(parsedPickUrl.hash.length > 1);
+
+const repoRoot = new URL("..", import.meta.url).pathname;
+const roundTripOutput = execFileSync(
+  `${repoRoot}node_modules/.bin/tsx`,
+  [
+    "-e",
+    `import("./lib/agent-pick.ts").then(({ parseAgentPickFragment }) => {
+      process.stdout.write(JSON.stringify(parseAgentPickFragment(${JSON.stringify(parsedPickUrl.hash)})));
+    });`,
+  ],
+  { cwd: repoRoot, encoding: "utf8" },
+).trim();
+assert.deepEqual(
+  JSON.parse(roundTripOutput),
+  { version: 1, ...pickPayload },
+  "buildPickUrl round-trips through parseAgentPickFragment",
+);
+
+// --op create (explicit) must still produce the identical /agent/new# URL for
+// a fixed launch ID — create's contract does not change.
+assert.deepEqual(
+  parseLauncherInput(["--op", "create", "--stdin-json"], JSON.stringify(input)),
+  input,
+  "--op create parses identically to the default",
+);
+const explicitCreateUrl = buildLaunchUrl(input, {
+  baseUrl: "https://truss.example/",
+  launchId,
+});
+assert.equal(
+  explicitCreateUrl,
+  launchUrl,
+  "--op create produces the identical /agent/new# URL for a fixed launch ID",
+);
+assert.throws(() => parseLauncherInput(["--op", "bogus", "--stdin-json"], JSON.stringify(input)));
+
+/*
+ * The CLI entry point, spawned for real.
+ *
+ * Everything above calls the launcher's exported functions directly, which is
+ * why a regression in `main()`'s own wiring went unnoticed: `parseArguments`
+ * was hoisted outside the try/catch, so a malformed invocation threw uncaught —
+ * create dumped a stack trace instead of its one-line error, and edit/delete
+ * exited without the terminating protocol event the calling agent waits for.
+ * Only spawning the process catches that.
+ */
+function runLauncher(args, stdin = "") {
+  const result = spawnSync(
+    process.execPath,
+    [SKILL_SCRIPT, ...args],
+    { input: stdin, encoding: "utf8", timeout: 15_000 },
+  );
+
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+{
+  // A pre-existing create-path validation error, part of the pinned contract.
+  const duplicated = runLauncher(["--stdin-json", "--stdin-json"], "{}");
+
+  assert.equal(duplicated.status, 1, "a malformed invocation exits non-zero");
+  assert.match(
+    duplicated.stderr,
+    /^Unable to open Truss: --stdin-json may only be provided once\.\n$/,
+    "create reports a clean one-line error, never a stack trace",
+  );
+  assert.doesNotMatch(
+    duplicated.stderr,
+    /\bat \w|node:internal/,
+    "no stack trace reaches stderr",
+  );
+  assert.equal(duplicated.stdout, "", "create writes nothing to stdout on failure");
+}
+
+{
+  // The same class of error on an interactive op must not strand the agent.
+  const bogus = runLauncher(["--op", "edit", "--not-a-flag"]);
+
+  assert.equal(bogus.status, 1, "a malformed interactive invocation exits non-zero");
+  assert.doesNotMatch(
+    bogus.stderr,
+    /\bat \w|node:internal/,
+    "no stack trace reaches stderr for an interactive op",
+  );
+}
+
+{
+  const unknownOp = runLauncher(["--op", "bogus", "--stdin-json"], "{}");
+
+  assert.equal(unknownOp.status, 1);
+  assert.doesNotMatch(unknownOp.stderr, /\bat \w|node:internal/);
+}
+
+console.info("Truss diagram skill checks passed");

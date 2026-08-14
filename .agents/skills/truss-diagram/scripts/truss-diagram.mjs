@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
+import { startLoopback } from "./loopback.mjs";
+
 const MAX_TITLE_LENGTH = 120;
 const MAX_GRAPH_NODES = 40;
 const MAX_GRAPH_EDGES = 60;
@@ -12,9 +14,12 @@ const MAX_FRAGMENT_LENGTH = 16_384;
 const MIN_POSITION = -10_000;
 const MAX_POSITION = 10_000;
 const DEFAULT_BASE_URL = "http://localhost:3000";
+// Matches the loopback's idle timeout (Global Constraints: 120000 ms).
+const LOOPBACK_TIMEOUT_MS = 120_000;
 const LAUNCH_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const OPS = new Set(["create", "edit", "delete"]);
 const SHAPES = new Set([
   "rectangle",
   "diamond",
@@ -158,7 +163,7 @@ function validateInput(rawInput) {
 }
 
 function parseArguments(argv) {
-  const options = { baseUrl: undefined, stdinJson: false };
+  const options = { baseUrl: undefined, stdinJson: false, op: "create" };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--stdin-json") {
@@ -167,8 +172,16 @@ function parseArguments(argv) {
       options.stdinJson = true;
       continue;
     }
+    if (argument === "--op") {
+      const value = argv[index + 1];
+      if (value === undefined || !OPS.has(value))
+        throw new Error("--op requires one of create, edit, delete.");
+      options.op = value;
+      index += 1;
+      continue;
+    }
     if (argument !== "--base-url")
-      throw new Error("Use --stdin-json and an optional --base-url.");
+      throw new Error("Use --stdin-json, --op, and an optional --base-url.");
     const value = argv[index + 1];
     if (value === undefined || value.startsWith("--"))
       throw new Error("--base-url requires a value.");
@@ -238,6 +251,15 @@ export function buildLaunchUrl(input, options) {
   return `${baseUrl}/agent/new#${encoded}`;
 }
 
+export function buildPickUrl(baseUrl, { op, port, nonce, pickId }) {
+  const encoded = Buffer.from(
+    JSON.stringify({ version: 1, pickId, op, port, nonce }),
+    "utf8",
+  ).toString("base64url");
+
+  return `${normalizeBaseUrl(baseUrl)}/agent/pick#${encoded}`;
+}
+
 export function browserCommand(url, platform) {
   if (platform === "darwin") return { command: "open", args: [url] };
   if (platform === "win32")
@@ -284,10 +306,119 @@ async function readStdinJson() {
   return lines.join("\n");
 }
 
-async function main() {
+// Line-delimited JSON protocol for --op edit/delete: one event object per
+// stdout line, one reply object per stdin line. See references/operations.md.
+function emitEvent(event) {
+  process.stdout.write(`${JSON.stringify(event)}\n`);
+}
+
+function createLineReader() {
+  const readline = createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+  const iterator = readline[Symbol.asyncIterator]();
+  return {
+    async nextJson() {
+      const { value, done } = await iterator.next();
+      if (done) throw new Error("stdin closed before a response arrived.");
+      try {
+        return JSON.parse(value);
+      } catch {
+        throw new Error("Expected one JSON object per line on stdin.");
+      }
+    },
+    close() {
+      readline.close();
+    },
+  };
+}
+
+async function runInteractiveOp(op, options) {
+  const lineReader = createLineReader();
+  let loopback;
   try {
-    const argv = process.argv.slice(2);
-    const options = parseArguments(argv);
+    const baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? process.env.TRUSS_APP_URL ?? DEFAULT_BASE_URL,
+    );
+    const nonce = randomUUID();
+    const pickId = randomUUID();
+    loopback = await startLoopback({
+      nonce,
+      allowedOrigin: baseUrl,
+      timeoutMs: LOOPBACK_TIMEOUT_MS,
+    });
+    await openLaunchUrl(
+      buildPickUrl(baseUrl, { op, port: loopback.port, nonce, pickId }),
+      process.platform,
+    );
+
+    const projectsExchange = await loopback.receive();
+    emitEvent({
+      event: "projects",
+      projects: projectsExchange.body?.projects ?? [],
+    });
+    const { projectId } = await lineReader.nextJson();
+    projectsExchange.respond({ projectId });
+
+    if (op === "edit") {
+      const graphExchange = await loopback.receive();
+      emitEvent({
+        event: "graph",
+        graph: graphExchange.body?.graph,
+        opaqueNodeIds: graphExchange.body?.opaqueNodeIds,
+        fingerprint: graphExchange.body?.fingerprint,
+      });
+      const { desiredGraph } = await lineReader.nextJson();
+      graphExchange.respond({ desiredGraph });
+    }
+
+    emitEvent({ event: "done" });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : `Unable to complete the ${op}.`;
+    emitEvent({ event: "error", message });
+    process.exitCode = 1;
+  } finally {
+    lineReader.close();
+    if (loopback) await loopback.close();
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+
+  /*
+   * Parsed inside the try, not above it.
+   *
+   * `parseArguments` throws on every malformed invocation, and hoisting it out
+   * meant those escaped uncaught: create printed a stack trace instead of the
+   * one-line non-sensitive error SKILL.md promises, and edit/delete exited with
+   * no terminating protocol event at all — leaving the calling agent waiting on
+   * a `done`/`error` line that would never come.
+   *
+   * The op is unknown until parsing succeeds, so a failure here reports through
+   * the create-shaped stderr path. That is the right default: an argv this
+   * malformed has no established protocol channel to answer on.
+   */
+  let options;
+
+  try {
+    options = parseArguments(argv);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to open Truss.";
+    process.stderr.write(`Unable to open Truss: ${message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.op === "edit" || options.op === "delete") {
+    await runInteractiveOp(options.op, options);
+    return;
+  }
+
+  try {
     const input = parseLauncherInput(
       argv,
       options.stdinJson ? await readStdinJson() : undefined,

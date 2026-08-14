@@ -139,22 +139,34 @@ That starts `next dev` **and** the Trigger.dev dev worker together. Open
 Without the Trigger worker running, the canvas and chat still load but every AI
 turn hangs — the tasks have nowhere to execute.
 
-## Render diagrams from an agent
+## Create, edit and delete diagrams from an agent
 
 Install the distributable skill after this change reaches the public default
 branch:
 
 ```bash
 npx skills add jackkfan0305/truss \
-  --skill render-truss-diagram \
+  --skill truss-diagram \
   --agent codex
 ```
 
-The skill turns the supplied description into a compact positioned graph, then
-sends only the title and graph to its launcher over stdin. The launcher uses
-`http://localhost:3000` by default. To open another Truss deployment, set
-`TRUSS_APP_URL=https://your-truss-host.example`; it must be an HTTP(S) origin
-without a path.
+**Create** turns the supplied description into a compact positioned graph, then
+sends only the title and graph to its launcher over stdin.
+
+**Edit** and **delete** need to read your projects, which the agent cannot do on
+its own — it never authenticates to Truss. The launcher opens `/agent/pick`,
+which uses your existing browser session to fetch the list and, for an edit, the
+live canvas, and hands them back over a one-shot listener bound to `127.0.0.1`.
+The agent asks which project you mean in the terminal. Deletes are confirmed
+twice: once by name in the terminal, once in the browser.
+
+An edit is reconciled against the live canvas rather than replacing it, so
+hand-positioned nodes keep their positions and anything the agent could not read
+is left untouched.
+
+The launcher uses `http://localhost:3000` by default. To open another Truss
+deployment, set `TRUSS_APP_URL=https://your-truss-host.example`; it must be an
+HTTP(S) origin without a path.
 
 ## Scripts
 

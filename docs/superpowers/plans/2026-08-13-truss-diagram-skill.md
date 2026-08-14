@@ -295,7 +295,7 @@ export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphV
       target: edge.target,
       label: edge.data?.label ?? "",
     });
-    const pair = `${edge.source} ${edge.target}`;
+    const pair = `${edge.source}\u0000${edge.target}`;
 
     if (
       !parsed.success ||

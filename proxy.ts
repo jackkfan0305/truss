@@ -2,6 +2,7 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
+import { AGENT_PICK_PATH } from "@/lib/agent-pick";
 
 const SIGN_IN_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
 const SIGN_UP_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL;
@@ -20,8 +21,15 @@ if (!SIGN_IN_URL || !SIGN_UP_URL) {
 // glob patterns cannot read from env anyway — a prefix check covers both.
 const AUTH_PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
 
+/**
+ * Both agent entry points carry their payload in the URL fragment, which the
+ * browser never sends. A Clerk redirect would discard it, so both must be
+ * public and both must bypass the development handshake.
+ */
+const AGENT_ENTRY_PATHS = [AGENT_LAUNCH_PATH, AGENT_PICK_PATH];
+
 export function isPublicPath(pathname: string): boolean {
-  if (pathname === AGENT_LAUNCH_PATH) {
+  if (AGENT_ENTRY_PATHS.includes(pathname)) {
     return true;
   }
 
@@ -32,13 +40,13 @@ export function isPublicPath(pathname: string): boolean {
 }
 
 /**
- * A launch payload exists only in the fragment, which browsers omit from the
- * HTTP request. Clerk's development handshake redirects document requests,
- * and a redirect would therefore discard the fragment before the client can
- * move it into tab-scoped storage.
+ * A launch/pick payload exists only in the fragment, which browsers omit
+ * from the HTTP request. Clerk's development handshake redirects document
+ * requests, and a redirect would therefore discard the fragment before the
+ * client can move it into tab-scoped storage.
  */
 export function isClerkHandshakeBypassPath(pathname: string): boolean {
-  return pathname === AGENT_LAUNCH_PATH;
+  return AGENT_ENTRY_PATHS.includes(pathname);
 }
 
 // `auth.protect()` answers a redirect, not a 401, so it cannot gate an API

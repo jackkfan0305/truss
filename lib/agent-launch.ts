@@ -77,7 +77,9 @@ const agentLaunchTransitions: Record<
   failed: ["creating-project", "importing-graph", "failed"],
 };
 
-function decodeBase64Url(value: string): string | null {
+// Exported so `lib/agent-pick.ts` can decode its own fragment contract
+// without duplicating this logic.
+export function decodeBase64Url(value: string): string | null {
   if (!BASE64URL_PATTERN.test(value)) {
     return null;
   }

@@ -53,5 +53,11 @@ next-env.d.ts
 /.claude/skills/*
 !/.agents/skills/react-doctor/
 !/.claude/skills/react-doctor/
+# truss-diagram is authored here, not fetched from upstream, so it must be
+# tracked. Its predecessor render-truss-diagram survived only because it was
+# force-added before these rules existed; a new file under an ignored path
+# would be silently left out of every commit.
+!/.agents/skills/truss-diagram/
+!/.claude/skills/truss-diagram
 
 .trigger

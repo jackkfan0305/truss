@@ -14,6 +14,13 @@ import {
   type AgentLaunchPayloadV1,
   type AgentLaunchStage,
 } from "../lib/agent-launch";
+import { parseAgentPickFragment, type AgentPickPayloadV1 } from "../lib/agent-pick";
+
+// Must precede the `../proxy` import: it stubs the env vars proxy.ts requires
+// at module load. See the file's own comment for why it is a module.
+import "./testing/clerk-env-stub.mjs";
+
+import { isClerkHandshakeBypassPath, isPublicPath } from "../proxy";
 
 const launchId = "00000000-0000-4a00-8000-000000000001";
 const payload = {
@@ -181,5 +188,83 @@ for (const [from, targets] of Object.entries(allowedTransitions) as [
     }
   }
 }
+
+// Task 6: the agent entry paths are public and bypass the Clerk handshake,
+// and nothing that merely looks similar slips through.
+assert.equal(isPublicPath("/agent/pick"), true);
+assert.equal(isClerkHandshakeBypassPath("/agent/pick"), true);
+assert.equal(isPublicPath("/agent/picky"), false);
+assert.equal(isPublicPath("/editor/abc"), false);
+assert.equal(isPublicPath("/agent/new"), true, "the launch path is still public");
+assert.equal(
+  isClerkHandshakeBypassPath("/agent/new"),
+  true,
+  "the launch path still bypasses the handshake",
+);
+
+const pickId = "00000000-0000-4a00-8000-000000000002";
+const pickNonce = "00000000-0000-4a00-8000-000000000003";
+const pickPayload = {
+  version: 1,
+  pickId,
+  op: "edit",
+  port: 51200,
+  nonce: pickNonce,
+} satisfies AgentPickPayloadV1;
+const pickFragment = Buffer.from(JSON.stringify(pickPayload)).toString("base64url");
+
+assert.deepEqual(parseAgentPickFragment(`#${pickFragment}`), pickPayload);
+assert.equal(parseAgentPickFragment(""), null, "blank fragment");
+assert.equal(parseAgentPickFragment("#"), null, "blank hash fragment");
+assert.equal(parseAgentPickFragment("#not-base64url!"), null, "non-base64url fragment");
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, extra: 1 })).toString("base64url")}`,
+  ),
+  null,
+  "rejects an unknown key",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, port: 1023 })).toString("base64url")}`,
+  ),
+  null,
+  "rejects a below-range port",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, port: 65536 })).toString("base64url")}`,
+  ),
+  null,
+  "rejects an above-range port",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, port: 1024.5 })).toString("base64url")}`,
+  ),
+  null,
+  "rejects a non-integer port",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, nonce: "not-a-uuid" })).toString("base64url")}`,
+  ),
+  null,
+  "rejects a non-UUID nonce",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, pickId: "not-a-uuid" })).toString("base64url")}`,
+  ),
+  null,
+  "rejects a non-UUID pickId",
+);
+assert.equal(
+  parseAgentPickFragment(
+    `#${Buffer.from(JSON.stringify({ ...pickPayload, op: "rename" })).toString("base64url")}`,
+  ),
+  null,
+  "rejects an unknown op",
+);
 
 console.info("Agent launch contract checks passed");

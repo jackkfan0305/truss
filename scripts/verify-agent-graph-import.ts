@@ -92,6 +92,20 @@ function createDependencies(
             flowWrites.push(...edges.map((edge) => `edge:${edge.id}`));
             canvas.edges = [...canvas.edges, ...edges];
           },
+          // The import path only ever adds; these satisfy the shared
+          // `AgentCanvasFlow` shape and must never be called here.
+          updateNode: () => {
+            throw new Error("import path must not update nodes");
+          },
+          updateEdge: () => {
+            throw new Error("import path must not update edges");
+          },
+          removeNodes: () => {
+            throw new Error("import path must not remove nodes");
+          },
+          removeEdges: () => {
+            throw new Error("import path must not remove edges");
+          },
         };
 
         await callback(flow);

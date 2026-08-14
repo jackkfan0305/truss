@@ -3,35 +3,16 @@ import {
   materializeAgentGraph,
   parseAgentGraph,
 } from "@/lib/agent-graph";
-import { isAgentLaunchId } from "@/lib/agent-launch";
 import {
-  drawPacedCanvasActions,
-  type CanvasDrawingDependencies,
-  type PacedCanvasAction,
-} from "@/lib/canvas-drawing";
+  drawNodesThenEdges,
+  type AgentCanvasWriteDependencies,
+} from "@/lib/agent-canvas-write";
+import { isAgentLaunchId } from "@/lib/agent-launch";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
-import type { Authorization } from "@/lib/project-access";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
-interface AgentGraphImportFlow {
-  readonly nodes: readonly CanvasNode[];
-  readonly edges: readonly CanvasEdge[];
-  addNodes(nodes: CanvasNode[]): void;
-  addEdges(edges: CanvasEdge[]): void;
-}
-
-export interface AgentGraphImportDependencies extends CanvasDrawingDependencies {
-  authorizeProject: (
-    projectId: string,
-    options: { requireOwner: true },
-  ) => Promise<Authorization>;
-  mutateFlow: (
-    projectId: string,
-    callback: (flow: AgentGraphImportFlow) => void | Promise<void>,
-  ) => Promise<void>;
-  saveCanvasSnapshot: (projectId: string, snapshot: CanvasSnapshot) => Promise<unknown>;
-}
+export type AgentGraphImportDependencies = AgentCanvasWriteDependencies;
 
 type ImportDecision = "empty" | "exact" | "resume" | "conflict";
 
@@ -170,26 +151,18 @@ export async function handleAgentGraphImportPost(
         existingSnapshot.nodes.length === 0 && existingSnapshot.edges.length === 0
           ? "empty"
           : "resume";
-      const requestedNodes = new Map(
-        requestedSnapshot.nodes.map((node) => [node.id, node]),
+      const requestedPositions = new Map(
+        requestedSnapshot.nodes.map((node) => [node.id, node.position]),
       );
 
-      const actions: PacedCanvasAction<AgentGraphImportFlow>[] = [
-        ...missingItems.nodes.map((node) => ({
-          target: () => node.position,
-          apply: (target: AgentGraphImportFlow) => {
-            target.addNodes([node]);
-          },
-        })),
-        ...missingItems.edges.map((edge) => ({
-          target: () => requestedNodes.get(edge.target)?.position ?? null,
-          apply: (target: AgentGraphImportFlow) => {
-            target.addEdges([edge]);
-          },
-        })),
-      ];
-
-      await drawPacedCanvasActions(projectId, flow, actions, dependencies);
+      await drawNodesThenEdges(
+        projectId,
+        flow,
+        missingItems.nodes,
+        missingItems.edges,
+        requestedPositions,
+        dependencies,
+      );
     });
   } catch {
     return jsonError("Could not import the graph", 502);

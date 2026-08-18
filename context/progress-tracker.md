@@ -8,6 +8,48 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `headless-agent-edit` complete. `truss:diagram --op edit` no longer opens a
+  browser. A one-time `gh auth login`-style flow (`--op login`, or triggered
+  inline on first edit) opens `/agent/link`, mints a long-lived `trs_agent_…`
+  token through the new owner-scoped `POST /api/agent/tokens`, and caches it at
+  `~/.truss/credentials.json` (dir 0700, file 0600, written via temp+rename so
+  an existing wider mode cannot survive a rewrite and a crash mid-write cannot
+  truncate it). Every later edit calls `/api/projects`, `agent-graph`, and
+  `agent-graph-edit` directly with `Authorization: Bearer`.
+  - Auth resolves at one chokepoint, `lib/agent-identity.ts`. It splits into a
+    cheap `resolveIdentitySource` (no Clerk call) and a lazy
+    `resolveIdentityEmail`, preserving `authorizeProject`'s existing
+    "only now is the email worth a second Clerk call" laziness for bearer
+    callers too — the owner-only path both agent-graph routes take stays one DB
+    lookup. `authorizeProject` gained `request` as its first argument; routes
+    wrap it in a request-scoped closure so every `*-server.ts` module and its
+    verifier needed no change.
+  - A *present but invalid* Authorization header resolves to `null` rather than
+    falling through to the session cookie, so a bad bearer token fails loudly
+    instead of riding a legitimate session. `POST /api/agent/tokens` rejects any
+    Authorization header before calling `auth()`, so a token can never mint
+    another. Tokens are stored only as SHA-256; plaintext is returned once and
+    never persisted, logged, or written to sessionStorage/DOM by the link page.
+  - `/agent/link` reuses `/agent/pick`'s full fragment hardening, including the
+    pre-hydration bootstrap in `lib/agent-launch-bootstrap*.ts` that copies the
+    fragment to tab-scoped storage before Clerk's client bundle can redirect.
+  - The hallucinated-`projectId` guard that `lib/agent-pick-browser.ts` owned
+    moved into the CLI: only an ID returned by the `projects` event is trusted.
+    The 409-retry-once-from-a-fresh-read behaviour moved with it. The stdout
+    event protocol is unchanged except a new `editorUrl` on edit's `done` and a
+    `linked` event for login.
+  - Create and delete are unchanged: create still opens `/agent/new`, delete
+    still opens `/agent/pick` for its in-app confirm dialog. **Follow-up: unify
+    create with edit so both run headless off the same token.**
+  - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`,
+    `npm run verify:integration`, and `npm run build` all exit 0. New verifiers:
+    `verify-agent-token.ts` (integration, DB-backed), `verify-agent-link-page.tsx`,
+    `verify-truss-diagram-cli-auth.mjs`.
+  - Not yet done: no revocation UI — revoking means deleting the `AgentToken`
+    row, after which the CLI 401s, clears its cache, and re-links. No live
+    authenticated end-to-end run; the dev Clerk instance's interactive sign-in
+    still blocks automation, same limitation recorded for earlier tasks.
+
 - `caller-generated-diagram-skill` Task 5 complete. The new owner-only graph
   import route authorizes before reading JSON, strictly validates the opaque
   launch ID and compact graph, and uses one paced Liveblocks `mutateFlow` to

@@ -2,6 +2,7 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
+import { AGENT_LINK_PATH } from "@/lib/agent-link";
 import { AGENT_PICK_PATH } from "@/lib/agent-pick";
 
 const SIGN_IN_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
@@ -22,11 +23,11 @@ if (!SIGN_IN_URL || !SIGN_UP_URL) {
 const AUTH_PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
 
 /**
- * Both agent entry points carry their payload in the URL fragment, which the
- * browser never sends. A Clerk redirect would discard it, so both must be
- * public and both must bypass the development handshake.
+ * All three agent entry points carry their payload in the URL fragment,
+ * which the browser never sends. A Clerk redirect would discard it, so all
+ * three must be public and all three must bypass the development handshake.
  */
-const AGENT_ENTRY_PATHS = [AGENT_LAUNCH_PATH, AGENT_PICK_PATH];
+const AGENT_ENTRY_PATHS = [AGENT_LAUNCH_PATH, AGENT_PICK_PATH, AGENT_LINK_PATH];
 
 export function isPublicPath(pathname: string): boolean {
   if (AGENT_ENTRY_PATHS.includes(pathname)) {

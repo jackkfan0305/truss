@@ -2,10 +2,12 @@ import {
   AGENT_LAUNCH_PATH,
   MAX_AGENT_LAUNCH_FRAGMENT_LENGTH,
 } from "@/lib/agent-launch";
+import { AGENT_LINK_PATH, MAX_AGENT_LINK_FRAGMENT_LENGTH } from "@/lib/agent-link";
 import { AGENT_PICK_PATH, MAX_AGENT_PICK_FRAGMENT_LENGTH } from "@/lib/agent-pick";
 
 export const AGENT_LAUNCH_PENDING_FRAGMENT_KEY = "truss.agent-launch.pending-fragment";
 export const AGENT_PICK_PENDING_FRAGMENT_KEY = "truss.agent-pick.pending-fragment";
+export const AGENT_LINK_PENDING_FRAGMENT_KEY = "truss.agent-link.pending-fragment";
 
 /**
  * Each agent entry path and the bounded fragment it may retain.
@@ -26,6 +28,11 @@ const AGENT_ENTRY_BOOTSTRAPS = [
     key: AGENT_PICK_PENDING_FRAGMENT_KEY,
     max: MAX_AGENT_PICK_FRAGMENT_LENGTH,
   },
+  {
+    path: AGENT_LINK_PATH,
+    key: AGENT_LINK_PENDING_FRAGMENT_KEY,
+    max: MAX_AGENT_LINK_FRAGMENT_LENGTH,
+  },
 ] as const;
 
 export function agentEntryPendingFragmentKey(pathname: string): string | null {
@@ -39,9 +46,10 @@ export function agentEntryPendingFragmentKey(pathname: string): string | null {
  * so the browser must retain a validated copy before any auth redirect can
  * replace the document URL.
  *
- * Covers both entry paths. `/agent/pick` needs this exactly as much as
- * `/agent/new` does: its callers are usually signed out, which is precisely the
- * case where Clerk redirects the document and takes the fragment with it.
+ * Covers all three entry paths. `/agent/pick` and `/agent/link` need this
+ * exactly as much as `/agent/new` does: their callers are usually signed
+ * out, which is precisely the case where Clerk redirects the document and
+ * takes the fragment with it.
  */
 export function agentLaunchBootstrapScript(): string {
   const entries = JSON.stringify(

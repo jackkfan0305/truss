@@ -8,6 +8,8 @@ import {
   type AgentLaunchStorage,
 } from "@/lib/agent-launch-browser";
 import { agentEntryPendingFragmentKey } from "@/lib/agent-launch-bootstrap";
+import { AGENT_LINK_PATH } from "@/lib/agent-link";
+import { agentLinkResumePath, captureAgentLink } from "@/lib/agent-link-browser";
 import { AGENT_PICK_PATH } from "@/lib/agent-pick";
 import { agentPickResumePath, captureAgentPick } from "@/lib/agent-pick-browser";
 
@@ -93,6 +95,12 @@ export function consumePendingAgentEntry(
       const captured = captureAgentPick(fragment, null, storage, scrubFragment);
 
       return captured ? agentPickResumePath(captured.pickId) : null;
+    }
+
+    if (pathname === AGENT_LINK_PATH) {
+      const captured = captureAgentLink(fragment, null, storage, scrubFragment);
+
+      return captured ? agentLinkResumePath(captured.linkId) : null;
     }
 
     return null;

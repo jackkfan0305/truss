@@ -51,6 +51,7 @@ import {
   CANVAS_NODE_TYPE,
   CONNECTION_SNAP_RADIUS,
   DEFAULT_NODE_COLOR,
+  MIN_ZOOM,
   NODE_DEFAULT_SIZES,
   VIEWPORT_TRANSITION_MS,
   type CanvasEdge,
@@ -381,6 +382,7 @@ function CanvasFlow({
         // <body> instead. Nodes are still individually tab-reachable.
         tabIndex={-1}
         fitView
+        minZoom={MIN_ZOOM}
         proOptions={{ hideAttribution: true }}
         // Themes React Flow's remaining chrome (the minimap) to match the dark
         // workspace without restyling its internals.

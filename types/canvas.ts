@@ -109,6 +109,13 @@ export const CONNECTION_SNAP_RADIUS = 90;
 export const VIEWPORT_TRANSITION_MS = 200;
 
 /**
+ * How far the canvas may zoom out. React Flow's default floor (0.5) cuts off
+ * well before a large diagram fits on screen, so `fitView` on a wide graph
+ * stops short with nodes still outside the viewport.
+ */
+export const MIN_ZOOM = 0.05;
+
+/**
  * Declared as a `type`, not an `interface`: React Flow constrains node data to
  * `Record<string, unknown>`, and only type aliases get the implicit index
  * signature that satisfies it.

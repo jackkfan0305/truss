@@ -22,12 +22,12 @@ interface RouteParams {
  * canvas it was written from, so a collaborator can read it back.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId, specId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;

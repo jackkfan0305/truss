@@ -28,12 +28,12 @@ const MAX_SPECS = 50;
  * canvas a spec is written from, so a collaborator can see the specs.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;

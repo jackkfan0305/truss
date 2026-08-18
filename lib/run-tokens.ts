@@ -53,7 +53,7 @@ export async function issueRunToken(request: Request): Promise<Response> {
   // Run ownership is necessary but not permanent access. Recheck the project
   // so a removed collaborator cannot mint a fresh stream token from an old
   // TaskRun record.
-  const projectAccess = await authorizeProject(taskRun.projectId, {
+  const projectAccess = await authorizeProject(request, taskRun.projectId, {
     requireOwner: false,
   });
 

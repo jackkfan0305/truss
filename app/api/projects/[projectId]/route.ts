@@ -16,11 +16,11 @@ interface RouteParams {
 // 09-share-dialog once the collaborator routes needed it too.
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
-  const access = await authorizeProject(projectId, { requireOwner: true });
+  const access = await authorizeProject(request, projectId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;
@@ -42,7 +42,7 @@ export async function PATCH(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: true });
+  const access = await authorizeProject(request, projectId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;
@@ -63,12 +63,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, {
+  const access = await authorizeProject(request, projectId, {
     requireOwner: true,
     allowDeletionStates: true,
   });

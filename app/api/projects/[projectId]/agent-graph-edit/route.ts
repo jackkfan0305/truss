@@ -18,8 +18,11 @@ interface RouteParams {
 // literal here while the shared constant remains available to the verifier.
 export const maxDuration = 120;
 
-const dependencies: AgentGraphEditDependencies = {
-  authorizeProject,
+// Everything but `authorizeProject` is request-independent, so it is built
+// once at module scope as before. `authorizeProject` closes over the request
+// per call below — it cannot be part of this shared object since it needs a
+// different `request` on every invocation.
+const sharedDependencies: Omit<AgentGraphEditDependencies, "authorizeProject"> = {
   mutateFlow: async (projectId, callback) => {
     await mutateFlow<CanvasNode, CanvasEdge>(
       { client: getLiveblocks(), roomId: projectId },
@@ -40,5 +43,10 @@ export async function POST(
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
+  const dependencies: AgentGraphEditDependencies = {
+    ...sharedDependencies,
+    authorizeProject: (id, options) => authorizeProject(request, id, options),
+  };
+
   return handleAgentGraphEditPost(request, projectId, dependencies);
 }

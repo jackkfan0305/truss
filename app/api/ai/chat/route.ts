@@ -22,7 +22,7 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError("A projectId and message are required", 400);
   }
 
-  const access = await authorizeProject(chatRequest.projectId, {
+  const access = await authorizeProject(request, chatRequest.projectId, {
     requireOwner: false,
   });
 

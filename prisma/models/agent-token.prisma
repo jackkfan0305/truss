@@ -1,0 +1,26 @@
+/// A long-lived bearer credential for headless agent runs (the CLI, not a
+/// browser tab). Minted by `POST /api/agent/tokens` under the owner's Clerk
+/// session, then sent back as `Authorization: Bearer trs_agent_...` so the
+/// same owner identity resolves without a cookie.
+///
+/// Only the hash is stored — the plaintext is returned once at mint time and
+/// never persisted, matching the "never log or persist plaintext tokens" rule
+/// in the shared agent-auth contract.
+model AgentToken {
+  id String @id @default(cuid())
+
+  ownerId String
+
+  /// SHA-256 hex digest of the full plaintext token (prefix included). Unique
+  /// so `resolveIdentity` looks a bearer token up with a single indexed read.
+  tokenHash String @unique
+
+  label String
+
+  createdAt  DateTime  @default(now())
+  /// Stamped on successful resolution. A stamp failure must not fail the
+  /// request it authorized, so this is best-effort and may lag reality.
+  lastUsedAt DateTime?
+
+  @@index([ownerId])
+}

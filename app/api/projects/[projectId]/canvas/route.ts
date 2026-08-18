@@ -40,7 +40,7 @@ export async function PUT(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;
@@ -70,12 +70,12 @@ export async function PUT(
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;

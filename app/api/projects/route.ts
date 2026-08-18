@@ -1,6 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
-
 import { Prisma } from "@/generated/prisma/client";
+import { resolveIdentitySource } from "@/lib/agent-identity";
 import { prisma } from "@/lib/prisma";
 import {
   DEFAULT_PROJECT_NAME,
@@ -15,16 +14,19 @@ const UNIQUE_VIOLATION = "P2002";
 // Auth is enforced here rather than in proxy.ts so unauthenticated API calls
 // get a JSON 401 instead of a redirect to the sign-in page.
 
-export async function GET(): Promise<Response> {
-  const { userId } = await auth();
+// Bearer-accepting (agent-auth contract): resolving just the userId is all a
+// list-my-projects query ever needed, cheap or not, so this reuses the same
+// no-Clerk-call identity step `authorizeProject` uses for its owner path.
+export async function GET(request: Request): Promise<Response> {
+  const identitySource = await resolveIdentitySource(request);
 
-  if (!userId) {
+  if (!identitySource) {
     return jsonError("Unauthorized", 401);
   }
 
   const projects = await prisma.project.findMany({
     where: {
-      ownerId: userId,
+      ownerId: identitySource.userId,
       status: { notIn: ["DELETING", "DELETED"] },
     },
     orderBy: { createdAt: "desc" },
@@ -33,12 +35,18 @@ export async function GET(): Promise<Response> {
   return Response.json({ projects });
 }
 
+// Bearer-accepting for the same reason GET is: a headless create needs to make
+// the project before it can import a graph into it, and it authenticates with
+// the same agent token. Minting a token is the one route that stays
+// cookie-only (app/api/agent/tokens/route.ts).
 export async function POST(request: Request): Promise<Response> {
-  const { userId } = await auth();
+  const identitySource = await resolveIdentitySource(request);
 
-  if (!userId) {
+  if (!identitySource) {
     return jsonError("Unauthorized", 401);
   }
+
+  const userId = identitySource.userId;
 
   const body = await readJsonBody(request);
   const name = parseProjectName(body, DEFAULT_PROJECT_NAME);

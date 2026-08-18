@@ -12,12 +12,12 @@ interface RouteParams {
  * 404 — there is no path here that can strip a project of its owner.
  */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId, memberId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: true });
+  const access = await authorizeProject(request, projectId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;

@@ -2,7 +2,7 @@
 
 Edit and delete resolve their target from the user's own Truss project list instead of taking a title up front. Both run `scripts/truss-diagram.mjs --op <edit|delete>` (optionally with `--base-url <origin>`, using the same resolution and origin preflight as create — see [SKILL.md](../SKILL.md) steps 6–8) from this skill directory, with no `--stdin-json` payload. The script prints one JSON object per line to stdout and reads one JSON object per line from stdin. Treat every line as a protocol event; never inspect, print, or reconstruct the script's own argv, its nonce, the agent token, or the `/agent/pick` and `/agent/link` URL fragments.
 
-**Edit runs headless.** It authenticates with a cached agent token and calls the Truss API directly — no browser tab, no window stealing focus. Delete still opens a tab, because its final confirmation is an in-app dialog.
+**Edit runs headless**, exactly like create: it authenticates with a cached agent token and calls the Truss API directly — no browser tab, no window stealing focus. Delete still opens a tab, because its final confirmation is an in-app dialog.
 
 ## Dispatch
 
@@ -10,12 +10,9 @@ Verb mapping lives in [SKILL.md](../SKILL.md#dispatch): create/draw/render → c
 
 ## Authentication
 
-The first run on a given origin has no cached credential. The script then opens `<origin>/agent/link` once, the user signs in if needed, and Truss mints a long-lived agent token that the script stores at `~/.truss/credentials.json` (mode 0600). Every run after that is silent.
+Shared with create, and described in [SKILL.md](../SKILL.md#authentication): the first run against an origin opens `/agent/link` once to sign in, then caches an agent token. Everything after that is silent.
 
-- **Announce that one tab.** Before the first edit against an origin, tell the user: "linking Truss to this agent — a browser tab will open once so you can sign in." An unannounced tab reads as unexpected.
-- The script also prints the link URL on its own line, before any JSON event, so a user on SSH or a headless box can paste it into a browser themselves. Pass that line through verbatim when the browser does not open on its own.
-- `--op login` runs the link flow on its own, without editing anything. Use it when the user asks to sign in or re-link, and after a revoked token.
-- Never print, log, or echo the token itself. It never appears in the protocol events; the script stores it and moves on.
+The project list is cached alongside that token, so resolving "which diagram did they mean" usually costs no round trip. The cache is refreshed whenever it is older than five minutes, and it is never the last word: an ID that misses the cache triggers one fresh read before the script will tell the user a project does not exist, so a diagram created since the last run resolves normally.
 
 ## Announce the tab (delete only)
 
@@ -29,7 +26,7 @@ Start the process, then read stdout line by line. The first JSON line is:
 {"event":"projects","projects":[{"id":"…","name":"…"}, …]}
 ```
 
-For a first-ever edit, the link URL line and the sign-in round trip happen *before* this event arrives, so it can take as long as the user takes to sign in.
+For a first-ever run, the link URL line and the sign-in round trip happen *before* this event arrives, so it can take as long as the user takes to sign in. Afterwards this event usually comes straight from the local cache.
 
 Resolve which project the user means:
 

@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Headless `--op edit`/`--op login` — no browser tab. Covers:
 //   - ~/.truss/credentials.json: mode, malformed-file handling
@@ -95,6 +103,69 @@ function createStubServer(routes) {
       });
     });
   });
+}
+
+// The queue-based stub above needs every route known up front, but a headless
+// create only learns its room ID from the request it is making. This variant
+// takes one handler and answers whatever it returns, so a test can key a route
+// off an ID the CLI generated.
+function createStubServerDynamic(handler) {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+    let bodyJson = null;
+    try {
+      bodyJson = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      bodyJson = null;
+    }
+
+    const url = new URL(req.url, "http://127.0.0.1");
+    const answer = handler(req.method, url.pathname, {
+      headers: req.headers,
+      body: bodyJson,
+    });
+
+    if (!answer) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `no stub route for ${req.method} ${url.pathname}` }));
+      return;
+    }
+
+    res.writeHead(answer.status, { "content-type": "application/json" });
+    res.end(JSON.stringify(answer.body));
+  });
+
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      resolve({
+        origin: `http://127.0.0.1:${port}`,
+        close: () => new Promise((resolveClose) => server.close(resolveClose)),
+      });
+    });
+  });
+}
+
+function seedCredentialWithProjects(homeDir, origin, token, projects, fetchedAt) {
+  const dir = join(homeDir, ".truss");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    join(dir, "credentials.json"),
+    JSON.stringify({
+      version: 1,
+      origins: {
+        [origin]: {
+          token,
+          createdAt: new Date().toISOString(),
+          projects,
+          projectsFetchedAt: fetchedAt,
+        },
+      },
+    }),
+    { mode: 0o600 },
+  );
 }
 
 function spawnCli(args, homeDir) {
@@ -569,5 +640,342 @@ async function performBrowserLinkCallback(cli, allowedOrigin, tokenToSend) {
   await stub.close();
   rmSync(homeDir, { recursive: true, force: true });
 }
+
+
+// ---------------------------------------------------------------- headless create
+
+const GRAPH = {
+  version: 1,
+  nodes: [{ id: "api", label: "API", shape: "rectangle", color: "blue", x: 0, y: 0 }],
+  edges: [],
+};
+
+async function checkHeadlessCreateMakesProjectThenImports() {
+  const home = tempHome();
+  const token = mintToken();
+  const seen = {};
+
+  const stub2 = await createStubServerDynamic((method, pathname, ctx) => {
+    if (method === "POST" && pathname === "/api/projects") {
+      seen.createAuth = ctx.headers.authorization;
+      seen.createdId = ctx.body.id;
+      seen.createdName = ctx.body.name;
+      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+    }
+    if (method === "POST" && pathname === `/api/projects/${seen.createdId}/agent-launch-import`) {
+      seen.importAuth = ctx.headers.authorization;
+      seen.importLaunchId = ctx.body.launchId;
+      seen.importGraph = ctx.body.graph;
+      return { status: 200, body: { imported: true } };
+    }
+    if (method === "GET" && pathname === "/api/projects") {
+      return { status: 200, body: { projects: [{ id: seen.createdId, name: seen.createdName }] } };
+    }
+    return null;
+  });
+  seedCredential(home, stub2.origin, token);
+
+  const cli = spawnCli(["--op", "create", "--stdin-json", "--base-url", stub2.origin], home);
+  cli.child.stdin.end(JSON.stringify({ title: "My Diagram", graph: GRAPH }));
+
+  const done = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub2.close();
+
+  assert.equal(exit, 0, "headless create should exit 0");
+  assert.equal(done.event, "done");
+  assert.equal(done.editorUrl, `${stub2.origin}/editor/${seen.createdId}`);
+  assert.equal(seen.createAuth, `Bearer ${token}`, "create must send the bearer token");
+  assert.equal(seen.importAuth, `Bearer ${token}`, "import must send the bearer token");
+  assert.equal(seen.createdName, "My Diagram");
+  assert.match(seen.createdId, /^my-diagram-[0-9a-f]{6}$/, "room id is slug+suffix");
+  assert.match(seen.importLaunchId, UUID_V4_PATTERN, "import carries a launch id");
+  assert.deepEqual(seen.importGraph, GRAPH, "the graph reaches the import route unchanged");
+  // Create must leave the cache holding the project it just made.
+  const cached = JSON.parse(
+    readFileSync(join(home, ".truss", "credentials.json"), "utf8"),
+  ).origins[stub2.origin];
+  assert.ok(
+    cached.projects.some((project) => project.id === seen.createdId),
+    "create refreshes the project cache",
+  );
+}
+
+async function checkCreateRetriesRoomIdCollision() {
+  const home = tempHome();
+  const token = mintToken();
+  const attempted = [];
+  let created = null;
+
+  const stub = await createStubServerDynamic((method, pathname, ctx) => {
+    if (method === "POST" && pathname === "/api/projects") {
+      attempted.push(ctx.body.id);
+      if (attempted.length === 1) {
+        return { status: 409, body: { error: "taken" } };
+      }
+      created = ctx.body.id;
+      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+    }
+    if (method === "POST" && pathname === `/api/projects/${created}/agent-launch-import`) {
+      return { status: 200, body: { imported: true } };
+    }
+    if (method === "GET" && pathname === "/api/projects") {
+      return { status: 200, body: { projects: [] } };
+    }
+    return null;
+  });
+  seedCredential(home, stub.origin, token);
+
+  const cli = spawnCli(["--op", "create", "--stdin-json", "--base-url", stub.origin], home);
+  cli.child.stdin.end(JSON.stringify({ title: "My Diagram", graph: GRAPH }));
+  const done = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(exit, 0, "a 409 collision should be retried, not fatal");
+  assert.equal(done.event, "done");
+  assert.equal(attempted.length, 2, "exactly one retry after the collision");
+  assert.notEqual(attempted[0], attempted[1], "the retry draws a fresh suffix");
+}
+
+async function checkCreateReportsEmptyProjectWhenImportFails() {
+  const home = tempHome();
+  const token = mintToken();
+  let created = null;
+
+  const stub = await createStubServerDynamic((method, pathname, ctx) => {
+    if (method === "POST" && pathname === "/api/projects") {
+      created = ctx.body.id;
+      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+    }
+    if (method === "POST" && pathname === `/api/projects/${created}/agent-launch-import`) {
+      return { status: 502, body: { error: "nope" } };
+    }
+    return null;
+  });
+  seedCredential(home, stub.origin, token);
+
+  const cli = spawnCli(["--op", "create", "--stdin-json", "--base-url", stub.origin], home);
+  cli.child.stdin.end(JSON.stringify({ title: "My Diagram", graph: GRAPH }));
+  const event = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(exit, 1);
+  assert.equal(event.event, "error");
+  // The project exists and is empty; the message has to say so and point at it,
+  // rather than implying nothing happened.
+  assert.match(event.message, /created but the diagram could not be drawn/);
+  assert.ok(event.message.includes(`${stub.origin}/editor/${created}`), "names the editor URL");
+}
+
+// ---------------------------------------------------------------- project cache
+
+async function checkEditServesFreshCacheWithoutRefetch() {
+  const home = tempHome();
+  const token = mintToken();
+  let projectListCalls = 0;
+
+  const stub = await createStubServerDynamic((method, pathname) => {
+    if (method === "GET" && pathname === "/api/projects") {
+      projectListCalls += 1;
+      return { status: 200, body: { projects: [{ id: "p1", name: "Cached" }] } };
+    }
+    if (method === "GET" && pathname === "/api/projects/p1/agent-graph") {
+      return {
+        status: 200,
+        body: { graph: GRAPH, opaqueNodeIds: [], opaqueEdgeIds: [], fingerprint: "f".repeat(64) },
+      };
+    }
+    if (method === "POST" && pathname === "/api/projects/p1/agent-graph-edit") {
+      return { status: 200, body: { applied: true } };
+    }
+    return null;
+  });
+
+  seedCredentialWithProjects(home, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+
+  const cli = spawnCli(["--op", "edit", "--base-url", stub.origin], home);
+  const projects = await cli.nextEvent();
+  assert.equal(projects.event, "projects");
+  assert.deepEqual(projects.projects, [{ id: "p1", name: "Cached" }]);
+  assert.equal(projectListCalls, 0, "a fresh cache must not hit the network");
+
+  cli.writeLine({ projectId: "p1" });
+  await cli.nextEvent();
+  cli.writeLine({ desiredGraph: GRAPH });
+  const done = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(done.event, "done");
+  assert.equal(exit, 0);
+}
+
+async function checkEditRefetchesStaleCache() {
+  const home = tempHome();
+  const token = mintToken();
+  let projectListCalls = 0;
+
+  const stub = await createStubServerDynamic((method, pathname) => {
+    if (method === "GET" && pathname === "/api/projects") {
+      projectListCalls += 1;
+      return { status: 200, body: { projects: [{ id: "p2", name: "Fresh" }] } };
+    }
+    return null;
+  });
+
+  // Older than the 5-minute TTL.
+  seedCredentialWithProjects(
+    home,
+    stub.origin,
+    token,
+    [{ id: "p1", name: "Stale" }],
+    Date.now() - 600_000,
+  );
+
+  const cli = spawnCli(["--op", "edit", "--base-url", stub.origin], home);
+  const projects = await cli.nextEvent();
+  cli.child.kill();
+  await stub.close();
+
+  assert.equal(projectListCalls, 1, "a stale cache must refetch");
+  assert.deepEqual(projects.projects, [{ id: "p2", name: "Fresh" }], "serves the fresh list");
+}
+
+async function checkCacheMissRefetchesBeforeRejecting() {
+  const home = tempHome();
+  const token = mintToken();
+  let projectListCalls = 0;
+
+  const stub = await createStubServerDynamic((method, pathname) => {
+    if (method === "GET" && pathname === "/api/projects") {
+      projectListCalls += 1;
+      // The project was created after the cache was written.
+      return {
+        status: 200,
+        body: { projects: [{ id: "p1", name: "Cached" }, { id: "new", name: "Brand New" }] },
+      };
+    }
+    if (method === "GET" && pathname === "/api/projects/new/agent-graph") {
+      return {
+        status: 200,
+        body: { graph: GRAPH, opaqueNodeIds: [], opaqueEdgeIds: [], fingerprint: "a".repeat(64) },
+      };
+    }
+    if (method === "POST" && pathname === "/api/projects/new/agent-graph-edit") {
+      return { status: 200, body: { applied: true } };
+    }
+    return null;
+  });
+
+  seedCredentialWithProjects(home, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+
+  const cli = spawnCli(["--op", "edit", "--base-url", stub.origin], home);
+  await cli.nextEvent();
+  cli.writeLine({ projectId: "new" });
+
+  const graph = await cli.nextEvent();
+  assert.equal(graph.event, "graph", "a cache miss refetches instead of rejecting outright");
+  assert.equal(projectListCalls, 1, "exactly one forced refetch");
+
+  cli.writeLine({ desiredGraph: GRAPH });
+  const done = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(done.event, "done");
+  assert.equal(exit, 0);
+}
+
+async function checkUnknownProjectStillRejectedAfterRefetch() {
+  const home = tempHome();
+  const token = mintToken();
+
+  const stub = await createStubServerDynamic((method, pathname) => {
+    if (method === "GET" && pathname === "/api/projects") {
+      return { status: 200, body: { projects: [{ id: "p1", name: "Cached" }] } };
+    }
+    return null;
+  });
+
+  seedCredentialWithProjects(home, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+
+  const cli = spawnCli(["--op", "edit", "--base-url", stub.origin], home);
+  await cli.nextEvent();
+  cli.writeLine({ projectId: "ghost" });
+  const event = await cli.nextEvent();
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(event.event, "error");
+  assert.match(event.message, /don't recognize/);
+  assert.equal(exit, 1, "a genuinely unknown id still fails after the refetch");
+}
+
+async function checkLoginPrimesProjectCache() {
+  const home = tempHome();
+  const token = mintToken();
+
+  const stub = await createStubServerDynamic((method, pathname, ctx) => {
+    if (method === "GET" && pathname === "/api/projects") {
+      assert.equal(ctx.headers.authorization, `Bearer ${token}`);
+      return { status: 200, body: { projects: [{ id: "p1", name: "Primed" }] } };
+    }
+    return null;
+  });
+
+  const cli = spawnCli(["--op", "login", "--base-url", stub.origin], home);
+  await performBrowserLinkCallback(cli, stub.origin, token);
+
+  const linked = await cli.nextEvent();
+  assert.equal(linked.event, "linked");
+  const projects = await cli.nextEvent();
+  assert.equal(projects.event, "projects", "login emits the primed list");
+  assert.deepEqual(projects.projects, [{ id: "p1", name: "Primed" }]);
+  const done = await cli.nextEvent();
+  assert.equal(done.event, "done");
+  const exit = await cli.waitExit();
+  await stub.close();
+
+  assert.equal(exit, 0);
+  const stored = JSON.parse(readFileSync(join(home, ".truss", "credentials.json"), "utf8"));
+  assert.deepEqual(
+    stored.origins[stub.origin].projects,
+    [{ id: "p1", name: "Primed" }],
+    "login writes the cache to disk",
+  );
+  assert.equal(typeof stored.origins[stub.origin].projectsFetchedAt, "number");
+}
+
+async function checkClearingCredentialDropsCachedProjects() {
+  const { clearCredential, readProjects, writeCredential, writeProjects } = await import(
+    pathToFileURL(join(dirname(SKILL_SCRIPT), "credentials.mjs")).href
+  );
+  const home = tempHome();
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    // A re-link can be a different user; a surviving list would resolve names
+    // against the previous account's projects.
+    await writeCredential("http://example.test", mintToken());
+    await writeProjects("http://example.test", [{ id: "p1", name: "Theirs" }]);
+    assert.ok(await readProjects("http://example.test"));
+    await clearCredential("http://example.test");
+    assert.equal(await readProjects("http://example.test"), null);
+  } finally {
+    process.env.HOME = previousHome;
+  }
+}
+
+await checkHeadlessCreateMakesProjectThenImports();
+await checkCreateRetriesRoomIdCollision();
+await checkCreateReportsEmptyProjectWhenImportFails();
+await checkEditServesFreshCacheWithoutRefetch();
+await checkEditRefetchesStaleCache();
+await checkCacheMissRefetchesBeforeRejecting();
+await checkUnknownProjectStillRejectedAfterRefetch();
+await checkLoginPrimesProjectCache();
+await checkClearingCredentialDropsCachedProjects();
 
 console.log("verify-truss-diagram-cli-auth: ok");

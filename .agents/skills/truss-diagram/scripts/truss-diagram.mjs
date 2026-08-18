@@ -2,7 +2,13 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
-import { clearCredential, readCredential, writeCredential } from "./credentials.mjs";
+import {
+  clearCredential,
+  readCredential,
+  readProjects,
+  writeCredential,
+  writeProjects,
+} from "./credentials.mjs";
 import { startLoopback } from "./loopback.mjs";
 
 const MAX_TITLE_LENGTH = 120;
@@ -24,6 +30,14 @@ const GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // contract. 32 bytes encodes to exactly 43 base64url characters.
 const AGENT_TOKEN_PATTERN = /^trs_agent_[A-Za-z0-9_-]{43}$/;
 const MAX_EDIT_ATTEMPTS = 2;
+// How long a cached project list may answer a resolution before it is
+// refetched. Short: the cache exists to skip a round trip, not to be a source
+// of truth, and a stale miss costs the user a wrong answer about their own
+// library.
+const PROJECTS_CACHE_TTL_MS = 300_000;
+const MAX_SLUG_LENGTH = 60;
+const ROOM_ID_SUFFIX_LENGTH = 6;
+const MAX_ROOM_ID_ATTEMPTS = 3;
 const OPS = new Set(["create", "edit", "delete", "login"]);
 const SHAPES = new Set([
   "rectangle",
@@ -436,6 +450,21 @@ async function runLoginOp(options) {
     const token = await performLink(baseUrl);
     await writeCredential(baseUrl, token);
     emitEvent({ event: "linked" });
+
+    // Prime the project cache while we are already authenticated, so the next
+    // edit resolves a name without a round trip. A failure here is not fatal:
+    // the cache is an optimisation, and the next run refetches anyway.
+    try {
+      const { projects } = await loadProjects(
+        baseUrl,
+        createAuthedFetcher(baseUrl, token),
+        { force: true },
+      );
+      emitEvent({ event: "projects", projects });
+    } catch {
+      // Left uncached deliberately.
+    }
+
     emitEvent({ event: "done" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to link Truss.";
@@ -513,6 +542,148 @@ function postGraphEdit(baseUrl, projectId, token, fingerprint, graph) {
   );
 }
 
+// Mirrors lib/room-id.ts. The project ID doubles as the /editor/[roomId]
+// segment and the Liveblocks room ID, so a headless create has to build the
+// same readable `<slug>-<suffix>` the create dialog does rather than let the
+// schema's cuid() default produce an opaque one.
+export function slugifyTitle(name) {
+  return name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function buildRoomId(name, suffix) {
+  const slug = slugifyTitle(name).slice(0, MAX_SLUG_LENGTH).replace(/-+$/, "");
+  return slug && suffix ? `${slug}-${suffix}` : "";
+}
+
+function createRoomIdSuffix() {
+  return randomUUID().replace(/-/g, "").slice(0, ROOM_ID_SUFFIX_LENGTH);
+}
+
+function postProject(baseUrl, token, id, name) {
+  return fetchJson(`${baseUrl}/api/projects`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ id, name }),
+  });
+}
+
+function postGraphImport(baseUrl, projectId, token, launchId, graph) {
+  return fetchJson(
+    `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/agent-launch-import`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ launchId, graph }),
+    },
+  );
+}
+
+/**
+ * Serves the project list from the link-time cache when it is fresh enough,
+ * and refetches otherwise. `force` skips the cache outright — used to
+ * re-check before rejecting an ID the agent chose, so a project created since
+ * the cache was written is never reported as nonexistent.
+ */
+async function loadProjects(baseUrl, auth, { force = false } = {}) {
+  if (!force) {
+    const cached = await readProjects(baseUrl);
+    if (cached && Date.now() - cached.fetchedAt < PROJECTS_CACHE_TTL_MS) {
+      return { projects: cached.projects, fromCache: true };
+    }
+  }
+
+  const result = await auth.call((token) => fetchProjects(baseUrl, token));
+  if (result.status !== 200) {
+    throw new Error("We couldn't read your projects. Please try again.");
+  }
+
+  const projects = Array.isArray(result.body?.projects)
+    ? result.body.projects
+        .filter((project) => typeof project?.id === "string" && typeof project?.name === "string")
+        .map((project) => ({ id: project.id, name: project.name }))
+    : [];
+
+  await writeProjects(baseUrl, projects);
+  return { projects, fromCache: false };
+}
+
+// Headless create: make the project, then import the graph into it. Replaces
+// the /agent/new tab, whose only real job was holding a session — the editor
+// it redirected to ran exactly these two calls.
+async function runHeadlessCreateOp(options, argv) {
+  try {
+    const input = parseLauncherInput(
+      argv,
+      options.stdinJson ? await readStdinJson() : undefined,
+    );
+    const baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? process.env.TRUSS_APP_URL ?? DEFAULT_BASE_URL,
+    );
+    const auth = createAuthedFetcher(baseUrl, await ensureCredential(baseUrl));
+    const launchId = randomUUID();
+
+    let projectId = "";
+    for (let attempt = 0; attempt < MAX_ROOM_ID_ATTEMPTS; attempt += 1) {
+      const candidate = buildRoomId(input.title, createRoomIdSuffix());
+      if (!candidate) {
+        throw new Error("That title has no characters a project ID can use.");
+      }
+
+      const created = await auth.call((token) =>
+        postProject(baseUrl, token, candidate, input.title),
+      );
+
+      if (created.status === 201) {
+        projectId = candidate;
+        break;
+      }
+
+      // The suffix collided with an existing room. Draw a new one and retry,
+      // matching what the create dialog does on 409.
+      if (created.status !== 409) {
+        throw new Error("We couldn't create that project. Please try again.");
+      }
+    }
+
+    if (!projectId) {
+      throw new Error("We couldn't find a free project ID. Please try again.");
+    }
+
+    const imported = await auth.call((token) =>
+      postGraphImport(baseUrl, projectId, token, launchId, input.graph),
+    );
+
+    const editorUrl = `${baseUrl}/editor/${projectId}`;
+
+    if (imported.status !== 200) {
+      // The project exists but is empty. Say so with the URL rather than
+      // silently reporting success — and do not delete it, since the user may
+      // well want to keep it and draw by hand.
+      throw new Error(
+        `The project was created but the diagram could not be drawn. Open ${editorUrl} and try the edit again.`,
+      );
+    }
+
+    await loadProjects(baseUrl, auth, { force: true });
+    emitEvent({ event: "done", editorUrl });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to create the diagram.";
+    emitEvent({ event: "error", message });
+    process.exitCode = 1;
+  }
+}
+
 // Headless replacement for the old browser-driven edit: the CLI now holds
 // the agent token and calls the API directly, no tab. The stdout/stdin event
 // protocol is unchanged from the browser-relay version (see
@@ -525,32 +696,40 @@ async function runHeadlessEditOp(options) {
     );
     const auth = createAuthedFetcher(baseUrl, await ensureCredential(baseUrl));
 
-    const projectsResult = await auth.call((token) => fetchProjects(baseUrl, token));
-    if (projectsResult.status !== 200) {
-      throw new Error("We couldn't read your projects. Please try again.");
-    }
-    const projects = Array.isArray(projectsResult.body?.projects)
-      ? projectsResult.body.projects
-      : [];
+    let { projects, fromCache } = await loadProjects(baseUrl, auth);
     emitEvent({ event: "projects", projects });
 
     const { projectId } = await lineReader.nextJson();
     // The browser used to be the only thing standing between a hallucinated
     // projectId and the delete/edit APIs (see the comment on
     // runAgentPickOperation in lib/agent-pick-browser.ts). That guarantee
-    // moves here: only an id this process actually listed above is trusted.
-    const matchedProject =
+    // moves here: only an id this process actually listed is trusted.
+    let matchedProject =
       typeof projectId === "string"
-        ? projects.find((project) => project?.id === projectId)
+        ? projects.find((project) => project.id === projectId)
         : undefined;
+
+    // A miss against the cache is not proof the project is gone: it may have
+    // been created since the cache was written. Pay for one fresh read before
+    // telling the user their own diagram does not exist.
+    if (!matchedProject && fromCache && typeof projectId === "string") {
+      ({ projects } = await loadProjects(baseUrl, auth, { force: true }));
+      matchedProject = projects.find((project) => project.id === projectId);
+    }
+
     if (!matchedProject) {
       throw new Error("The agent chose a project we don't recognize.");
     }
 
-    let graphResult = await auth.call((token) =>
+    const graphResult = await auth.call((token) =>
       fetchGraph(baseUrl, matchedProject.id, token),
     );
     if (graphResult.status !== 200) {
+      // The cache can name a project a collaborator has since deleted. Drop it
+      // so the next run does not offer the same dead entry again.
+      if (graphResult.status === 404 && fromCache) {
+        await loadProjects(baseUrl, auth, { force: true });
+      }
       throw new Error("We couldn't read this diagram. Please try again.");
     }
     emitEvent({
@@ -657,26 +836,7 @@ async function main() {
     return;
   }
 
-  try {
-    const input = parseLauncherInput(
-      argv,
-      options.stdinJson ? await readStdinJson() : undefined,
-    );
-    const baseUrl = normalizeBaseUrl(
-      options.baseUrl ?? process.env.TRUSS_APP_URL ?? DEFAULT_BASE_URL,
-    );
-    const launchId = randomUUID();
-    await openLaunchUrl(
-      buildLaunchUrl(input, { baseUrl, launchId }),
-      process.platform,
-    );
-    process.stdout.write(`${formatLauncherSuccess(baseUrl, launchId)}\n`);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to open Truss.";
-    process.stderr.write(`Unable to open Truss: ${message}\n`);
-    process.exitCode = 1;
-  }
+  await runHeadlessCreateOp(options, argv);
 }
 
 if (

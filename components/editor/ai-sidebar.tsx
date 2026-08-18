@@ -14,11 +14,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useAiChat } from "@/hooks/use-ai-chat"
+import { useAiPromptSubmission } from "@/hooks/use-ai-prompt-submission"
 import { useAiStatus } from "@/hooks/use-ai-status"
 import { useCollaborators } from "@/hooks/use-collaborators"
-import { useAgentRun } from "@/hooks/use-agent-run"
 import { selectLiveRunStep } from "@/lib/ai-run-turns"
+import { submitAiSidebarPrompt } from "@/lib/ai-sidebar-submission"
 import { cn } from "@/lib/utils"
 import {
   AI_DESIGN_MODELS,
@@ -47,7 +47,10 @@ const STARTER_PROMPTS = [
 ]
 
 /** Monochrome AI workspace with room chat and run-scoped activity streams. */
-export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
+export function AiSidebar({
+  isOpen,
+  useCollaboratorsSource,
+}: AiSidebarProps) {
   const [draft, setDraft] = useState("")
   const [modelId, setModelId] = useState<AiDesignModelId>(
     DEFAULT_AI_DESIGN_MODEL_ID
@@ -58,17 +61,19 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const roomId = useRoom().id
   const { message: status, isGenerating } = useAiStatus()
   const {
-    messages,
-    send,
-    error,
-    isSending,
-    canSend,
-    selfId,
-    hasOlderMessages,
-    isFetchingOlder,
-    fetchOlderMessages,
-  } = useAiChat()
-  const { start, isRunning, turns, subscription, settle } = useAgentRun(roomId)
+    chat: {
+      messages,
+      error,
+      isSending,
+      canSend,
+      selfId,
+      hasOlderMessages,
+      isFetchingOlder,
+      fetchOlderMessages,
+    },
+    run: { isRunning, turns, subscription, settle },
+    submit: submitPrompt,
+  } = useAiPromptSubmission(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
   /*
    * This client's own run when there is one, and the room's shared status when
@@ -81,16 +86,15 @@ export function AiSidebar({ isOpen, useCollaboratorsSource }: AiSidebarProps) {
   const liveStep =
     selectLiveRunStep(turns) ?? (isGenerating ? status?.text ?? "Working" : null)
 
-  const submit = async (text: string) => {
-    if (isComposerDisabled) return
-
-    const promptMessageId = await send(text)
-
-    if (!promptMessageId) return
-
-    setDraft("")
-    await start(text, promptMessageId, { modelId, thinkingLevel })
-  }
+  const submit = (text: string) =>
+    submitAiSidebarPrompt({
+      text,
+      isComposerDisabled,
+      modelId,
+      thinkingLevel,
+      submitPrompt,
+      clearDraft: () => setDraft(""),
+    })
 
   return (
     <aside

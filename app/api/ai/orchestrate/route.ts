@@ -22,7 +22,11 @@ import type { orchestrator } from "@/trigger/orchestrator";
  */
 export async function POST(request: Request): Promise<Response> {
   return handleOrchestratePost(request, {
-    authorizeProject,
+    // Closes over `request` so `OrchestratePostDependencies.authorizeProject`
+    // — unaware of bearer tokens — can still reach the real, request-scoped
+    // authorization gate without lib/orchestrate-route-handler.ts changing.
+    authorizeProject: (projectId, options) =>
+      authorizeProject(request, projectId, options),
     startAgentRun: (orchestrateRequest, userId) =>
       startVerifiedAgentRun(orchestrateRequest, userId, {
         readFeedMessages: (params) => getLiveblocks().getFeedMessages(params),

@@ -38,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // 401 / 404 / 403 before anything else — an outsider must not be able to
   // create a room or spend a Clerk lookup.
-  const authorization = await authorizeProject(roomId, { requireOwner: false });
+  const authorization = await authorizeProject(request, roomId, { requireOwner: false });
 
   if (!authorization.ok) {
     return authorization.response;
@@ -87,7 +87,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Authorization and room creation cross two external calls. Fence the result
   // against a concurrent deletion before returning a bearer token.
-  const finalAuthorization = await authorizeProject(roomId, {
+  const finalAuthorization = await authorizeProject(request, roomId, {
     requireOwner: false,
   });
 

@@ -1,10 +1,12 @@
-import { get, put } from "@vercel/blob";
+import { get } from "@vercel/blob";
 
 import {
-  canvasBlobPath,
   parseCanvasSnapshot,
-  serializeCanvasSnapshot,
 } from "@/lib/canvas-snapshot";
+import {
+  CanvasSnapshotUploadError,
+  saveCanvasSnapshot,
+} from "@/lib/canvas-persistence";
 import { prisma } from "@/lib/prisma";
 import { authorizeProject } from "@/lib/project-access";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
@@ -38,7 +40,7 @@ export async function PUT(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;
@@ -50,48 +52,30 @@ export async function PUT(
     return jsonError("A canvas snapshot is required", 400);
   }
 
-  let url: string;
-
   try {
-    const blob = await put(
-      canvasBlobPath(projectId),
-      serializeCanvasSnapshot(snapshot),
-      {
-        access: BLOB_ACCESS,
-        contentType: "application/json",
-        // Same pathname every save, so overwriting is the whole point — without
-        // this the second save of any project throws.
-        allowOverwrite: true,
-        addRandomSuffix: false,
-      },
-    );
+    const url = await saveCanvasSnapshot(projectId, snapshot);
 
-    url = blob.url;
+    return Response.json({
+      canvasJsonPath: url,
+      savedAt: new Date().toISOString(),
+    });
   } catch (error: unknown) {
-    console.error(`Canvas upload failed for ${projectId}`, error);
-    return jsonError("Could not save the canvas", 502);
+    if (error instanceof CanvasSnapshotUploadError) {
+      console.error(`Canvas upload failed for ${projectId}`, error);
+      return jsonError("Could not save the canvas", 502);
+    }
+
+    throw error;
   }
-
-  // Written after the upload, never before: a pointer stored ahead of the blob
-  // would advertise an artifact that does not exist.
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { canvasJsonPath: url },
-  });
-
-  return Response.json({
-    canvasJsonPath: url,
-    savedAt: new Date().toISOString(),
-  });
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;

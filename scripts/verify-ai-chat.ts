@@ -213,13 +213,29 @@ function checkChatMessagesAreValidated() {
 }
 
 function checkChatRequestsAreValidated() {
+  const launchId = "00000000-0000-4000-8000-000000000001";
+
   assert.deepEqual(
-    parseAiChatRequest({ projectId: "project-1", content: "  hello  " }),
-    { projectId: "project-1", content: "hello" }
+    parseAiChatRequest({ projectId: "project-1", content: "  hello  ", launchId }),
+    { projectId: "project-1", content: "hello", launchId }
+  );
+  assert.deepEqual(
+    parseAiChatRequest({ projectId: "project-1", content: "hello" }),
+    { projectId: "project-1", content: "hello", launchId: null }
   );
   assert.equal(parseAiChatRequest(null), null);
   assert.equal(parseAiChatRequest({ projectId: "", content: "hello" }), null);
   assert.equal(parseAiChatRequest({ projectId: "project-1", content: "  " }), null);
+  assert.equal(
+    parseAiChatRequest({ projectId: "project-1", content: "hello", launchId: "invented" }),
+    null,
+    "a non-canonical launch ID is rejected",
+  );
+  assert.equal(
+    parseAiChatRequest({ projectId: "project-1", content: "hello", launchId: null }),
+    null,
+    "an explicitly supplied null launch ID is rejected",
+  );
   assert.equal(
     parseAiChatRequest({
       projectId: "project-1",
@@ -235,26 +251,21 @@ function checkChatRequestsAreValidated() {
       senderId: "user_spoof",
       senderName: "Mallory",
     }),
-    { projectId: "project-1", content: "hello" },
+    { projectId: "project-1", content: "hello", launchId: null },
     "browser-supplied identity is ignored",
   );
 }
 
 async function checkAuthenticatedMessagesUseTheClerkAvatar() {
-  // The verifier only exercises the route's pure message builder. A valid
-  // placeholder lets its Prisma-backed authorization import initialize without
-  // asking this boundary check to contact a database.
-  process.env.DATABASE_URL ??=
-    "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
-  const aiChatRoute = await import("../app/api/ai/chat/route");
+  const agentLaunchServer = await import("../lib/agent-launch-server");
 
   assert.ok(
-    "createAuthenticatedAiChatMessage" in aiChatRoute,
-    "the authenticated route exposes its server-authored message builder",
+    "createAuthenticatedAiChatMessage" in agentLaunchServer,
+    "the server write controller exposes its authenticated message builder",
   );
 
   const createMessage = (
-    aiChatRoute as typeof aiChatRoute & {
+    agentLaunchServer as typeof agentLaunchServer & {
       createAuthenticatedAiChatMessage: (
         request: { projectId: string; content: string },
         senderId: string,
@@ -290,6 +301,111 @@ async function checkAuthenticatedMessagesUseTheClerkAvatar() {
       sentAt: 1_700_000_000_000,
     },
     "authenticated user messages carry only the Clerk avatar snapshot",
+  );
+}
+
+/** A launch retry owns one server-authored prompt row without changing manual chat. */
+async function checkLaunchPromptWritesAreIdempotent() {
+  const launchId = "00000000-0000-4000-8000-000000000001";
+  const agentLaunchServer = await import("../lib/agent-launch-server");
+  const createAgentLaunchPromptMessageId = (
+    agentLaunchServer as typeof agentLaunchServer & {
+      createAgentLaunchPromptMessageId: (input: {
+        launchId: string;
+        projectId: string;
+        userId: string;
+      }) => string;
+    }
+  ).createAgentLaunchPromptMessageId;
+  const writeAuthenticatedAiChatMessage = (
+    agentLaunchServer as typeof agentLaunchServer & {
+      writeAuthenticatedAiChatMessage: (
+        request: { projectId: string; content: string; launchId: string | null },
+        senderId: string,
+        user: {
+          fullName: string | null;
+          username: string | null;
+          primaryEmailAddress: { emailAddress: string } | null;
+          imageUrl: string;
+        },
+        dependencies: {
+          create: (projectId: string, message: AiChatMessage) => Promise<string>;
+          upsert: (projectId: string, messageId: string, message: AiChatMessage) => Promise<void>;
+        },
+      ) => Promise<{ id: string; isIdempotent: boolean }>;
+    }
+  ).writeAuthenticatedAiChatMessage;
+  const id = createAgentLaunchPromptMessageId({
+    launchId,
+    projectId: "project-1",
+    userId: "user-1",
+  });
+
+  assert.equal(
+    id,
+    createAgentLaunchPromptMessageId({ launchId, projectId: "project-1", userId: "user-1" }),
+    "the same authenticated launch derives the same row ID",
+  );
+  assert.notEqual(
+    id,
+    createAgentLaunchPromptMessageId({ launchId, projectId: "project-2", userId: "user-1" }),
+    "a different project gets a different row ID",
+  );
+  assert.notEqual(
+    id,
+    createAgentLaunchPromptMessageId({ launchId, projectId: "project-1", userId: "user-2" }),
+    "a different user gets a different row ID",
+  );
+  assert.match(id, /^chat-launch-[0-9a-f]{64}$/, "launch prompt IDs are opaque SHA-256 hashes");
+
+  const user = {
+    fullName: "Ada Lovelace",
+    username: null,
+    primaryEmailAddress: null,
+    imageUrl: "https://img.clerk.com/ada.jpg",
+  };
+  const created: Array<{ projectId: string; message: AiChatMessage }> = [];
+  const upserted: Array<{ projectId: string; messageId: string; message: AiChatMessage }> = [];
+  const dependencies = {
+    create: async (projectId: string, message: AiChatMessage) => {
+      created.push({ projectId, message });
+      return "chat-manual";
+    },
+    upsert: async (projectId: string, messageId: string, message: AiChatMessage) => {
+      upserted.push({ projectId, messageId, message });
+    },
+  };
+
+  const manual = await writeAuthenticatedAiChatMessage(
+    { projectId: "project-1", content: "Manual prompt", launchId: null },
+    "user-1",
+    user,
+    dependencies,
+  );
+
+  assert.deepEqual(manual, { id: "chat-manual", isIdempotent: false });
+  assert.equal(created.length, 1, "manual chat creates one new message");
+  assert.equal(upserted.length, 0, "manual chat never upserts a launch message");
+  assert.deepEqual(
+    { projectId: created[0]?.projectId, senderId: created[0]?.message.senderId, content: created[0]?.message.content },
+    { projectId: "project-1", senderId: "user-1", content: "Manual prompt" },
+    "manual chat remains server-authored",
+  );
+
+  const launchRequest = { projectId: "project-1", content: "Launch prompt", launchId };
+  const firstLaunch = await writeAuthenticatedAiChatMessage(launchRequest, "user-1", user, dependencies);
+  const replayedLaunch = await writeAuthenticatedAiChatMessage(launchRequest, "user-1", user, dependencies);
+
+  assert.deepEqual(firstLaunch, { id, isIdempotent: true });
+  assert.deepEqual(replayedLaunch, { id, isIdempotent: true });
+  assert.equal(created.length, 1, "launch retries do not create new rows");
+  assert.deepEqual(
+    upserted.map(({ projectId, messageId, message }) => ({ projectId, messageId, senderId: message.senderId, content: message.content })),
+    [
+      { projectId: "project-1", messageId: id, senderId: "user-1", content: "Launch prompt" },
+      { projectId: "project-1", messageId: id, senderId: "user-1", content: "Launch prompt" },
+    ],
+    "launch retries upsert the same authenticated message row",
   );
 }
 
@@ -846,6 +962,7 @@ async function main() {
   checkChatMessagesAreValidated();
   checkChatRequestsAreValidated();
   await checkAuthenticatedMessagesUseTheClerkAvatar();
+  await checkLaunchPromptWritesAreIdempotent();
   checkTranscriptIsOrderedAndFiltered();
   checkPromptLinkedRunsAreArrangedAndExpire();
   checkLocalStartFailuresRemainVisibleBesideDurableRuns();

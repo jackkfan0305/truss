@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useFeedMessages, useRoom, useSelf } from "@liveblocks/react";
 
 import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
+import type { AiChatSendOptions } from "@/lib/ai-prompt-submission";
 import { AI_CHAT_FEED_ID } from "@/types/tasks";
 
 /**
@@ -21,7 +22,7 @@ export interface AiChat {
   isFetchingOlder: boolean;
   fetchOlderMessages: () => void;
   /** Resolves to the server-generated feed ID that anchors a run. */
-  send: (text: string) => Promise<string | null>;
+  send: (text: string, options?: AiChatSendOptions) => Promise<string | null>;
   /** Set when the last send failed, cleared by the next one that works. */
   error: string | null;
   isSending: boolean;
@@ -52,7 +53,7 @@ export function useAiChat(): AiChat {
   // that would read as everyone being the same person.
   const selfId = self ? (self.id ?? `connection:${self.connectionId}`) : null;
   const send = useCallback(
-    async (text: string): Promise<string | null> => {
+    async (text: string, options?: AiChatSendOptions): Promise<string | null> => {
       const content = text.trim();
 
       if (!content || !selfId) {
@@ -65,7 +66,11 @@ export function useAiChat(): AiChat {
         const response = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: roomId, content }),
+          body: JSON.stringify({
+            projectId: roomId,
+            content,
+            ...(options?.launchId ? { launchId: options.launchId } : {}),
+          }),
         });
 
         if (!response.ok) {

@@ -1,4 +1,9 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
+import { NextResponse, type NextRequest } from "next/server";
+
+import { AGENT_LAUNCH_PATH } from "@/lib/agent-launch";
+import { AGENT_LINK_PATH } from "@/lib/agent-link";
+import { AGENT_PICK_PATH } from "@/lib/agent-pick";
 
 const SIGN_IN_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
 const SIGN_UP_URL = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL;
@@ -15,13 +20,34 @@ if (!SIGN_IN_URL || !SIGN_UP_URL) {
 // routes cannot drift out of sync with the middleware.
 // ponytail: `createRouteMatcher` is deprecated in @clerk/nextjs 7.x, and its
 // glob patterns cannot read from env anyway — a prefix check covers both.
-const PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
+const AUTH_PUBLIC_PATHS = [SIGN_IN_URL, SIGN_UP_URL];
 
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
+/**
+ * All three agent entry points carry their payload in the URL fragment,
+ * which the browser never sends. A Clerk redirect would discard it, so all
+ * three must be public and all three must bypass the development handshake.
+ */
+const AGENT_ENTRY_PATHS = [AGENT_LAUNCH_PATH, AGENT_PICK_PATH, AGENT_LINK_PATH];
+
+export function isPublicPath(pathname: string): boolean {
+  if (AGENT_ENTRY_PATHS.includes(pathname)) {
+    return true;
+  }
+
+  return AUTH_PUBLIC_PATHS.some(
     (publicPath) =>
       pathname === publicPath || pathname.startsWith(`${publicPath}/`)
   );
+}
+
+/**
+ * A launch/pick payload exists only in the fragment, which browsers omit
+ * from the HTTP request. Clerk's development handshake redirects document
+ * requests, and a redirect would therefore discard the fragment before the
+ * client can move it into tab-scoped storage.
+ */
+export function isClerkHandshakeBypassPath(pathname: string): boolean {
+  return AGENT_ENTRY_PATHS.includes(pathname);
 }
 
 // `auth.protect()` answers a redirect, not a 401, so it cannot gate an API
@@ -33,13 +59,24 @@ function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
-export default clerkMiddleware(async (auth, req) => {
+const clerkProxy = clerkMiddleware(async (auth, req) => {
   const { pathname } = req.nextUrl;
 
   if (!isPublicPath(pathname) && !isApiPath(pathname)) {
     await auth.protect();
   }
 });
+
+export default function proxy(
+  request: NextRequest,
+  event: Parameters<typeof clerkProxy>[1],
+) {
+  if (isClerkHandshakeBypassPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
+  return clerkProxy(request, event);
+}
 
 export const config = {
   matcher: [

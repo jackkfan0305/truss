@@ -1,0 +1,4 @@
+interface:
+  display_name: "Truss Diagram"
+  short_description: "Create, edit, or delete architecture diagrams in Truss"
+  default_prompt: "Use $truss-diagram to create, edit, or delete a Truss architecture diagram from my description."

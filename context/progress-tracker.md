@@ -8,6 +8,227 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `unified-agent-operations` complete. Create now runs headless like edit: it
+  POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
+  ID the create dialog builds, retries once per 409 collision, then POSTs
+  `agent-launch-import` — the two calls the `/agent/new` tab's editor used to
+  make on mount. Create and edit now share auth, the line-delimited JSON event
+  protocol, and the `done`/`error` shape; create's old plain-sentence stdout
+  success line is gone, replaced by `{"event":"done","editorUrl":…}`.
+  - An import that fails after the project exists reports that explicitly and
+    names the editor URL rather than implying nothing happened. The empty
+    project is deliberately left in place.
+  - `POST /api/projects` accepts bearer tokens for the same reason `GET` does.
+  - Project list cached per origin beside the token, primed at login and
+    refreshed past a 5-minute TTL. It is never authoritative: a cache miss
+    forces one fresh read before reporting a project as nonexistent, and a 404
+    on the graph read invalidates it. Clearing the credential clears the cache,
+    so a re-link as a different user cannot resolve against the old account's
+    projects.
+  - Delete alone still opens a browser, for its in-app confirm dialog.
+  - Gates: typecheck, lint, `verify:unit`, and `build` all exit 0. The CLI
+    verifier grew nine checks (headless create, 409 retry, import-failure
+    message, cache hit/stale/miss/reject paths, login priming, credential-clear
+    dropping the cache); a deliberate broken assertion confirmed they execute
+    rather than silently passing.
+  - **Now unused by the skill but still present:** `/agent/new`, its launch
+    page, `lib/agent-launch-browser.ts`, `hooks/use-agent-launch-import.ts`,
+    and the editor's launch import controller. They remain a working browser
+    entry point; deleting them is a separate change and was not taken here.
+
+- `headless-agent-edit` complete. `truss:diagram --op edit` no longer opens a
+  browser. A one-time `gh auth login`-style flow (`--op login`, or triggered
+  inline on first edit) opens `/agent/link`, mints a long-lived `trs_agent_…`
+  token through the new owner-scoped `POST /api/agent/tokens`, and caches it at
+  `~/.truss/credentials.json` (dir 0700, file 0600, written via temp+rename so
+  an existing wider mode cannot survive a rewrite and a crash mid-write cannot
+  truncate it). Every later edit calls `/api/projects`, `agent-graph`, and
+  `agent-graph-edit` directly with `Authorization: Bearer`.
+  - Auth resolves at one chokepoint, `lib/agent-identity.ts`. It splits into a
+    cheap `resolveIdentitySource` (no Clerk call) and a lazy
+    `resolveIdentityEmail`, preserving `authorizeProject`'s existing
+    "only now is the email worth a second Clerk call" laziness for bearer
+    callers too — the owner-only path both agent-graph routes take stays one DB
+    lookup. `authorizeProject` gained `request` as its first argument; routes
+    wrap it in a request-scoped closure so every `*-server.ts` module and its
+    verifier needed no change.
+  - A *present but invalid* Authorization header resolves to `null` rather than
+    falling through to the session cookie, so a bad bearer token fails loudly
+    instead of riding a legitimate session. `POST /api/agent/tokens` rejects any
+    Authorization header before calling `auth()`, so a token can never mint
+    another. Tokens are stored only as SHA-256; plaintext is returned once and
+    never persisted, logged, or written to sessionStorage/DOM by the link page.
+  - `/agent/link` reuses `/agent/pick`'s full fragment hardening, including the
+    pre-hydration bootstrap in `lib/agent-launch-bootstrap*.ts` that copies the
+    fragment to tab-scoped storage before Clerk's client bundle can redirect.
+  - The hallucinated-`projectId` guard that `lib/agent-pick-browser.ts` owned
+    moved into the CLI: only an ID returned by the `projects` event is trusted.
+    The 409-retry-once-from-a-fresh-read behaviour moved with it. The stdout
+    event protocol is unchanged except a new `editorUrl` on edit's `done` and a
+    `linked` event for login.
+  - Create and delete are unchanged: create still opens `/agent/new`, delete
+    still opens `/agent/pick` for its in-app confirm dialog. **Follow-up: unify
+    create with edit so both run headless off the same token.**
+  - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`,
+    `npm run verify:integration`, and `npm run build` all exit 0. New verifiers:
+    `verify-agent-token.ts` (integration, DB-backed), `verify-agent-link-page.tsx`,
+    `verify-truss-diagram-cli-auth.mjs`.
+  - Not yet done: no revocation UI — revoking means deleting the `AgentToken`
+    row, after which the CLI 401s, clears its cache, and re-links. No live
+    authenticated end-to-end run; the dev Clerk instance's interactive sign-in
+    still blocks automation, same limitation recorded for earlier tasks.
+
+- `caller-generated-diagram-skill` Task 5 complete. The new owner-only graph
+  import route authorizes before reading JSON, strictly validates the opaque
+  launch ID and compact graph, and uses one paced Liveblocks `mutateFlow` to
+  draw canonical nodes then edges with the same shared native AI cursor loop
+  (540ms cursor arrival plus `getBuildStepMs`, bounded to 76 seconds for the
+  graph cap). Exact replays do not write;
+  exact interrupted subsets resume only missing canonical items; divergent
+  rooms return 409 untouched. The shared `saveCanvasSnapshot` keeps Blob-first,
+  Prisma-pointer-second storage for both generic collaborator canvas saves and
+  graph imports, so a post-Liveblocks persistence failure safely retries.
+  `scripts/verify-agent-graph-import.ts` covers pre-body authorization, strict
+  rejection, paced presence/delay ordering, full/exact/partial idempotency,
+  conflicts, and persistence retry.
+  - Review fix: existing duplicate node or edge IDs now make the live room
+    divergent (409), never an exact replay. Native design runs again clear AI
+    presence around the entire run, including zero-action and pre-build failure
+    paths; direct imports declare a literal 120-second Next route duration so
+    the shared maximum 76-second native drawing loop has safe headroom.
+
+- Final Task 5 verification: fresh configured `npm test`, integration,
+  typecheck, lint, and production build gates pass. The first build caught and
+  the bounded fix addressed Next 16's requirement that route segment config be
+  statically analyzable; the import route now exports literal `120`, while the
+  shared duration constant remains covered by the verifier. Changed-scope React
+  Doctor passes 100/100 with an isolated npm cache after the default cache hit
+  an external `EEXIST/EACCES` collision. The official skill validator,
+  launcher verifier, clean-project `npx skills add/list/use`, and a 40-node /
+  60-edge fixture (8,454 encoded characters) pass. A fresh signed-out browser
+  probe confirms fragment scrubbing before Clerk, cleared pending storage,
+  retained opaque graph record, and `/sign-in` handoff. Authenticated native
+  drawing/no-chat/no-Trigger/refresh-dedupe and public GitHub install remain
+  manual/post-merge follow-ups.
+
+- `agent-invoked-diagram-skill` Task 7 verification recorded. Fresh configured-environment
+  commands `npm test`, `npm run verify:integration`, `npm run typecheck`, `npm run lint`, and
+  `npm run build` each exit 0. Changed-scope React Doctor reports 100/100 with no findings when
+  run with an isolated temporary npm cache (the shared cache could not rename an existing entry).
+  The local clean-project `npx skills` add/list/use flow installed `render-truss-diagram` for
+  Codex and its generated prompt named the bundled launcher; the launcher also completed a local
+  synthetic invocation. The public-source R2 command remains pending merge to the public default
+  branch: `npx skills add jackkfan0305/truss --list`, followed by `npx skills use
+  jackkfan0305/truss@render-truss-diagram` and a launcher-name check.
+  - Browser QA found and fixed a real privacy failure: Clerk's server handshake and client
+    initialization could act before a valid launch fragment was captured. Exact `/agent/new` now
+    bypasses only the server handshake; a constant parser-time head bootstrap copies only a bounded
+    base64url fragment into tab-scoped storage and scrubs the URL, even when storage rejects its
+    write. The SSR-stable Clerk provider gate performs canonical capture only after hydration, then
+    reloads the fixed opaque resume route; canonical rejection and every storage failure fail open
+    to normal Clerk mounting rather than leaving a capture status. The focused verifier includes a
+    JSDOM hydration check (no mismatch and no pre-capture Clerk mount), typecheck, lint, unit suite,
+    integration suite, production build, and changed-scope React Doctor all pass after the fix. A
+    guarded accessor now defers every `sessionStorage` property access until after the exact route
+    check, so a privacy-mode getter failure fails open and irrelevant routes never touch storage.
+    A signed-out browser probe confirmed one stored launch record, an empty launch
+    hash, canonical opaque resume query, and no raw description or encoded payload in observed
+    resource URLs. A nonempty Clerk-owned sign-in hash did not parse as a launch payload.
+  - Full authenticated project/prompt/run/canvas refresh-dedupe and transcript-count checks remain
+    blocked by the development Clerk instance's interactive sign-in/CAPTCHA. The signed-out browser
+    reaches the native sign-in form and retains the resume record, but no session can be completed
+    safely by automation. Deterministic checks cover launch parsing, scrub/storage, launch editor
+    retry/dedupe, description exclusion from status/editor chrome, and escaped chat rendering;
+    they cannot prove the live authenticated transcript count.
+
+- `agent-invoked-diagram-skill` Task 6 complete. The editor now accepts only
+  the canonical opaque launch query, opens AI for an authorized launch, and
+  waits for the mounted Liveblocks room's send-ready state before calling the
+  Task 5 submission controller. The tab-scoped launch record persists the
+  prompt/run lifecycle, resumes safely from each durable stage, shares one
+  in-flight Promise across Strict Mode effects, and removes session/query state
+  only after the idempotent run accepts. Failed launches retain a neutral Retry
+  row above the composer without rendering the description. `npx tsx
+  scripts/verify-agent-launch-editor.tsx`, focused submission/chat/editor
+  checks, `npm run verify:unit`, focused ESLint, and `git diff --check` pass.
+  `npm test` / `npm run typecheck` remain blocked before/at Prisma type setup by
+  the missing generated client and `DATABASE_URL`; the new editor files add no
+  TypeScript errors.
+  - Fix Round 1 adds an actual hook-effect harness (not a source grep or
+    runner-only test): a launch waits through `canStart: false` without a write
+    or submission, starts exactly once once its mounted room is send-ready, and
+    ignores a stored project/room mismatch. The normal durable chat transcript
+    remains unchanged and continues to render the accepted launch prompt once.
+
+- `agent-invoked-diagram-skill` Task 5 complete. `submitAiPrompt` is now the
+  single client submission controller: it obtains (or reuses) the server-owned
+  prompt ID, permits launch IDs only on the authenticated chat write, invokes
+  lifecycle callbacks in prompt-then-run order, and returns `message-error`,
+  `run-error`, or the started subscription. `useAgentRun.start` records and
+  rethrows a start failure so the controller keeps the visible local error
+  path while preventing an event-handler rejection. The manual composer keeps
+  its trim/reject-empty and disabled-while-running behavior through
+  `useAiPromptSubmission`. `npx tsx scripts/verify-ai-prompt-submission.ts`,
+  `npx tsx scripts/verify-ai-chat.ts`, `npx tsx
+  scripts/verify-ai-run-chat.ts`, `npx tsx scripts/verify-ai-chat-ui.tsx`,
+  `npx tsx scripts/verify-editor-controls.tsx`, focused ESLint, `git diff
+  --check`, and the changed-scope local React Doctor scan (100/100, no issues)
+  pass. `npm run typecheck` remains blocked by the pre-existing missing
+  generated Prisma client and `DATABASE_URL` setup.
+  - Fix Round 1 adds behavior-level coverage through the actual hook-composition
+    factory and manual composer boundary: a started or visible run-error clears
+    the draft, a message error and disabled composer do not, and the selected
+    model/default input reaches the run. It also proves rejecting sends and both
+    lifecycle callbacks propagate rather than being collapsed into `run-error`.
+    The testable manual boundary lives in `lib/ai-sidebar-submission.ts`, keeping
+    `AiSidebar` component-only for Fast Refresh. Focused controller/chat/run/UI
+    checks, `npm run verify:unit`, focused ESLint, `git diff --check`, and the
+    changed-scope React Doctor scan (100/100) pass.
+
+- `agent-invoked-diagram-skill` Task 4 complete. The authenticated chat parser
+  accepts an absent launch ID as manual chat and otherwise requires the shared
+  canonical lowercase UUID v4. After authorization, the write controller hashes
+  the authenticated user, project, and launch IDs into a server-owned feed ID,
+  upserts it, and returns 200; manual prompts still create a new row and return
+  201. `npx tsx scripts/verify-ai-chat.ts`, `npx tsx
+  scripts/verify-orchestrate-api.ts`, focused ESLint, and `git diff --check`
+  pass. Full typecheck remains blocked by the missing generated Prisma client
+  and `DATABASE_URL`.
+
+- `agent-invoked-diagram-skill` Task 3 complete. `/agent/new` is public only
+  long enough to synchronously capture and scrub its fragment into tab-scoped
+  session storage, then resumes with Clerk through a fixed same-origin UUID
+  return URL. Project creation persists a precomputed ID, recovers a lost POST
+  response through an owner-only matching read, and makes one replacement
+  attempt for an inaccessible collision. `npx tsx
+  scripts/verify-agent-launch-page.tsx`, `npx tsx scripts/verify-project-api.ts`,
+  and `npx tsx scripts/verify-editor-controls.tsx` pass; full typecheck remains
+  blocked by the missing generated Prisma client and `DATABASE_URL`.
+
+- `agent-invoked-diagram-skill` Task 1 complete. The shared versioned launch
+  contract validates bounded base64url fragments and persisted records, keeps
+  an immutable retry-stage transition graph, and exposes the project-name bound
+  to prevent launch and project parsing from drifting. `npx tsx
+  scripts/verify-agent-launch.ts` and `npx tsx scripts/verify-project-api.ts`
+  pass.
+
+- `agent-invoked-diagram-skill` Task 2 complete. The tracked
+  `render-truss-diagram` skill packages a no-shell-interpolation Node launcher
+  that validates the v1 title/description bounds and origin-only base URL,
+  sends the payload only in a base64url fragment, and opens the platform browser
+  command detached. `quick_validate.py`, `node
+  scripts/verify-render-truss-skill.mjs`, and `npx skills add . --list` pass;
+  a clean copied Codex install passed at
+  `/var/folders/x7/9w5z8rhj2xlgs_rd8g7vjwqr0000gn/T/tmp.OzdyiPK2jh` (left in
+  place). Public installation verification remains pending merge to the public
+  default branch: `npx skills add jackkfan0305/truss --skill
+  render-truss-diagram --agent codex`.
+  - Fix Round 1 rejects raw empty query/fragment delimiters that URL parsing
+    normalizes away, waits for the child `spawn` event, and reports asynchronous
+    child errors through a generic non-sensitive rejection. The launcher
+    verifier also decodes the exact v1 payload and proves inclusive/over-limit
+    title and description bounds.
+
 - `38-live-step-status` complete. The AI panel says what it is doing in one
   place, and the work log is what it thought and what it changed.
   - **One thing thinks at a time.** `ThinkingDisclosure` decided "am I
@@ -270,6 +491,76 @@ Update this file whenever the current phase, active feature, or implementation s
 - `27-ai-sidechat-redesign` complete: the AI panel is monochrome and rebuilt around shadcn primitives, visibly identifies `gemini-3.6-flash`, and renders each local run as a Cursor-style work turn directly after its prompt. Activity keeps true stream order, distinguishes pending canvas operations from completed ones, survives run completion for the mounted session, follows new output until the reader scrolls up, offers a Jump to latest control, and paginates older room messages.
 
 ## Completed
+
+- **`truss:diagram` skill — edit and delete** — `render-truss-diagram` (create
+  only, write-only) is replaced by `.agents/skills/truss-diagram/`, a single
+  skill dispatching on the user's phrasing to create, edit, or delete. Create's
+  contract is unchanged. Edit and delete resolve their target from the user's
+  own project list, read in the terminal from a numbered prompt or name match,
+  never guessed between two plausible candidates.
+  - `lib/agent-graph.ts` gained `projectCanvasToAgentGraph` and
+    `canvasFingerprint`: the canvas→compact direction, the reverse of the
+    existing `materializeAgentGraph`. Items the compact contract cannot
+    express (arbitrary human IDs, over-length labels, off-enum colors) are
+    reported as `opaqueNodeIds`/`opaqueEdgeIds` rather than dropped, so an
+    agent can never delete what it could not see. `lib/agent-graph-diff.ts`
+    (`diffAgentGraph`, `collidesWithOpaque`) derives add/update/remove keyed
+    on ID, with removal structurally impossible for anything outside the live
+    graph projection.
+  - `lib/agent-canvas-write.ts` extracts the shared paced drawing/persistence
+    loop out of the import route (`b7ddeda`) with no behavior change, so
+    create and edit share pacing and Blob-first/pointer-second persistence
+    without sharing reconciliation logic.
+  - `GET /api/projects/:id/agent-graph` (owner-only) reads the **live**
+    Liveblocks room via `readCanvas`, not the lagging Blob snapshot, and
+    returns the compact graph, opaque ID sets, and a room fingerprint.
+  - `POST /api/projects/:id/agent-graph-edit` recomputes the fingerprint
+    *inside* the `mutateFlow` callback (checking before it would reopen the
+    read-then-write race), refuses an edit that reuses an opaque ID, batches
+    removals/updates before pacing additions, and sweeps edges anchored to a
+    removed node (opaque ones included) since `removeNodes` does not cascade.
+  - A one-shot `node:http` loopback listener
+    (`.agents/skills/truss-diagram/scripts/loopback.mjs`) carries the
+    browser's answers back to the skill script: loopback-only bind verified
+    off the real socket, one-shot nonce compared with `timingSafeEqual`,
+    exact-origin CORS, Host pin against DNS rebinding. Each exchange is a
+    held-open response, not a poll — Node's `headersTimeout`/`requestTimeout`
+    bound receiving a request, not answering one, so an agent that
+    deliberates for a minute is safe. A rejected callback does not consume
+    the one-shot.
+  - `/agent/pick` (`app/agent/pick/`, `components/agent/agent-pick-page.tsx`,
+    `lib/agent-pick.ts`, `lib/agent-pick-browser.ts`) is the second public
+    entry path, added to `isPublicPath`/`isClerkHandshakeBypassPath` in
+    `proxy.ts` alongside `/agent/new`, and reuses the pre-hydration fragment
+    capture — extended (`8eec984`) to cover this path, since it previously
+    covered only `/agent/new` and Clerk could otherwise redirect a
+    signed-out caller before the fragment was read. Launch and pick fragments
+    use separate per-path `sessionStorage` keys so one payload type can never
+    be decoded as the other.
+  - Undo does **not** cover a server-side edit (open question from the design
+    spec, resolved this task): Liveblocks `history.undo()` only reverts
+    operations made by the current client's own room connection, and
+    `mutateFlow` runs through `@liveblocks/node`'s separate REST connection —
+    confirmed straight from `@liveblocks/core`'s type declarations ("It does
+    not impact operations made by other clients") and matches this app's own
+    `CanvasControls` doc comment ("per-client — undo takes back *your* last
+    change, not a collaborator's"). The terminal's destructive-edit
+    confirmation is therefore the only safety net against an agent removing
+    the wrong nodes, not a convenience; `references/operations.md` and
+    `context/architecture-context.md` both say so explicitly now.
+  - Review rounds caught real defects, not just polish: a literal NUL byte
+    copied into the plan document (`f8e4ac1`); an opaque edge that would have
+    permanently outlived a removed node's endpoint because `removeNodes`
+    doesn't cascade (`f8e4ac1`); a binding assertion that reported the
+    *requested* loopback address instead of the one actually bound, making
+    "loopback-only" a tautology (`a6e6e8e`); argument parsing hoisted outside
+    the launcher's `try`, so a malformed invocation threw uncaught instead of
+    emitting the terminating protocol event an interactive op depends on
+    (`e3ff286`); and `verify-agent-graph-edit` missing from `verify:unit`, so
+    the suite guarding the canvas write path was not running at all
+    (`8eec984`, now fixed).
+  - Manual browser QA (below) is the only thing left unverified — everything
+    else runs in `verify:unit`, `typecheck`, `lint`, and `build`.
 
 - **Liveblocks feed upsert fix** — `upsertAiChatMessageWithClient` branched on
   `404`/`409`, but the live v2 API reports a missing message, a duplicate
@@ -676,6 +967,58 @@ Update this file whenever the current phase, active feature, or implementation s
 - `isThinking` is now the only Presence field nothing reads or writes. It arrives with the AI panel.
 - `EditorNavbar` now imports `UserButton`, so it can no longer render outside a `ClerkProvider`. Any future harness or story for the navbar must be mounted under the root layout.
 
+## Manual QA — `truss:diagram` edit/delete
+
+None of these can run from a script: they need a real browser and a signed-in
+Clerk session. Perform each and check the box only after the exact expected
+result is observed.
+
+- [ ] **Create still works unchanged.** Ask the skill to create a diagram
+      (e.g. "draw me a simple CI/CD pipeline"). Expected: `/agent/new` opens,
+      the browser signs in if needed, a new project is created with the given
+      title, and the canvas draws paced with the cursor animation exactly as
+      before this task's changes — no behavior difference from the prior
+      create-only skill.
+- [ ] **Edit a diagram with a hand-moved node.** Open an existing diagram in
+      the browser first and drag one node to a new position by hand (leave
+      the tab open or reload after). Then ask the skill to edit that same
+      diagram by adding one new node (a request with no removals). Expected:
+      after the skill applies the edit and the browser redirects to
+      `/editor/:id`, the hand-moved node is still at the position you dragged
+      it to, and the new node draws in with the same paced cursor-arrival
+      animation used by create/import — not an instant appearance.
+- [ ] **Ask to remove a node.** Ask the skill to edit a diagram in a way that
+      removes an existing node (e.g. "remove the caching layer"). Expected:
+      before the skill answers the held `/agent/pick` request, the terminal
+      states exactly what will be removed by name/label and waits for an
+      explicit yes. It does not proceed on its own.
+- [ ] **Delete a diagram.** Ask the skill to delete a specific diagram by
+      name. Expected: the terminal confirms by quoting the full project name
+      it resolved (never a list position/index) and waits for an explicit
+      yes; only after that does the browser open its own native confirm
+      dialog naming the same project before the `DELETE` actually fires. Two
+      separate confirmations, terminal then browser.
+- [ ] **Empty library — edit.** With an account that owns no projects, ask
+      the skill to edit "my diagram" (or any diagram). Expected: the agent
+      reports there are no diagrams yet, asks for a title (never inventing
+      one), reuses the edit request as the description, and falls through to
+      the create branch — producing a new project rather than erroring.
+- [ ] **Empty library — delete.** With an account that owns no projects, ask
+      the skill to delete a diagram. Expected: the agent says there is
+      nothing to delete and stops. It does not open a browser tab, and it
+      does not offer to create one.
+- [ ] **Signed-out cold load of `/agent/pick#<fragment>`.** This is the one no
+      script can prove, and it is where a regression in the pre-hydration
+      fragment capture would appear. Sign out of Truss entirely (or use a
+      fresh private window), then trigger an edit or delete request so the
+      skill opens `/agent/pick#<fragment>` while signed out. Expected: the
+      fragment survives the Clerk sign-in redirect (it is captured into
+      `sessionStorage` and scrubbed from the URL *before* Clerk's client
+      bundle can mount and redirect), the user completes sign-in, and the
+      operation resumes from where it left off — the project list (or the
+      graph read, for edit) still appears, rather than the operation silently
+      losing its target and hanging or erroring.
+
 ## Open Questions
 
 - **Still open after `09`**: `ProjectCollaborator` has no `userId` column, so access is keyed entirely on the email string. Two consequences, both unresolved because `09` says "do not add a local user table": a collaborator who changes their Clerk primary email loses access silently, and an invite sent to an address nobody has registered grants access to whoever registers it later. Adding a nullable `userId`, backfilled the first time a collaborator opens the project, would fix both without a user table.
@@ -1029,3 +1372,47 @@ Update this file whenever the current phase, active feature, or implementation s
   down on overlap and knows nothing about the edges the same plan adds, so a
   long label on a short edge can still collide. A real router (dagre/elk) is the
   upgrade path if that shows up in practice.
+
+## Caller-generated diagram graph contract
+
+- Task 1 introduced `lib/agent-graph.ts`: launch graphs are strict,
+  all-or-nothing compact documents with 1..40 nodes and 0..60 edges. Accepted
+  data is materialized into the canonical canvas node/edge constants and
+  per-shape default dimensions; graph launch payloads remain version 1.
+- Agent-launch session records now carry `{ version, launchId, title, graph }`,
+  live under the `truss.agent-launch.graph.v1:` namespace, and follow the graph
+  import lifecycle instead of creating an AI chat prompt or Trigger run.
+- `scripts/verify-agent-graph.ts` covers graph parsing, materialization,
+  cardinality, strictness, graph topology, and immutability. The launch verifier
+  covers the new payload transport and every allowed and rejected lifecycle
+  transition.
+
+## Caller-generated diagram skill launcher
+
+- Task 2 packages the caller-generated graph flow in `render-truss-diagram`.
+  The skill keeps the user title and description, creates a compact positioned
+  graph using its bundled contract reference, and sends only `{ title, graph }`
+  through launcher stdin. The dependency-free launcher rejects malformed or
+  oversized graphs, including encoded fragments over 16,384 characters, before
+  opening the browser; it retains origin validation and privacy-safe output.
+- Review fix round 1 validates the bundled reference graph through the launcher,
+  makes app and launcher boundaries both reject padded transport values rather
+  than silently trimming them, and proves the exact 16,384-character fragment
+  acceptance boundary plus the next valid encoded length rejection.
+- Review fix round 2 reuses one deterministic test-only fixture to verify the
+  app fragment parser itself accepts exactly 16,384 encoded characters and
+  rejects the next constructible valid length, matching the launcher.
+
+## Caller-generated diagram editor import
+
+- Task 4 replaces the obsolete prompt launch runner and hook with the direct
+  `useAgentLaunchImport` owner-route flow. Matching project/launch records are
+  deduplicated across Strict Mode, persist `importing-graph` before POST and
+  `graph-imported` before clearing tab storage and `?launch` after HTTP 200.
+  Network, 5xx, and 409 responses retain the graph in a safe failed state for
+  Retry; terminal and mismatched records are no-ops. The editor renders only a
+  neutral canvas status/failure overlay, keeps ordinary AI chat closed, and
+  never passes launch IDs into `AiSidebar` or calls chat/orchestrate/Trigger.
+  `scripts/verify-agent-launch-editor.tsx` covers the lifecycle, same-tab
+  deduplication, retry retention, mismatch/terminal no-ops, hook mount gate,
+  and unchanged manual-sidebar boundary.

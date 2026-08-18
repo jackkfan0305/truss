@@ -9,6 +9,11 @@ import {
   setAiPresence,
 } from "@/lib/ai-activity";
 import {
+  drawPacedCanvasActions,
+  runWithAiPresenceCleanup,
+  type PacedCanvasAction,
+} from "@/lib/canvas-drawing";
+import {
   openActivityStream,
   type ActivityEmitter,
 } from "@/lib/ai-activity-stream";
@@ -39,11 +44,8 @@ import {
   type CanvasNode,
 } from "@/types/canvas";
 import {
-  AI_CURSOR_ARRIVAL_PAD_MS,
-  AI_CURSOR_SWEEP_MS,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
-  getBuildStepMs,
   parseAiDesignModelId,
   parseAiThinkingLevel,
   type AiActivityTerminalPart,
@@ -248,6 +250,17 @@ const INCLUDE_THOUGHTS = true;
  */
 export async function runDesign(
   payload: DesignAgentPayload,
+  options: DesignRunOptions,
+): Promise<DesignRunResult> {
+  return runWithAiPresenceCleanup(
+    payload.roomId,
+    () => runDesignWithoutPresenceCleanup(payload, options),
+    { clearAiPresence },
+  );
+}
+
+async function runDesignWithoutPresenceCleanup(
+  payload: DesignAgentPayload,
   { runId, activity, reads, onFailure }: DesignRunOptions
 ): Promise<DesignRunResult> {
   const { roomId, prompt, promptMessageId } = payload;
@@ -411,11 +424,6 @@ export async function runDesign(
     await onFailure?.(failureText);
 
     throw error;
-  } finally {
-    // Runs on the success and failure paths alike — a ghost AI avatar left
-    // thinking forever is worse than no avatar at all. The activity stream is
-    // the caller's, and is closed there.
-    await clearAiPresence(roomId);
   }
 }
 
@@ -556,47 +564,35 @@ async function buildCanvas(
   context: DesignContext,
   activity: ActivityEmitter
 ): Promise<number> {
-  const stepMs = getBuildStepMs(plan.actions.length);
   const cursor = createCursorTargets(context);
   let applied = 0;
 
   await mutateFlow<CanvasNode, CanvasEdge>(
     { client: getLiveblocks(), roomId },
     async (flow) => {
-      for (const action of plan.actions) {
-        const target = cursor.next(action);
+      const actions: PacedCanvasAction<typeof flow>[] = plan.actions.map(
+        (action) => ({
+          target: () => cursor.next(action),
+          apply: (target) => {
+            applyDesignAction(target, action);
 
-        if (target) {
-          // Not awaited: presence is commentary on a canvas write, and a slow
-          // or failed presence call must not stall the work itself. The sweep
-          // below is the wait that matters.
-          void setAiPresence(roomId, { cursor: target, isThinking: true });
-          await sleep(AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS);
-        }
+            // Emitted with the write rather than ahead of the whole batch.
+            if (action.type !== "moveNode") {
+              activity.emit({
+                type: "action",
+                text: action.type,
+                detail: describeDesignAction(action),
+              });
+            }
+          },
+        }),
+      );
 
-        applyDesignAction(flow, action);
-
-        // Emitted with the write rather than ahead of the whole batch, so the
-        // sidebar list and the canvas describe the same moment.
-        //
-        // Except a move. A layout pass emits one per node and they are the bulk
-        // of a large plan, all saying a node is now at some coordinates the
-        // reader cannot picture and would not check — while crowding out the
-        // adds, deletes and connections, which are what actually changed about
-        // the system. The move still happens and still counts toward `applied`;
-        // it is only not worth a line in a log that is kept forever.
-        if (action.type !== "moveNode") {
-          activity.emit({
-            type: "action",
-            text: action.type,
-            detail: describeDesignAction(action),
-          });
-        }
-
-        applied += 1;
-
-        await sleep(stepMs);
-      }
+      applied = await drawPacedCanvasActions(roomId, flow, actions, {
+        setAiPresence,
+        clearAiPresence,
+        sleep,
+      });
     }
   );
 

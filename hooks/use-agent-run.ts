@@ -49,7 +49,7 @@ export interface AgentRun {
     prompt: string,
     promptMessageId: string,
     options: AgentRunOptions
-  ) => Promise<void>;
+  ) => Promise<RunSubscription>;
   /** True from the request leaving the client until the run settles. */
   isRunning: boolean;
   /**
@@ -101,9 +101,9 @@ export function useAgentRun(roomId: string): AgentRun {
       prompt: string,
       promptMessageId: string,
       options: AgentRunOptions
-    ): Promise<void> => {
+    ): Promise<RunSubscription> => {
       if (startLock.current) {
-        return;
+        throw new Error("An agent run is already active");
       }
 
       startLock.current = true;
@@ -124,6 +124,7 @@ export function useAgentRun(roomId: string): AgentRun {
           runId: nextSubscription.runId,
         });
         setSubscription(nextSubscription);
+        return nextSubscription;
       } catch (error: unknown) {
         startLock.current = false;
         console.error("Design run failed to start", error);
@@ -139,6 +140,7 @@ export function useAgentRun(roomId: string): AgentRun {
           ],
           completedAt: Date.now(),
         });
+        throw error;
       } finally {
         setIsStarting(false);
       }

@@ -8,6 +8,7 @@ import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AiSidebar } from "@/components/editor/ai-sidebar"
+import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
 import { ProjectSidebar } from "@/components/editor/project-sidebar"
@@ -15,6 +16,10 @@ import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useProjectActions } from "@/hooks/use-project-actions"
+import {
+  initialEditorSidebar,
+  type EditorSidebar,
+} from "@/lib/editor-sidebar-state"
 import type { ProjectAccess, ProjectSummary } from "@/types/project"
 
 interface EditorShellProps {
@@ -25,9 +30,11 @@ interface EditorShellProps {
    * switches the shell from the create prompt to the workspace layout.
    */
   activeProject?: ProjectAccess
+  /** An opaque launch UUID, only accepted for an already-authorized project. */
+  launchId?: string
 }
 
-type OpenSidebar = "projects" | "ai" | null
+type OpenSidebar = EditorSidebar
 
 /**
  * Owns the sidebar open/close state for the editor workspace and the project
@@ -38,8 +45,11 @@ export function EditorShell({
   ownedProjects,
   sharedProjects,
   activeProject,
+  launchId,
 }: EditorShellProps) {
-  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(null)
+  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
+    () => initialEditorSidebar()
+  )
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
@@ -113,7 +123,12 @@ export function EditorShell({
                   projectId={activeProject.id}
                   isTemplatesOpen={isTemplatesOpen}
                   onTemplatesOpenChange={setIsTemplatesOpen}
-                />
+                >
+                  <AgentLaunchImportController
+                    launchId={launchId}
+                    roomId={activeProject.id}
+                  />
+                </CanvasSurface>
               </main>
 
               <AiSidebar isOpen={isAiSidebarOpen} />

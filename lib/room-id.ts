@@ -25,6 +25,14 @@ export function slugify(name: string): string {
  */
 const MAX_SLUG_LENGTH = 60;
 const HTTP_CONFLICT_STATUS = 409;
+const ROOM_ID_SUFFIX_LENGTH = 6;
+
+/** Hex characters taken off a UUID — enough to keep slugs apart, short enough to read. */
+export function createRoomIdSuffix(
+  randomUuid: () => string = () => crypto.randomUUID(),
+): string {
+  return randomUuid().replace(/-/g, "").slice(0, ROOM_ID_SUFFIX_LENGTH);
+}
 
 /**
  * `<slug>-<suffix>`, or an empty string when the name has no slugifiable

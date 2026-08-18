@@ -59,12 +59,12 @@ async function listMembers(
 
 /** Readable by owner and collaborators alike — the share dialog is read-only for the latter. */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: false });
+  const access = await authorizeProject(request, projectId, { requireOwner: false });
 
   if (!access.ok) {
     return access.response;
@@ -81,7 +81,7 @@ export async function POST(
 ): Promise<Response> {
   const { projectId } = await params;
 
-  const access = await authorizeProject(projectId, { requireOwner: true });
+  const access = await authorizeProject(request, projectId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;

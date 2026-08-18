@@ -62,6 +62,47 @@ async function writeStore(store) {
   }
 }
 
+/**
+ * The project list captured at link time and refreshed on every fetch, so a
+ * later run can resolve "which diagram did they mean" without a round trip.
+ *
+ * Cached beside the token deliberately: both are scoped to one origin and one
+ * signed-in user, so clearing the credential must clear this too — otherwise a
+ * re-link as a different user would resolve names against the previous user's
+ * projects.
+ */
+export async function readProjects(origin) {
+  const store = await readStore();
+  const entry = store.origins[origin];
+
+  if (!Array.isArray(entry?.projects) || typeof entry.projectsFetchedAt !== "number") {
+    return null;
+  }
+
+  const projects = entry.projects.filter(
+    (project) =>
+      project !== null &&
+      typeof project === "object" &&
+      typeof project.id === "string" &&
+      typeof project.name === "string",
+  );
+
+  return { projects, fetchedAt: entry.projectsFetchedAt };
+}
+
+export async function writeProjects(origin, projects) {
+  const store = await readStore();
+  const entry = store.origins[origin];
+
+  // No token for this origin means nothing to attach the cache to; a bare
+  // project list with no credential would outlive the sign-in it came from.
+  if (!entry) return;
+
+  entry.projects = projects.map((project) => ({ id: project.id, name: project.name }));
+  entry.projectsFetchedAt = Date.now();
+  await writeStore(store);
+}
+
 export async function readCredential(origin) {
   const store = await readStore();
   const entry = store.origins[origin];

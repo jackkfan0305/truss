@@ -8,6 +8,34 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `unified-agent-operations` complete. Create now runs headless like edit: it
+  POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
+  ID the create dialog builds, retries once per 409 collision, then POSTs
+  `agent-launch-import` — the two calls the `/agent/new` tab's editor used to
+  make on mount. Create and edit now share auth, the line-delimited JSON event
+  protocol, and the `done`/`error` shape; create's old plain-sentence stdout
+  success line is gone, replaced by `{"event":"done","editorUrl":…}`.
+  - An import that fails after the project exists reports that explicitly and
+    names the editor URL rather than implying nothing happened. The empty
+    project is deliberately left in place.
+  - `POST /api/projects` accepts bearer tokens for the same reason `GET` does.
+  - Project list cached per origin beside the token, primed at login and
+    refreshed past a 5-minute TTL. It is never authoritative: a cache miss
+    forces one fresh read before reporting a project as nonexistent, and a 404
+    on the graph read invalidates it. Clearing the credential clears the cache,
+    so a re-link as a different user cannot resolve against the old account's
+    projects.
+  - Delete alone still opens a browser, for its in-app confirm dialog.
+  - Gates: typecheck, lint, `verify:unit`, and `build` all exit 0. The CLI
+    verifier grew nine checks (headless create, 409 retry, import-failure
+    message, cache hit/stale/miss/reject paths, login priming, credential-clear
+    dropping the cache); a deliberate broken assertion confirmed they execute
+    rather than silently passing.
+  - **Now unused by the skill but still present:** `/agent/new`, its launch
+    page, `lib/agent-launch-browser.ts`, `hooks/use-agent-launch-import.ts`,
+    and the editor's launch import controller. They remain a working browser
+    entry point; deleting them is a separate change and was not taken here.
+
 - `headless-agent-edit` complete. `truss:diagram --op edit` no longer opens a
   browser. A one-time `gh auth login`-style flow (`--op login`, or triggered
   inline on first edit) opens `/agent/link`, mints a long-lived `trs_agent_…`

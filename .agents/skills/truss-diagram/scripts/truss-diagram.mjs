@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
+import { clearCredential, readCredential, writeCredential } from "./credentials.mjs";
 import { startLoopback } from "./loopback.mjs";
 
 const MAX_TITLE_LENGTH = 120;
@@ -19,7 +20,11 @@ const LOOPBACK_TIMEOUT_MS = 120_000;
 const LAUNCH_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const OPS = new Set(["create", "edit", "delete"]);
+// trs_agent_ + base64url(32 random bytes) — see the shared agent-auth
+// contract. 32 bytes encodes to exactly 43 base64url characters.
+const AGENT_TOKEN_PATTERN = /^trs_agent_[A-Za-z0-9_-]{43}$/;
+const MAX_EDIT_ATTEMPTS = 2;
+const OPS = new Set(["create", "edit", "delete", "login"]);
 const SHAPES = new Set([
   "rectangle",
   "diamond",
@@ -175,7 +180,7 @@ function parseArguments(argv) {
     if (argument === "--op") {
       const value = argv[index + 1];
       if (value === undefined || !OPS.has(value))
-        throw new Error("--op requires one of create, edit, delete.");
+        throw new Error("--op requires one of create, edit, delete, login.");
       options.op = value;
       index += 1;
       continue;
@@ -249,6 +254,16 @@ export function buildLaunchUrl(input, options) {
   if (encoded.length > MAX_FRAGMENT_LENGTH)
     throw new Error("The diagram is too large to launch.");
   return `${baseUrl}/agent/new#${encoded}`;
+}
+
+// Mirrors buildPickUrl: same shape, different page and payload. See the
+// shared agent-auth contract for the exact fragment fields.
+export function buildLinkUrl(baseUrl, { linkId, port, nonce }) {
+  const encoded = Buffer.from(
+    JSON.stringify({ version: 1, linkId, port, nonce }),
+    "utf8",
+  ).toString("base64url");
+  return `${normalizeBaseUrl(baseUrl)}/agent/link#${encoded}`;
 }
 
 export function buildPickUrl(baseUrl, { op, port, nonce, pickId }) {
@@ -334,7 +349,9 @@ function createLineReader() {
   };
 }
 
-async function runInteractiveOp(op, options) {
+// Delete keeps the browser-tab confirm flow: the CLI relays project selection
+// through the loopback and the browser shows its own final confirm dialog.
+async function runDeleteOp(options) {
   const lineReader = createLineReader();
   let loopback;
   try {
@@ -349,7 +366,7 @@ async function runInteractiveOp(op, options) {
       timeoutMs: LOOPBACK_TIMEOUT_MS,
     });
     await openLaunchUrl(
-      buildPickUrl(baseUrl, { op, port: loopback.port, nonce, pickId }),
+      buildPickUrl(baseUrl, { op: "delete", port: loopback.port, nonce, pickId }),
       process.platform,
     );
 
@@ -361,27 +378,239 @@ async function runInteractiveOp(op, options) {
     const { projectId } = await lineReader.nextJson();
     projectsExchange.respond({ projectId });
 
-    if (op === "edit") {
-      const graphExchange = await loopback.receive();
-      emitEvent({
-        event: "graph",
-        graph: graphExchange.body?.graph,
-        opaqueNodeIds: graphExchange.body?.opaqueNodeIds,
-        fingerprint: graphExchange.body?.fingerprint,
-      });
-      const { desiredGraph } = await lineReader.nextJson();
-      graphExchange.respond({ desiredGraph });
-    }
-
     emitEvent({ event: "done" });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : `Unable to complete the ${op}.`;
+      error instanceof Error ? error.message : "Unable to complete the delete.";
     emitEvent({ event: "error", message });
     process.exitCode = 1;
   } finally {
     lineReader.close();
     if (loopback) await loopback.close();
+  }
+}
+
+// Mints a fresh agent token via the one-shot loopback link flow: open (and
+// print, for headless/SSH sessions with no local browser) `/agent/link#…`,
+// then wait for the page to POST the token back. Shared by `--op login` and
+// by `--op edit`'s auto-link-when-absent/on-401 paths — both need exactly
+// this exchange, just triggered differently.
+async function performLink(baseUrl) {
+  const nonce = randomUUID();
+  const linkId = randomUUID();
+  const loopback = await startLoopback({
+    nonce,
+    allowedOrigin: baseUrl,
+    timeoutMs: LOOPBACK_TIMEOUT_MS,
+  });
+  try {
+    const linkUrl = buildLinkUrl(baseUrl, { linkId, port: loopback.port, nonce });
+    process.stdout.write(`${linkUrl}\n`);
+    try {
+      await openLaunchUrl(linkUrl, process.platform);
+    } catch {
+      // No local browser to open (e.g. over SSH) — the printed URL above is
+      // the fallback, so a failure here is not fatal.
+    }
+
+    const exchange = await loopback.receive();
+    const token = exchange.body?.token;
+
+    if (typeof token !== "string" || !AGENT_TOKEN_PATTERN.test(token)) {
+      exchange.respond({ ok: false });
+      throw new Error("The link callback returned an invalid token.");
+    }
+
+    exchange.respond({ ok: true });
+    return token;
+  } finally {
+    await loopback.close();
+  }
+}
+
+async function runLoginOp(options) {
+  try {
+    const baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? process.env.TRUSS_APP_URL ?? DEFAULT_BASE_URL,
+    );
+    const token = await performLink(baseUrl);
+    await writeCredential(baseUrl, token);
+    emitEvent({ event: "linked" });
+    emitEvent({ event: "done" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to link Truss.";
+    emitEvent({ event: "error", message });
+    process.exitCode = 1;
+  }
+}
+
+async function ensureCredential(baseUrl) {
+  const cached = await readCredential(baseUrl);
+  if (cached) return cached;
+  const token = await performLink(baseUrl);
+  await writeCredential(baseUrl, token);
+  return token;
+}
+
+// Wraps a fetch call with the "clear + relink once" 401 recovery the contract
+// asks for. `hasRelinked` is shared across every call made through the same
+// fetcher, so a token that is invalid for reasons other than expiry (e.g. the
+// server itself is misbehaving) fails the whole edit rather than looping.
+function createAuthedFetcher(baseUrl, initialToken) {
+  let token = initialToken;
+  let hasRelinked = false;
+
+  return {
+    async call(requestFn) {
+      let result = await requestFn(token);
+      if (result.status === 401 && !hasRelinked) {
+        hasRelinked = true;
+        await clearCredential(baseUrl);
+        token = await performLink(baseUrl);
+        await writeCredential(baseUrl, token);
+        result = await requestFn(token);
+      }
+      return result;
+    },
+  };
+}
+
+async function fetchJson(url, requestOptions) {
+  const response = await fetch(url, requestOptions);
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  return { status: response.status, body };
+}
+
+function fetchProjects(baseUrl, token) {
+  return fetchJson(`${baseUrl}/api/projects`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+
+function fetchGraph(baseUrl, projectId, token) {
+  return fetchJson(
+    `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/agent-graph`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+}
+
+function postGraphEdit(baseUrl, projectId, token, fingerprint, graph) {
+  return fetchJson(
+    `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/agent-graph-edit`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ fingerprint, graph }),
+    },
+  );
+}
+
+// Headless replacement for the old browser-driven edit: the CLI now holds
+// the agent token and calls the API directly, no tab. The stdout/stdin event
+// protocol is unchanged from the browser-relay version (see
+// references/operations.md) so the calling agent's instructions still apply.
+async function runHeadlessEditOp(options) {
+  const lineReader = createLineReader();
+  try {
+    const baseUrl = normalizeBaseUrl(
+      options.baseUrl ?? process.env.TRUSS_APP_URL ?? DEFAULT_BASE_URL,
+    );
+    const auth = createAuthedFetcher(baseUrl, await ensureCredential(baseUrl));
+
+    const projectsResult = await auth.call((token) => fetchProjects(baseUrl, token));
+    if (projectsResult.status !== 200) {
+      throw new Error("We couldn't read your projects. Please try again.");
+    }
+    const projects = Array.isArray(projectsResult.body?.projects)
+      ? projectsResult.body.projects
+      : [];
+    emitEvent({ event: "projects", projects });
+
+    const { projectId } = await lineReader.nextJson();
+    // The browser used to be the only thing standing between a hallucinated
+    // projectId and the delete/edit APIs (see the comment on
+    // runAgentPickOperation in lib/agent-pick-browser.ts). That guarantee
+    // moves here: only an id this process actually listed above is trusted.
+    const matchedProject =
+      typeof projectId === "string"
+        ? projects.find((project) => project?.id === projectId)
+        : undefined;
+    if (!matchedProject) {
+      throw new Error("The agent chose a project we don't recognize.");
+    }
+
+    let graphResult = await auth.call((token) =>
+      fetchGraph(baseUrl, matchedProject.id, token),
+    );
+    if (graphResult.status !== 200) {
+      throw new Error("We couldn't read this diagram. Please try again.");
+    }
+    emitEvent({
+      event: "graph",
+      graph: graphResult.body?.graph,
+      opaqueNodeIds: graphResult.body?.opaqueNodeIds,
+      fingerprint: graphResult.body?.fingerprint,
+    });
+
+    const { desiredGraph } = await lineReader.nextJson();
+
+    let fingerprint = graphResult.body?.fingerprint;
+    let applied = false;
+
+    for (let attempt = 0; attempt < MAX_EDIT_ATTEMPTS; attempt += 1) {
+      const editResult = await auth.call((token) =>
+        postGraphEdit(baseUrl, matchedProject.id, token, fingerprint, desiredGraph),
+      );
+
+      if (editResult.status === 200) {
+        applied = true;
+        break;
+      }
+
+      if (editResult.status !== 409) {
+        throw new Error("We couldn't apply that change. Please try again.");
+      }
+
+      // A 409 on the last attempt falls through to the "actively edited
+      // elsewhere" message below, rather than the generic one — a repeated
+      // collision deserves the more specific explanation.
+      if (attempt === MAX_EDIT_ATTEMPTS - 1) {
+        break;
+      }
+
+      // Stale fingerprint: retry once from a fresh read, matching the
+      // browser's prior behaviour (runEditFlow in lib/agent-pick-browser.ts).
+      const retryRead = await auth.call((token) =>
+        fetchGraph(baseUrl, matchedProject.id, token),
+      );
+      if (retryRead.status !== 200) {
+        throw new Error("We couldn't read this diagram. Please try again.");
+      }
+      fingerprint = retryRead.body?.fingerprint;
+    }
+
+    if (!applied) {
+      throw new Error(
+        "This diagram is being actively edited elsewhere. Please try again in a moment.",
+      );
+    }
+
+    emitEvent({ event: "done", editorUrl: `${baseUrl}/editor/${matchedProject.id}` });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to complete the edit.";
+    emitEvent({ event: "error", message });
+    process.exitCode = 1;
+  } finally {
+    lineReader.close();
   }
 }
 
@@ -413,8 +642,18 @@ async function main() {
     return;
   }
 
-  if (options.op === "edit" || options.op === "delete") {
-    await runInteractiveOp(options.op, options);
+  if (options.op === "delete") {
+    await runDeleteOp(options);
+    return;
+  }
+
+  if (options.op === "edit") {
+    await runHeadlessEditOp(options);
+    return;
+  }
+
+  if (options.op === "login") {
+    await runLoginOp(options);
     return;
   }
 

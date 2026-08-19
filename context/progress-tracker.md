@@ -1442,7 +1442,28 @@ result is observed.
   uploads, and an uploaded `.env` arrives in the build container as a dangling
   symlink — Next stats it while scanning the project root for root-level route
   files and the build dies with `ENOENT: stat '/vercel/path0/.env'`.
-- Still open: the deployment sits behind Vercel Deployment Protection, so only
-  the account owner can reach it, and Clerk is still on its development instance
-  (`pk_test_`/`sk_test_`). Both are deliberate — going public wants real Clerk
-  production keys first.
+- Live at https://truss-jet.vercel.app. Deployment Protection covers the
+  generated `truss-<hash>-*.vercel.app` URLs, not the production alias, so that
+  alias is publicly reachable. Clerk is still on its development instance
+  (`pk_test_`/`sk_test_`): it loads fine on the deployed domain but carries
+  strict usage limits. Staying on the development instance is a deliberate call
+  for now — a Clerk production instance is pinned to a domain via CNAME records,
+  and DNS cannot be set on `*.vercel.app`, so going production means buying a
+  domain first. Revisit before handing the URL to anyone else; until then anyone
+  who finds the alias can sign up into the development instance.
+  When it is time: `clerk deploy` (interactive, creates the instance and prints
+  the DNS records), then `clerk deploy status`, then add the keys to `.env` as
+  `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PROD` / `CLERK_SECRET_KEY_PROD` and re-run
+  `scripts/push-vercel-env.ts`. No code changes — the `_PROD` convention covers
+  it. Social sign-in providers would need their own production OAuth credentials.
+- The `truss-diagram` skill works against the deployment with
+  `--base-url https://truss-jet.vercel.app` (or `TRUSS_APP_URL`). Verified: the
+  `/agent/link` preflight answers 200, and the link flow's callback from the
+  deployed HTTPS page to the `127.0.0.1` loopback succeeds in a real browser —
+  the preflight and POST both arrive, no private-network header needed. It fails
+  only in headless Chrome, which is not what the skill opens.
+- Gotcha worth remembering: local and prod share one `DATABASE_URL` but use
+  different Liveblocks projects, and `Project.id` doubles as the Liveblocks room
+  ID. A diagram drawn through prod therefore appears in the local project list
+  with an empty canvas, and vice versa. Splitting the database is the fix if
+  that becomes confusing.

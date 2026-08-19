@@ -1416,3 +1416,33 @@ result is observed.
   `scripts/verify-agent-launch-editor.tsx` covers the lifecycle, same-tab
   deduplication, retry retention, mismatch/terminal no-ops, hook mount gate,
   and unchanged manual-sidebar boundary.
+
+## Production deployment and dev/prod key split
+
+- `.env` now carries production credentials alongside development ones under a
+  `_PROD` suffix (`LIVEBLOCKS_SECRET_KEY_PROD`, `LIVEBLOCKS_PUBLIC_KEY_PROD`,
+  `TRIGGER_SECRET_KEY_PROD`). Nothing reads the suffix at runtime: application
+  code keeps reading the plain names, and the suffix is resolved once per deploy
+  by `lib/env-keys.ts` (`resolveEnvKeys`). Local `npm run dev` therefore always
+  gets development keys, with no branch anywhere in the app.
+- Two callers share that function so a new key cannot follow the rule in one
+  place and not the other: `scripts/push-vercel-env.ts` (plain values into
+  Vercel Development/Preview, `_PROD` values into Production, both under the
+  plain name) and the `syncEnvVars` extension in `trigger.config.ts` (same rule
+  when `trigger.dev deploy` targets prod). `scripts/verify-env-keys.ts` covers
+  the resolution and runs in `npm run verify:unit`.
+- Trigger.dev prod holds the three tasks plus 11 synced env vars, so the Gemini
+  key no longer needs a manual dashboard entry. Deploying needs the CLI pinned
+  to the installed SDK version and Docker Desktop's credential helper on PATH:
+  `PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH" npx trigger.dev@4.5.10 deploy --env prod`.
+- Vercel project `truss` deploys from the CLI. Two things it needs and cannot
+  infer: `vercel.json` pins the Next.js framework preset (the project was
+  created with none, so the build looked for a `public/` output directory), and
+  `.vercelignore` must list `.env*`. A `.vercelignore` replaces `.gitignore` for
+  uploads, and an uploaded `.env` arrives in the build container as a dangling
+  symlink — Next stats it while scanning the project root for root-level route
+  files and the build dies with `ENOENT: stat '/vercel/path0/.env'`.
+- Still open: the deployment sits behind Vercel Deployment Protection, so only
+  the account owner can reach it, and Clerk is still on its development instance
+  (`pk_test_`/`sk_test_`). Both are deliberate — going public wants real Clerk
+  production keys first.

@@ -5,6 +5,8 @@ English, an AI agent draws it onto a shared canvas, your collaborators refine it
 live, and the same agent turns the resulting graph into a Markdown technical
 spec.
 
+**Live:** <https://truss-jet.vercel.app>
+
 ## What it does
 
 - **Projects** — sign in, create a project, invite collaborators by email. The
@@ -108,6 +110,19 @@ If you keep a `.env.local`, Next.js still reads it and it still wins on
 conflicts — but the Prisma CLI will not see it, so a key that lives only there
 is invisible to migrations and the seed.
 
+#### Development vs production keys
+
+A plain name holds the development value; an optional `<NAME>_PROD` twin holds
+the production one. Nothing local reads the `_PROD` entries — `npm run dev`
+always gets development keys. The suffix is consumed only at deploy time, by
+`scripts/push-vercel-env.ts` and by the `syncEnvVars` extension in
+`trigger.config.ts`, which both resolve it through the same
+`resolveEnvKeys()` in `lib/env-keys.ts` so a new key cannot follow the rule in
+one and not the other. Either way the value lands under the plain name, so
+application code never branches on environment.
+
+`scripts/verify-env-keys.ts` (part of `npm test`) pins that behaviour.
+
 ### Database
 
 ```bash
@@ -164,9 +179,39 @@ An edit is reconciled against the live canvas rather than replacing it, so
 hand-positioned nodes keep their positions and anything the agent could not read
 is left untouched.
 
-The launcher uses `http://localhost:3000` by default. To open another Truss
-deployment, set `TRUSS_APP_URL=https://your-truss-host.example`; it must be an
-HTTP(S) origin without a path.
+The launcher uses `http://localhost:3000` by default. To point it at the
+deployment instead, set `TRUSS_APP_URL=https://truss-jet.vercel.app`; it must be
+an HTTP(S) origin without a path.
+
+## Deploying
+
+The app runs on Vercel; the AI tasks run in Trigger.dev's cloud. They are two
+separate deploys and each needs its own copy of the environment.
+
+```bash
+npx vercel link                        # once, to bind this checkout to a project
+npx tsx scripts/push-vercel-env.ts     # .env → Vercel, applying the _PROD rule
+npx vercel --prod                      # deploy the app
+npx trigger.dev@latest deploy          # deploy the tasks
+```
+
+- **Migrations run on the host build.** `vercel-build` is
+  `prisma generate && prisma migrate deploy && next build`, so the schema is
+  brought forward by the deploy that needs it rather than by hand.
+- **`.vercelignore` replaces `.gitignore` for CLI deploys**, which means
+  everything not listed there is uploaded — `.env` included. Its `.env*` entry
+  is the one that must never be dropped: Vercel refuses to store an uploaded
+  `.env`, but the entry survives as a dangling symlink and the Next build then
+  dies with `ENOENT: stat '/vercel/path0/.env'`.
+- **Trigger.dev gets its keys from the deploy**, not from the dashboard: the
+  `syncEnvVars` extension reads the local `.env` at build time and pushes the
+  resolved set. A deploy from CI, with no `.env` to read, leaves the existing
+  vars alone rather than wiping them.
+- **Clerk has no `_PROD` twin yet**, so the deployment authenticates against the
+  Clerk *development* instance. It works — sign-in, sessions and the middleware
+  all behave — but you get the development banner and development limits. Add
+  `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY_PROD` and `CLERK_SECRET_KEY_PROD` and
+  re-push when the app moves to a domain you control.
 
 ## Scripts
 
@@ -174,8 +219,12 @@ HTTP(S) origin without a path.
 | ------- | ------------ |
 | `npm run dev` | Next.js dev server + Trigger.dev dev worker |
 | `npm run build` | Production build (runs `prisma generate` first) |
+| `npm run vercel-build` | What Vercel runs: generate, `migrate deploy`, build |
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | The `verify:*` contract checks that need no network |
+| `npm run verify:integration` | The checks that do hit the database and APIs |
 | `npm run generate` | Regenerate the Prisma client |
 | `npm run doctor` | React Doctor scan |
 

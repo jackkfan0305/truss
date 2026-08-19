@@ -43,21 +43,20 @@ next-env.d.ts
 # prisma generated client
 /generated
 
-# agent skills installed from an upstream repo — skills-lock.json pins the
-# source and content hash, so re-fetch rather than vendor ~50 reference files.
-# The lockfile itself stays tracked; without it the pins are lost.
-# react-doctor predates this and is already tracked, so these rules do not
-# affect it — .gitignore never applies to tracked files. The negations are
-# there so it does not silently vanish if it is ever removed and re-added.
+# Agent tooling is local to a checkout, not part of the project. .claude/ is
+# per-agent config (its truss-diagram entry is only a symlink into .agents/),
+# and .superpowers/ is planning prose no build step reads.
+/.claude/
+/.superpowers/
+
+# Skills installed from upstream repos — skills-lock.json pins the source and
+# content hash, so re-fetch rather than vendor the reference files. The
+# lockfile itself stays tracked; without it the pins are lost.
 /.agents/skills/*
-/.claude/skills/*
-!/.agents/skills/react-doctor/
-!/.claude/skills/react-doctor/
-# truss-diagram is authored here, not fetched from upstream, so it must be
-# tracked. Its predecessor render-truss-diagram survived only because it was
-# force-added before these rules existed; a new file under an ignored path
-# would be silently left out of every commit.
+# truss-diagram is authored here, not fetched, and `npx skills add
+# jackkfan0305/truss --skill truss-diagram` serves it straight out of this
+# repo — so it must stay tracked. A new file under an ignored path would
+# otherwise be silently left out of every commit.
 !/.agents/skills/truss-diagram/
-!/.claude/skills/truss-diagram
 
 .trigger

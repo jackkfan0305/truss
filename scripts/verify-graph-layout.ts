@@ -160,32 +160,42 @@ function checkLayoutDoesNotMutateInputs(): void {
 }
 
 /** Direct geometry tests: `chooseHandles` reads the gap, not raw centre distance. */
-function checkChooseHandlesPicksTheDominantAxis(): void {
+function checkChooseHandlesFollowsTheFlowDirection(): void {
   const base: Box = { x: 0, y: 0, width: 100, height: 50 };
 
   assert.deepEqual(
     chooseHandles(base, { ...base, x: 300 }),
     { sourceHandle: "right", targetHandle: "left" },
-    "target far to the right connects right-to-left",
+    "a target in a further rank connects right-to-left",
   );
   assert.deepEqual(
     chooseHandles(base, { ...base, x: -300 }),
     { sourceHandle: "left", targetHandle: "right" },
-    "target far to the left connects left-to-right",
+    "a back-edge to an earlier rank connects left-to-right",
   );
   assert.deepEqual(
     chooseHandles(base, { ...base, y: 300 }),
     { sourceHandle: "bottom", targetHandle: "top" },
-    "target far below connects bottom-to-top",
+    "same rank, target below: bottom-to-top",
   );
   assert.deepEqual(
     chooseHandles(base, { ...base, y: -300 }),
     { sourceHandle: "top", targetHandle: "bottom" },
-    "target far above connects top-to-bottom",
+    "same rank, target above: top-to-bottom",
   );
 
-  // A tall node beside a short one: centres are mostly vertically offset, but
-  // the clear space between the rectangles is almost entirely horizontal.
+  // The regression this rule was rewritten for. Weighing horizontal against
+  // vertical separation sent this one out through the source's top, because
+  // the target sits further up than it does across — even though the edge
+  // advances exactly one rank and the layout runs left to right.
+  assert.deepEqual(
+    chooseHandles(base, { x: 300, y: -600, width: 100, height: 50 }),
+    { sourceHandle: "right", targetHandle: "left" },
+    "a one-rank hop to a node far above still leaves from the right",
+  );
+
+  // A tall node beside a short one: the centres are mostly vertically offset,
+  // but the two rectangles still clear each other on x.
   const tall: Box = { x: 0, y: 0, width: 50, height: 400 };
   const shortBeside: Box = { x: 200, y: 350, width: 50, height: 50 };
 
@@ -309,7 +319,7 @@ function main() {
   checkAcyclicEdgesRunLeftToRight();
   checkLayoutIsDeterministic();
   checkLayoutDoesNotMutateInputs();
-  checkChooseHandlesPicksTheDominantAxis();
+  checkChooseHandlesFollowsTheFlowDirection();
   checkApplyLayoutStampsHandlesFromGeometry();
   checkEmptyGraph();
   checkDanglingEdgeReferenceIsSkippedNotInvented();

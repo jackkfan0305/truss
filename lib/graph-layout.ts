@@ -184,35 +184,38 @@ function boundingCenter(centers: readonly XYPosition[]): XYPosition {
 /**
  * Picks the handle pair for an edge from its endpoints' final rectangles.
  *
- * The dominant axis is decided by the GAP between the two rectangles, not by
- * raw centre distance — a short, wide node sitting beside a tall one still
- * has centres that are mostly vertically offset, but the clear space between
- * their edges is almost entirely horizontal, which is the axis a viewer
- * actually reads the connection along.
+ * Horizontal separation wins outright rather than competing with the vertical
+ * offset. The layout is left-to-right, so two rectangles that clear each other
+ * on x are in different ranks, and the edge between them advances the flow —
+ * it belongs on the right and left faces however far apart the two ranks sit
+ * vertically. Weighing the two gaps against each other instead sends a
+ * one-rank hop out through the top of its source the moment its target happens
+ * to sit a couple of rows up, which reads as a diagonal fighting the layout.
+ *
+ * Vertical handles are for the case that actually calls for them: two nodes in
+ * the same rank, overlapping on x, where the connection genuinely runs up or
+ * down the column.
  */
 export function chooseHandles(
   source: Box,
   target: Box
 ): { sourceHandle: string; targetHandle: string } {
-  const sourceCenter = { x: source.x + source.width / 2, y: source.y + source.height / 2 };
-  const targetCenter = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
-
-  const horizontalGap =
-    target.x >= source.x
-      ? target.x - (source.x + source.width)
-      : source.x - (target.x + target.width);
-  const verticalGap =
-    target.y >= source.y
-      ? target.y - (source.y + source.height)
-      : source.y - (target.y + target.height);
-
-  if (horizontalGap >= verticalGap) {
-    return targetCenter.x >= sourceCenter.x
-      ? { sourceHandle: HANDLE_ID.right, targetHandle: HANDLE_ID.left }
-      : { sourceHandle: HANDLE_ID.left, targetHandle: HANDLE_ID.right };
+  // A forward hop: the target's left edge clears the source's right one.
+  if (target.x >= source.x + source.width) {
+    return { sourceHandle: HANDLE_ID.right, targetHandle: HANDLE_ID.left };
   }
 
-  return targetCenter.y >= sourceCenter.y
+  // A back-edge, the same test mirrored.
+  if (source.x >= target.x + target.width) {
+    return { sourceHandle: HANDLE_ID.left, targetHandle: HANDLE_ID.right };
+  }
+
+  // Same rank: the rectangles overlap on x, so the connection really does run
+  // up or down the column.
+  const sourceCenterY = source.y + source.height / 2;
+  const targetCenterY = target.y + target.height / 2;
+
+  return targetCenterY >= sourceCenterY
     ? { sourceHandle: HANDLE_ID.bottom, targetHandle: HANDLE_ID.top }
     : { sourceHandle: HANDLE_ID.top, targetHandle: HANDLE_ID.bottom };
 }

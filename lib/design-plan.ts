@@ -730,9 +730,19 @@ function applyActionsInMemory(
     }
   }
 
+  // `flatMap` over filter-then-map: one pass, and the lookup narrows the type
+  // itself instead of needing a non-null assertion to undo the `has` check.
   return {
-    nodes: nodeOrder.filter((id) => nodes.has(id)).map((id) => nodes.get(id)!),
-    edges: edgeOrder.filter((id) => edges.has(id)).map((id) => edges.get(id)!),
+    nodes: nodeOrder.flatMap((id) => {
+      const node = nodes.get(id);
+
+      return node ? [node] : [];
+    }),
+    edges: edgeOrder.flatMap((id) => {
+      const edge = edges.get(id);
+
+      return edge ? [edge] : [];
+    }),
   };
 }
 

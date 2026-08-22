@@ -66,7 +66,6 @@ const graphSchemaMarkdown = await readFile(
 const documentedGraph = JSON.parse(
   graphSchemaMarkdown.match(/```json\n([\s\S]*?)\n```/)?.[1] ?? "",
 );
-
 assert.deepEqual(
   parseLauncherInput(["--stdin-json"], JSON.stringify(input)),
   input,
@@ -77,7 +76,18 @@ assert.deepEqual(
     JSON.stringify({ title: "Documented graph", graph: documentedGraph }),
   ).graph,
   documentedGraph,
-  "the graph documented for skill consumers passes the real launcher parser",
+  "the graph documented for skill consumers passes the real launcher parser, positions omitted and all",
+);
+
+// The documented example carries no `x`/`y` at all, which is the case the docs
+// now tell agents to send. Assert the omission survives the parser rather than
+// being backfilled: a placeholder position would travel all the way to the app
+// only to be discarded by its layout pass.
+assert.ok(
+  documentedGraph.nodes.every(
+    (node) => node.x === undefined && node.y === undefined,
+  ),
+  "the documented example graph omits positions",
 );
 assert.throws(() => parseLauncherInput([], JSON.stringify(input)));
 assert.throws(() => parseLauncherInput(["--title", input.title], input));

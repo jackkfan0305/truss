@@ -38,8 +38,8 @@ The script authenticates with an agent token cached at `~/.truss/credentials.jso
 
 1. Preserve the user's title and description after trimming whitespace. Do not invent a title when one is missing. Ask only for the missing title or description.
 2. Reject titles over 120 characters and descriptions over 2,000 characters with a concise request to shorten that value.
-3. Read [the compact graph contract](references/graph-schema.md). Infer the architecture from the description and produce one positioned compact graph that conforms exactly to it. Do not include secrets in labels.
-4. Keep the primary request path left to right. Keep node origins at least 240 flow units apart horizontally and 150 vertically. Put supporting systems on secondary rows. Use stable lowercase kebab-case IDs, concise labels, consistent colors, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors, and simple shapes for services.
+3. Read [the compact graph contract](references/graph-schema.md). Infer the architecture from the description and produce one compact graph that conforms exactly to it. Do not include secrets in labels.
+4. The app lays the diagram out itself, so spend your judgment on meaning, not geometry: pick each node's shape and color per the legend in [the compact graph contract](references/graph-schema.md), name things in the user's domain language, and use stable lowercase kebab-case IDs and concise labels. Label an edge only when what moves across it isn't obvious from its two endpoints.
 5. Pass no graph data in shell arguments: invoke the script with only `--stdin-json` (and optionally `--base-url <origin>`) and send exactly one JSON object with `{ "title": "…", "graph": { … } }` through process stdin. Prefer a process API that passes an argument array. `--op create` is the default and may be omitted.
 6. The script creates the project and draws the graph into it, then emits `done` with the `editorUrl`. Tell the user the diagram is ready and give them that link. Nobody has to be watching for it to land — but if they already have Truss open, they will see the agent draw it live.
 

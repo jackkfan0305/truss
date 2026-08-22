@@ -5,6 +5,7 @@ import {
   projectCanvasToAgentGraph,
   type AgentGraphView,
 } from "@/lib/agent-graph";
+import type { CanvasEdge } from "@/types/canvas";
 import {
   collidesWithOpaque,
   diffAgentGraph,
@@ -50,6 +51,45 @@ function parseEditRequest(value: unknown): EditRequest | null {
 }
 
 type EditDecision = "applied" | "stale" | "collision";
+
+/**
+ * Maps a materialized, laid-out snapshot to the compact shape `diffAgentGraph`
+ * expects — without going back through `projectCanvasToAgentGraph`'s schema
+ * revalidation.
+ *
+ * `projectCanvasToAgentGraph` looked like the natural fit (it already produces
+ * exactly this shape from a snapshot), but it re-runs every node through
+ * `agentGraphNodeSchema`, which clamps `x`/`y` to
+ * [`MIN_AGENT_GRAPH_POSITION`, `MAX_AGENT_GRAPH_POSITION`]. A dagre layout of a
+ * wide graph routinely lands nodes outside that compact-contract range (a
+ * 40-node chain reaches roughly x=14,800, well past the 10,000 bound) even
+ * though every field is perfectly well-formed — the bound exists to police
+ * agent input, not the app's own layout output. Failing that check would make
+ * `projectCanvasToAgentGraph` mark the node opaque, which would make it vanish
+ * from `desired.graph.nodes` entirely and read to `diffAgentGraph` as removed.
+ * This mapping is 1:1 with `desiredSnapshot`, which was itself built by
+ * `materializeAgentGraph` from already-validated agent input, so every field
+ * other than the freshly laid-out position is already known-valid.
+ */
+function toDesiredAgentGraph(desiredSnapshot: CanvasSnapshot): AgentGraphView["graph"] {
+  return {
+    version: 1,
+    nodes: desiredSnapshot.nodes.map((node) => ({
+      id: node.id,
+      label: node.data.label,
+      shape: node.data.shape,
+      color: node.data.color,
+      x: node.position.x,
+      y: node.position.y,
+    })),
+    edges: desiredSnapshot.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.data?.label ?? "",
+    })),
+  };
+}
 
 /**
  * Applies removals and updates as one batch, then draws additions paced.
@@ -125,6 +165,32 @@ function applyDiff(
     }
   }
 
+  /*
+   * Handles are a rendering detail the compact graph contract has no concept
+   * of (`AgentGraphEdge` carries no handle field), so `diffAgentGraph`'s
+   * `edgesEqual` never flags a handle-only change and the loop above never
+   * touches it. Every relayout can still move an edge's handle even when its
+   * source/target/label do not change — the whole point of laying out on
+   * every edit — so every edge that survives this diff (updated above or
+   * untouched) is checked against the live room's handles here and stamped
+   * only when they actually differ.
+   */
+  const liveEdgesById = new Map(live.edges.map((edge) => [edge.id, edge]));
+
+  for (const edge of desired.edges) {
+    const liveEdge = liveEdgesById.get(edge.id);
+
+    if (
+      liveEdge &&
+      (liveEdge.sourceHandle !== edge.sourceHandle || liveEdge.targetHandle !== edge.targetHandle)
+    ) {
+      flow.updateEdge(edge.id, {
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+      } satisfies Partial<CanvasEdge>);
+    }
+  }
+
   return drawNodesThenEdges(
     projectId,
     flow,
@@ -184,7 +250,13 @@ export async function handleAgentGraphEditPost(
         return;
       }
 
-      const diff = diffAgentGraph(live, parsed.graph);
+      // Diffed against the laid-out graph, not `parsed.graph` as sent: the app
+      // re-lays out every node on every edit, so a node the agent re-sent with
+      // unchanged coordinates must still be judged "moved" when the layout
+      // wants it somewhere else. `collidesWithOpaque` above is deliberately
+      // still checked against what the agent asked for — collision is about
+      // the ID the caller chose, not where layout ultimately puts it.
+      const diff = diffAgentGraph(live, toDesiredAgentGraph(desiredSnapshot));
       await applyDiff(projectId, flow, diff, desiredSnapshot, liveSnapshot, dependencies);
       decision = "applied";
       appliedSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
+import { applyLayout } from "@/lib/graph-layout";
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
@@ -11,6 +12,8 @@ import {
   NODE_COLORS,
   NODE_DEFAULT_SIZES,
   NODE_SHAPES,
+  type CanvasEdge,
+  type CanvasNode,
   type NodeColor,
 } from "@/types/canvas";
 
@@ -44,8 +47,12 @@ const agentGraphNodeSchema = z.strictObject({
     label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
     shape: z.enum(NODE_SHAPES),
     color: z.enum(nodeColorValues),
-    x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
-    y: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
+    // The app lays out every graph itself (`materializeAgentGraph`), so these
+    // are optional going forward. Kept validated when present — with the same
+    // int/range rule as before — so an older agent that still sends them
+    // cannot start failing; the values are simply ignored once parsed.
+    x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION).optional(),
+    y: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION).optional(),
 });
 
 const agentGraphEdgeSchema = z.strictObject({
@@ -158,26 +165,32 @@ export function parseAgentGraph(value: unknown): AgentGraph | null {
  * Takes `AgentGraphView["graph"]` rather than the stricter `AgentGraph` — the
  * body only reads fields both share, and the edit path legitimately produces a
  * zero-node graph that `AgentGraph` alone would not type.
+ *
+ * The app owns placement, not the agent: every node is run through
+ * `applyLayout` before this returns, so `node.x`/`node.y` are used only as an
+ * arbitrary pre-layout placeholder (defaulting to the origin when absent, as
+ * they now normally are) and are otherwise discarded, and every edge comes
+ * back with `sourceHandle`/`targetHandle` stamped from the laid-out geometry.
  */
 export function materializeAgentGraph(graph: AgentGraphView["graph"]): CanvasSnapshot {
-  return {
-    nodes: graph.nodes.map((node) => ({
-      id: node.id,
-      type: CANVAS_NODE_TYPE,
-      position: { x: node.x, y: node.y },
-      ...NODE_DEFAULT_SIZES[node.shape],
-      data: { label: node.label, shape: node.shape, color: node.color },
-    })),
-    edges: graph.edges.map((edge) => ({
-      id: edge.id,
-      type: CANVAS_EDGE_TYPE,
-      source: edge.source,
-      target: edge.target,
-      data: { label: edge.label },
-      style: { ...CANVAS_EDGE_STYLE },
-      markerEnd: { ...CANVAS_EDGE_MARKER },
-    })),
-  };
+  const nodes: CanvasNode[] = graph.nodes.map((node) => ({
+    id: node.id,
+    type: CANVAS_NODE_TYPE,
+    position: { x: node.x ?? 0, y: node.y ?? 0 },
+    ...NODE_DEFAULT_SIZES[node.shape],
+    data: { label: node.label, shape: node.shape, color: node.color },
+  }));
+  const edges: CanvasEdge[] = graph.edges.map((edge) => ({
+    id: edge.id,
+    type: CANVAS_EDGE_TYPE,
+    source: edge.source,
+    target: edge.target,
+    data: { label: edge.label },
+    style: { ...CANVAS_EDGE_STYLE },
+    markerEnd: { ...CANVAS_EDGE_MARKER },
+  }));
+
+  return applyLayout(nodes, edges);
 }
 
 /**

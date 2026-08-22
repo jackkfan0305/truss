@@ -322,10 +322,17 @@ function checkRouteDurationCoversMaximumNativeImport(): void {
 
 /** Server-side pacing makes the mounted room observe an intentional drawing sequence. */
 async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
+  const laidOut = materializeAgentGraph(graph);
   const canvas: CanvasSnapshot = {
-    nodes: [materializeAgentGraph(graph).nodes[0]],
+    nodes: [laidOut.nodes[0]],
     edges: [],
   };
+  // The app lays every graph out itself now, so the target the cursor sweeps
+  // to is wherever `applyLayout` put "orders-api" — not the agent's raw (280,
+  // 0) — and is read from the same materialization the import path itself
+  // uses, rather than hard-coded, so this does not silently drift out of sync
+  // with the layout module.
+  const ordersApiPosition = laidOut.nodes[1].position;
   const events: string[] = [];
   const { dependencies, getFlowWrites, getMutationCount, getPersistenceCount } =
     createDependencies(canvas, {
@@ -354,11 +361,12 @@ async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
     "node:orders-api",
     "edge:client-to-orders",
   ], "only canonical items missing from an interrupted import are added");
+  const ordersApiCursor = `cursor:${ordersApiPosition.x},${ordersApiPosition.y}`;
   assert.deepEqual(events, [
-    "cursor:280,0",
+    ordersApiCursor,
     `delay:${AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS}`,
     `delay:${getBuildStepMs(2)}`,
-    "cursor:280,0",
+    ordersApiCursor,
     `delay:${AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS}`,
     `delay:${getBuildStepMs(2)}`,
     "clear",

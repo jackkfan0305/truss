@@ -171,14 +171,20 @@ async function checkRemovalOfASeenEdgeLeavesItsNodesIntact(): Promise<void> {
   );
 }
 
+/**
+ * The app owns layout now, so the only thing that keeps a node's position
+ * stable across an edit is the layout itself producing the same answer twice
+ * — which it does whenever the graph's structure (ids, edges, shapes) is
+ * unchanged. This is no longer a claim about the agent's x/y being honoured.
+ */
 async function checkLabelOnlyUpdateLeavesPositionAlone(): Promise<void> {
-  const start = materializeAgentGraph({ version: 1, nodes: [n("web", "Web", 40, 60)], edges: [] });
+  const start = materializeAgentGraph({ version: 1, nodes: [n("web", "Web")], edges: [] });
   const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
 
   const response = await handleAgentGraphEditPost(
     request({
       fingerprint: canvasFingerprint(start),
-      graph: { version: 1, nodes: [n("web", "Web Server", 40, 60)], edges: [] },
+      graph: { version: 1, nodes: [n("web", "Web Server")], edges: [] },
     }),
     "p1",
     deps(flow, {}),
@@ -189,28 +195,126 @@ async function checkLabelOnlyUpdateLeavesPositionAlone(): Promise<void> {
   assert.equal(state.nodes[0].data.label, "Web Server");
   assert.deepEqual(
     state.nodes[0].position,
-    { x: 40, y: 60 },
-    "position is untouched by a label-only update",
+    start.nodes[0].position,
+    "position is untouched by a label-only update, because layout of the same graph shape is deterministic",
   );
 }
 
-async function checkPositionOnlyUpdateLeavesLabelAlone(): Promise<void> {
-  const start = materializeAgentGraph({ version: 1, nodes: [n("web", "Web", 40, 60)], edges: [] });
+/**
+ * THE REGRESSION THIS TASK EXISTS TO PREVENT.
+ *
+ * The agent re-sends "web" with the exact x/y it already has on the live
+ * canvas — the case the old diff (comparing agent-supplied x/y against the
+ * live canvas's x/y) would call unchanged and never move. But the edit also
+ * adds an upstream node feeding into "web", so the whole graph must re-lay
+ * out and "web" has to shift right into rank 1. The fix diffs against the
+ * *laid-out* desired graph, not the raw request, so this must still produce a
+ * position update despite the identical x/y the agent sent.
+ */
+async function checkUnchangedCoordinatesStillMoveWhenLayoutWantsThemElsewhere(): Promise<void> {
+  const start = materializeAgentGraph({ version: 1, nodes: [n("web", "Web")], edges: [] });
+  const startPosition = start.nodes[0].position;
   const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
 
   const response = await handleAgentGraphEditPost(
     request({
       fingerprint: canvasFingerprint(start),
-      graph: { version: 1, nodes: [n("web", "Web", 500, 320)], edges: [] },
+      graph: {
+        version: 1,
+        nodes: [
+          n("web", "Web", startPosition.x, startPosition.y),
+          n("upstream", "Upstream"),
+        ],
+        edges: [{ id: "upstream-to-web", source: "upstream", target: "web", label: "" }],
+      },
     }),
     "p1",
     deps(flow, {}),
   );
 
   assert.equal(response.status, 200);
-  assert.equal(state.nodes.length, 1);
-  assert.deepEqual(state.nodes[0].position, { x: 500, y: 320 });
-  assert.equal(state.nodes[0].data.label, "Web", "label is untouched by a position-only update");
+  const web = state.nodes.find((node) => node.id === "web")!;
+  assert.notDeepEqual(
+    web.position,
+    startPosition,
+    "layout still relocates a node even though the agent re-sent its old coordinates unchanged",
+  );
+}
+
+/**
+ * `edgesEqual` in `lib/agent-graph-diff.ts` only compares source/target/label,
+ * so an edge whose endpoints moved but whose fields are otherwise identical
+ * never shows up in `diff.updatedEdges` — yet its handles can be stale once
+ * its nodes relocate. `applyDiff` has to catch this itself.
+ */
+async function checkEdgeHandlesAreRefreshedWhenEndpointsMove(): Promise<void> {
+  const start = materializeAgentGraph({
+    version: 1,
+    nodes: [n("web"), n("db")],
+    edges: [{ id: "web-to-db", source: "web", target: "db", label: "" }],
+  });
+  const originalEdge = start.edges[0];
+  assert.ok(originalEdge.sourceHandle, "the initial layout stamps a sourceHandle");
+  assert.ok(originalEdge.targetHandle, "the initial layout stamps a targetHandle");
+
+  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
+
+  // Adding an upstream predecessor to "web" reranks the whole graph: "db" ends
+  // up two ranks over instead of one, which is enough to shift where the edge
+  // between "web" and "db" needs to leave from and land on relative to the
+  // node in between — a case dagre is free to route differently than the
+  // original two-node chain.
+  const response = await handleAgentGraphEditPost(
+    request({
+      fingerprint: canvasFingerprint(start),
+      graph: {
+        version: 1,
+        nodes: [n("web"), n("db"), n("upstream")],
+        edges: [
+          { id: "web-to-db", source: "web", target: "db", label: "" },
+          { id: "upstream-to-web", source: "upstream", target: "web", label: "" },
+        ],
+      },
+    }),
+    "p1",
+    deps(flow, {}),
+  );
+
+  assert.equal(response.status, 200);
+  const edge = state.edges.find((candidate) => candidate.id === "web-to-db")!;
+  assert.equal(edge.sourceHandle, "right", "still a straight left-to-right chain, so still right-to-left");
+  assert.equal(edge.targetHandle, "left");
+
+  // Now shrink back to just "web" -> "db": "db" moves back to rank 1, which is
+  // the regression case — same two edge endpoints, same handle pairing this
+  // graph shape always produces, but only correct if it was actually
+  // recomputed rather than left over from the three-node layout above.
+  const secondFingerprint = canvasFingerprint({ nodes: [...flow.nodes], edges: [...flow.edges] });
+  const secondResponse = await handleAgentGraphEditPost(
+    request({
+      fingerprint: secondFingerprint,
+      graph: {
+        version: 1,
+        nodes: [n("web"), n("db")],
+        edges: [{ id: "web-to-db", source: "web", target: "db", label: "" }],
+      },
+    }),
+    "p1",
+    deps(flow, {}),
+  );
+
+  assert.equal(secondResponse.status, 200);
+  const finalEdge = state.edges.find((candidate) => candidate.id === "web-to-db")!;
+  assert.deepEqual(
+    { sourceHandle: finalEdge.sourceHandle, targetHandle: finalEdge.targetHandle },
+    { sourceHandle: originalEdge.sourceHandle, targetHandle: originalEdge.targetHandle },
+    "handles are refreshed back to what the two-node layout calls for, not left stale from the three-node layout",
+  );
+  assert.deepEqual(
+    state.nodes.find((node) => node.id === "db")!.position,
+    start.nodes.find((node) => node.id === "db")!.position,
+    "db's position is also refreshed back to the original two-node layout",
+  );
 }
 
 async function checkEmptyDesiredGraphEmptiesTheCanvas(): Promise<void> {
@@ -502,7 +606,8 @@ async function main(): Promise<void> {
   await checkRemovalOfASeenNodeIsApplied();
   await checkRemovalOfASeenEdgeLeavesItsNodesIntact();
   await checkLabelOnlyUpdateLeavesPositionAlone();
-  await checkPositionOnlyUpdateLeavesLabelAlone();
+  await checkUnchangedCoordinatesStillMoveWhenLayoutWantsThemElsewhere();
+  await checkEdgeHandlesAreRefreshedWhenEndpointsMove();
   await checkEmptyDesiredGraphEmptiesTheCanvas();
   await checkUnseenNodeSurvivesAnEdit();
   await checkReusingAnOpaqueIdIsRefusedAndNothingMutates();

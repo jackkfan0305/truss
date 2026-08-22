@@ -1467,3 +1467,31 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
+- Diagram readability rework. The app now owns node placement: `lib/graph-layout.ts`
+  runs a deterministic left-to-right dagre layout and stamps `sourceHandle`/
+  `targetHandle` on every edge from the resulting geometry. Both generation paths
+  re-lay out the whole graph on every run — `materializeAgentGraph` for the skill,
+  `parseDesignPlan` for the in-app design agent — so neither the model nor an
+  external agent places anything any more, and the layout instructions were
+  deleted from both prompts. Handles are why the old diagrams looked like
+  spaghetti: generated edges set none, and React Flow falls back to the first
+  handle a node renders, so every edge left the top of its source and entered the
+  top of its target.
+- Two invariants the layout has to hold, both regression-tested:
+  the laid-out graph is centred on the origin, because the compact agent contract
+  only represents ±10,000 and anything outside projects as *opaque* — invisible to
+  an agent reading the canvas back, and a 409 on its next edit; and labelling an
+  edge must not widen the layout, because declaring label sizes to dagre reserves
+  that width *on top of* `ranksep` and pushed a fully-labelled 40-node chain
+  (the contract's own ceiling) past ±11,000. The rank gap reserves the pill's
+  width for every gap instead.
+- `lib/diagram-legend.ts` is the one definition of what the visual vocabulary
+  means — shape = kind of thing, colour = layer, edge label = what moves. It is
+  injected into `lib/design-prompt.ts` and mirrored into the skill's
+  `references/graph-schema.md`, with `scripts/verify-design-agent.ts` asserting the
+  markdown still carries the exact meaning strings so the two cannot drift.
+- `lib/canvas-geometry.ts` exists only to break a cycle: `graph-layout` needs
+  `LAYOUT_GRID`/`MIN_NODE_GAP`/`toBox`, which lived in `design-plan`, which now
+  imports `applyLayout`. The cycle threw at module scope rather than degrading.
+- `x`/`y` are optional through the whole agent path now (skill docs, launcher
+  validation, and the zod schema) and ignored wherever they arrive.

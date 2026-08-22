@@ -19,6 +19,7 @@ import {
   type NodeShape,
   type NodeSize,
 } from "@/types/canvas";
+import { applyLayout } from "@/lib/graph-layout";
 
 /**
  * The design agent's trust boundary (23-design-agent-logic).
@@ -33,9 +34,16 @@ import {
  * without a room, a model or a browser.
  */
 
+/**
+ * The action types a model is allowed to request. `moveNode` and `updateEdge`
+ * are deliberately absent: the app lays out the whole graph on every
+ * generation now (`layoutPlan` below), so a model-requested position is never
+ * honoured and a model has no coordinate to update a handle from either.
+ * Both still exist as `DesignAction` variants — `layoutPlan` emits them
+ * itself — just never as something raw model output can produce.
+ */
 export const DESIGN_ACTION_TYPES = [
   "addNode",
-  "moveNode",
   "resizeNode",
   "updateNodeData",
   "deleteNode",
@@ -55,25 +63,6 @@ export const NODE_COLOR_NAMES = Object.keys(NODE_COLORS) as NodeColor[];
  */
 export const MAX_DESIGN_ACTIONS = 60;
 
-/** Positions snap to this, matching the canvas `Background` dot grid. */
-export const LAYOUT_GRID = 20;
-
-/** The clear space every generated node keeps from its neighbours, in flow units. */
-export const MIN_NODE_GAP = 40;
-
-/** How far right of the existing diagram a generated one starts. */
-const NEW_CONTENT_OFFSET = 80;
-
-/**
- * Auto-placed nodes lay out in rows of this many before wrapping. The steps
- * clear the widest and tallest default node plus `EDGE_LABEL_CLEARANCE`, so a
- * labelled edge between two auto-placed nodes has somewhere to draw itself
- * instead of landing on one of them.
- */
-const AUTO_COLUMNS = 4;
-const AUTO_COLUMN_STEP = 380;
-const AUTO_ROW_STEP = 240;
-
 /** A node big enough to matter, small enough to stay on a readable canvas. */
 const MAX_NODE_SIZE: NodeSize = { width: 800, height: 600 };
 
@@ -82,17 +71,22 @@ const AI_NODE_ID_PREFIX = "ai";
 const MAX_ID_LENGTH = 48;
 const MAX_LABEL_LENGTH = 80;
 
-/** A push-down loop has to terminate even against a pathological canvas. */
-const MAX_PLACEMENT_ATTEMPTS = 50;
-
 export type DesignAction =
   | { type: "addNode"; node: CanvasNode }
-  | { type: "moveNode"; id: string; position: XYPosition }
+  // `label` rides along so the sidebar activity list can name the node a
+  // relayout moved without `describeDesignAction` needing a lookup table —
+  // every `moveNode` is `layoutPlan`'s own output now, and it already has
+  // the node's current label in hand when it builds one.
+  | { type: "moveNode"; id: string; position: XYPosition; label: string }
   | { type: "resizeNode"; id: string; width: number; height: number }
   | { type: "updateNodeData"; id: string; data: Partial<CanvasNodeData> }
   | { type: "deleteNode"; id: string }
   | { type: "addEdge"; edge: CanvasEdge }
-  | { type: "deleteEdge"; id: string };
+  | { type: "deleteEdge"; id: string }
+  // Never built from raw model output (see `DESIGN_ACTION_TYPES`) — only
+  // `layoutPlan` emits this, to refresh a pre-existing edge's handles after
+  // a relayout moved one of its endpoints.
+  | { type: "updateEdge"; id: string; sourceHandle: string; targetHandle: string };
 
 export interface DesignPlan {
   summary: string;
@@ -104,8 +98,6 @@ export interface DesignContext {
   nodes: readonly CanvasNode[];
   edges: readonly CanvasEdge[];
 }
-
-export interface Box extends NodeSize, XYPosition {}
 
 /**
  * Validates and normalizes a raw model response into a plan the canvas can
@@ -120,9 +112,11 @@ export function parseDesignPlan(
   const summary = readSummary(raw);
   const rawActions = readActionList(raw);
   const resolver = createIdResolver(context);
-  const layout = createLayout(context);
   const actions: DesignAction[] = [];
 
+  // The cap applies to what the model asked for, not to what `layoutPlan`
+  // adds on top — a relayout's own moves and handle refreshes are never
+  // truncated by it.
   for (const rawAction of rawActions.slice(0, MAX_DESIGN_ACTIONS)) {
     const type = readString(rawAction, "type");
 
@@ -130,10 +124,10 @@ export function parseDesignPlan(
       continue;
     }
 
-    actions.push(...buildActions(type, rawAction, resolver, layout));
+    actions.push(...buildActions(type, rawAction, resolver));
   }
 
-  return { summary, actions };
+  return { summary, actions: layoutPlan(actions, context) };
 }
 
 /**
@@ -188,6 +182,12 @@ export function applyDesignAction(
     case "deleteEdge":
       flow.removeEdge(action.id);
       break;
+    case "updateEdge":
+      flow.updateEdge(action.id, {
+        sourceHandle: action.sourceHandle,
+        targetHandle: action.targetHandle,
+      });
+      break;
   }
 }
 
@@ -232,7 +232,8 @@ export function createCursorTargets(context: DesignContext) {
           // connection lands is what makes an edge read as being drawn.
           return positions.get(action.edge.target) ?? null;
 
-        case "deleteEdge": {
+        case "deleteEdge":
+        case "updateEdge": {
           const target = edgeTargets.get(action.id);
 
           return target === undefined ? null : positions.get(target) ?? null;
@@ -269,6 +270,10 @@ export function describeDesignAction(action: DesignAction): string {
   switch (action.type) {
     case "addNode":
       return action.node.data.label;
+    case "moveNode":
+      // Falls back to the id in the rare case the moved node has no label —
+      // an empty row would be worse than a raw id, same as `deleteNode`.
+      return action.label || action.id;
     case "addEdge":
       return `${action.edge.source} → ${action.edge.target}`;
     case "updateNodeData":
@@ -283,14 +288,11 @@ export function describeDesignAction(action: DesignAction): string {
 function buildActions(
   type: DesignActionType,
   raw: unknown,
-  resolver: IdResolver,
-  layout: Layout
+  resolver: IdResolver
 ): DesignAction[] {
   switch (type) {
     case "addNode":
-      return buildAddNode(raw, resolver, layout);
-    case "moveNode":
-      return buildMoveNode(raw, resolver);
+      return buildAddNode(raw, resolver);
     case "resizeNode":
       return buildResizeNode(raw, resolver);
     case "updateNodeData":
@@ -304,15 +306,10 @@ function buildActions(
   }
 }
 
-function buildAddNode(
-  raw: unknown,
-  resolver: IdResolver,
-  layout: Layout
-): DesignAction[] {
+function buildAddNode(raw: unknown, resolver: IdResolver): DesignAction[] {
   const shape = readShape(raw) ?? DEFAULT_NODE_SHAPE;
   const size = readSize(raw) ?? NODE_DEFAULT_SIZES[shape];
   const id = resolver.claimNodeId(readString(raw, "id"));
-  const position = layout.place(readPosition(raw), size);
 
   return [
     {
@@ -320,7 +317,10 @@ function buildAddNode(
       node: {
         id,
         type: CANVAS_NODE_TYPE,
-        position,
+        // Overwritten by `layoutPlan` before this plan ever reaches the
+        // canvas — the app places every node now, never the model, so there
+        // is nothing to read a proposed position for.
+        position: { x: 0, y: 0 },
         width: size.width,
         height: size.height,
         data: {
@@ -331,17 +331,6 @@ function buildAddNode(
       },
     },
   ];
-}
-
-function buildMoveNode(raw: unknown, resolver: IdResolver): DesignAction[] {
-  const id = resolver.resolveNodeId(readString(raw, "id"));
-  const position = readPosition(raw);
-
-  if (!id || !position) {
-    return [];
-  }
-
-  return [{ type: "moveNode", id, position: snapPosition(position) }];
 }
 
 function buildResizeNode(raw: unknown, resolver: IdResolver): DesignAction[] {
@@ -583,132 +572,168 @@ function sanitizeId(value: string | null): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-// --- layout ----------------------------------------------------------------
-
-interface Layout {
-  /** Snaps a position to the grid and pushes it clear of everything placed. */
-  place: (proposed: XYPosition | null, size: NodeSize) => XYPosition;
-}
+// --- layout ------------------------------------------------------------
 
 /**
- * The layout and spacing rules from the spec, in one place: every generated
- * node lands on the canvas grid and keeps `MIN_NODE_GAP` clear of every node
- * already on the canvas and of every node this plan places.
+ * Re-lays out the whole resulting graph after every generation, create and
+ * edit alike. This replaces the old `createLayout`/`pushClear` (grid-snap,
+ * then shove overlaps straight down) — that knew nothing about edges, so
+ * crossings and long back-edges went unmanaged. `applyLayout`
+ * (`lib/graph-layout.ts`) is the dagre-based upgrade the old `pushClear`
+ * comment named as the intended next step.
  *
- * A model that omits positions entirely — or returns the same one for every
- * node — is the common failure, and it produces a single unreadable pile. The
- * fallback lays those out in rows just clear of the existing diagram, so a
- * generated design never lands on top of the user's work.
+ * Folds the layout result back into the actions the model actually asked
+ * for: an added node is born at its final position (never an add-then-move
+ * pair), an existing node only gets a `moveNode` when its position actually
+ * changed, and every edge — generated or pre-existing — ends up with the
+ * handle pair its final geometry calls for.
  */
-function createLayout(context: DesignContext): Layout {
-  const boxes = context.nodes.map(toBox);
-  const origin = {
-    x: boxes.length === 0 ? 0 : maxOf(boxes, (box) => box.x + box.width) + NEW_CONTENT_OFFSET,
-    y: boxes.length === 0 ? 0 : minOf(boxes, (box) => box.y),
-  };
-  let autoIndex = 0;
+function layoutPlan(
+  actions: readonly DesignAction[],
+  context: DesignContext
+): DesignAction[] {
+  const resulting = applyActionsInMemory(context, actions);
+  const laidOut = applyLayout(resulting.nodes, resulting.edges);
+  const laidOutNodesById = new Map(laidOut.nodes.map((node) => [node.id, node]));
+  const laidOutEdgesById = new Map(laidOut.edges.map((edge) => [edge.id, edge]));
 
-  return {
-    place(proposed, size) {
-      const start = proposed ?? nextAutoPosition(origin, autoIndex);
+  // Adds and edges the plan already asked for, with the layout folded
+  // directly into them — never a separate move for something not yet on
+  // the canvas.
+  const folded = actions.map((action): DesignAction => {
+    if (action.type === "addNode") {
+      const placed = laidOutNodesById.get(action.node.id);
 
-      if (!proposed) {
-        autoIndex += 1;
-      }
-
-      const placed = pushClear(snapPosition(start), size, boxes);
-
-      boxes.push({ ...placed, ...size });
-
-      return placed;
-    },
-  };
-}
-
-function nextAutoPosition(origin: XYPosition, index: number): XYPosition {
-  return {
-    x: origin.x + (index % AUTO_COLUMNS) * AUTO_COLUMN_STEP,
-    y: origin.y + Math.floor(index / AUTO_COLUMNS) * AUTO_ROW_STEP,
-  };
-}
-
-/**
- * Downwards rather than in the nearest free direction: it is one axis, it is
- * stable (the same plan lays out the same way twice), and a diagram that grows
- * down stays inside the viewport React Flow fits to.
- *
- * ponytail: no force-directed relaxation and no edge-aware routing. If diagrams
- * start reading as columns rather than as flows, that is when a real layout
- * pass (dagre/elk) earns its dependency.
- */
-function pushClear(
-  start: XYPosition,
-  size: NodeSize,
-  boxes: readonly Box[]
-): XYPosition {
-  let candidate = { ...start };
-
-  for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS; attempt += 1) {
-    const blocker = boxes.find((box) => overlaps({ ...candidate, ...size }, box));
-
-    if (!blocker) {
-      return candidate;
+      return placed
+        ? { ...action, node: { ...action.node, position: placed.position } }
+        : action;
     }
 
-    candidate = {
-      x: candidate.x,
-      y: snapUp(blocker.y + blocker.height + MIN_NODE_GAP),
-    };
-  }
+    if (action.type === "addEdge") {
+      const wired = laidOutEdgesById.get(action.edge.id);
 
-  return candidate;
+      return wired?.sourceHandle && wired.targetHandle
+        ? {
+            ...action,
+            edge: {
+              ...action.edge,
+              sourceHandle: wired.sourceHandle,
+              targetHandle: wired.targetHandle,
+            },
+          }
+        : action;
+    }
+
+    return action;
+  });
+
+  // A pre-existing node whose layout position did not move needs nothing —
+  // a no-op move is a pointless AI-cursor trip and a junk activity row. One
+  // that did move gets exactly one `moveNode`, in reading order (left to
+  // right, top to bottom) so the relaid-out canvas draws itself sensibly.
+  const moves = context.nodes
+    .flatMap((node): MoveNodeAction[] => {
+      const placed = laidOutNodesById.get(node.id);
+
+      if (!placed || samePosition(placed.position, node.position)) {
+        return [];
+      }
+
+      return [
+        { type: "moveNode", id: node.id, position: placed.position, label: placed.data.label },
+      ];
+    })
+    .sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
+
+  // A pre-existing edge whose endpoint moved is the exact bug this whole
+  // layout pass exists to fix: without a refresh it keeps whatever stale
+  // handles it had, which is the top-to-top spaghetti described up top.
+  const handleRefreshes = context.edges.flatMap((edge): DesignAction[] => {
+    const wired = laidOutEdgesById.get(edge.id);
+
+    if (
+      !wired?.sourceHandle ||
+      !wired.targetHandle ||
+      (wired.sourceHandle === edge.sourceHandle && wired.targetHandle === edge.targetHandle)
+    ) {
+      return [];
+    }
+
+    return [
+      { type: "updateEdge", id: edge.id, sourceHandle: wired.sourceHandle, targetHandle: wired.targetHandle },
+    ];
+  });
+
+  return [...folded, ...moves, ...handleRefreshes];
 }
 
-/** Boxes inflated by the gap, so touching counts as too close. */
-function overlaps(a: Box, b: Box): boolean {
-  return (
-    a.x < b.x + b.width + MIN_NODE_GAP &&
-    a.x + a.width + MIN_NODE_GAP > b.x &&
-    a.y < b.y + b.height + MIN_NODE_GAP &&
-    a.y + a.height + MIN_NODE_GAP > b.y
-  );
+type MoveNodeAction = Extract<DesignAction, { type: "moveNode" }>;
+
+function samePosition(a: XYPosition, b: XYPosition): boolean {
+  return a.x === b.x && a.y === b.y;
 }
 
 /**
- * A node's occupied rectangle. Exported because the prompt builder describes the
- * same rectangles to the model that the layout uses to avoid overlaps — if the
- * two disagreed, the model would be reasoning about sizes the canvas does not have.
+ * The context nodes/edges with the plan's adds, deletes and data updates
+ * applied in memory — what `layoutPlan` actually lays out. Positions are
+ * never applied here: `applyLayout` computes every position from graph
+ * structure alone, never from a node's current position, so comparing a
+ * pre-existing node's *original* context position against the layout result
+ * is `layoutPlan`'s job, not this function's.
  */
-export function toBox(node: CanvasNode): Box {
-  const fallback = NODE_DEFAULT_SIZES[node.data.shape] ?? NODE_DEFAULT_SIZES.rectangle;
+function applyActionsInMemory(
+  context: DesignContext,
+  actions: readonly DesignAction[]
+): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  const nodes = new Map(context.nodes.map((node) => [node.id, node]));
+  const edges = new Map(context.edges.map((edge) => [edge.id, edge]));
+  const nodeOrder = context.nodes.map((node) => node.id);
+  const edgeOrder = context.edges.map((edge) => edge.id);
+
+  for (const action of actions) {
+    switch (action.type) {
+      case "addNode":
+        nodes.set(action.node.id, action.node);
+        nodeOrder.push(action.node.id);
+        break;
+      case "deleteNode":
+        nodes.delete(action.id);
+        break;
+      case "resizeNode": {
+        const existing = nodes.get(action.id);
+
+        if (existing) {
+          nodes.set(action.id, { ...existing, width: action.width, height: action.height });
+        }
+        break;
+      }
+      case "updateNodeData": {
+        const existing = nodes.get(action.id);
+
+        if (existing) {
+          nodes.set(action.id, { ...existing, data: { ...existing.data, ...action.data } });
+        }
+        break;
+      }
+      case "addEdge":
+        edges.set(action.edge.id, action.edge);
+        edgeOrder.push(action.edge.id);
+        break;
+      case "deleteEdge":
+        edges.delete(action.id);
+        break;
+      default:
+        // `moveNode`/`updateEdge` never appear in the raw actions this
+        // function is fed — they are `layoutPlan`'s own output, derived
+        // from this function's result, not an input to it.
+        break;
+    }
+  }
 
   return {
-    x: node.position.x,
-    y: node.position.y,
-    width: node.width ?? fallback.width,
-    height: node.height ?? fallback.height,
+    nodes: nodeOrder.filter((id) => nodes.has(id)).map((id) => nodes.get(id)!),
+    edges: edgeOrder.filter((id) => edges.has(id)).map((id) => edges.get(id)!),
   };
-}
-
-function snapPosition(position: XYPosition): XYPosition {
-  return { x: snap(position.x), y: snap(position.y) };
-}
-
-function snap(value: number): number {
-  return Math.round(value / LAYOUT_GRID) * LAYOUT_GRID;
-}
-
-/** Rounds away from the blocker, so a push never lands back inside it. */
-function snapUp(value: number): number {
-  return Math.ceil(value / LAYOUT_GRID) * LAYOUT_GRID;
-}
-
-function maxOf<T>(items: readonly T[], read: (item: T) => number): number {
-  return items.reduce((best, item) => Math.max(best, read(item)), -Infinity);
-}
-
-function minOf<T>(items: readonly T[], read: (item: T) => number): number {
-  return items.reduce((best, item) => Math.min(best, read(item)), Infinity);
 }
 
 // --- field readers ---------------------------------------------------------
@@ -759,15 +784,6 @@ function readNumber(raw: unknown, key: string): number | null {
   const value = (raw as Record<string, unknown>)[key];
 
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readPosition(raw: unknown): XYPosition | null {
-  const x = readNumber(raw, "x");
-  const y = readNumber(raw, "y");
-
-  // Both or neither: half a coordinate is not a position, and defaulting the
-  // missing axis to 0 drags the node to the origin.
-  return x === null || y === null ? null : { x, y };
 }
 
 function readSize(raw: unknown): NodeSize | null {

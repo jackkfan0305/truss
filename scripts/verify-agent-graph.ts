@@ -6,7 +6,9 @@ import {
   canonicalCanvasSnapshotsEqual,
   materializeAgentGraph,
   parseAgentGraph,
+  projectCanvasToAgentGraph,
 } from "../lib/agent-graph";
+import { LAYOUT_GRID, MIN_NODE_GAP } from "../lib/canvas-geometry";
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
@@ -56,13 +58,25 @@ for (const shape of NODE_SHAPES) {
   assert.ok(candidate, `accepts ${shape}`);
 
   const snapshot = materializeAgentGraph(candidate);
-  assert.deepEqual(snapshot.nodes[0], {
+  const { position, ...rest } = snapshot.nodes[0];
+
+  // Position is not asserted against the agent's raw (0, 10): the app now
+  // lays every graph out itself, so an isolated single node's coordinates are
+  // whatever `applyLayout` places it at, not whatever the agent sent.
+  assert.deepEqual(rest, {
     id: "client",
     type: CANVAS_NODE_TYPE,
-    position: { x: 0, y: 10 },
     ...NODE_DEFAULT_SIZES[shape],
     data: { label: "Client", shape, color: "blue" },
   });
+  assert.ok(
+    Number.isInteger(position.x / LAYOUT_GRID),
+    `${shape} lands on the layout grid`,
+  );
+  assert.ok(
+    Number.isInteger(position.y / LAYOUT_GRID),
+    `${shape} lands on the layout grid`,
+  );
 }
 
 for (const color of Object.keys(NODE_COLORS)) {
@@ -77,11 +91,16 @@ for (const color of Object.keys(NODE_COLORS)) {
 }
 
 const snapshot = materializeAgentGraph(parsed!);
+// `sourceHandle`/`targetHandle` are asserted separately below (24-graph-layout)
+// against the laid-out geometry, so they are folded into the expected object
+// here from the actual result rather than hard-coded.
 assert.deepEqual(snapshot.edges[0], {
   id: "client-to-orders",
   type: CANVAS_EDGE_TYPE,
   source: "client",
   target: "orders-api",
+  sourceHandle: snapshot.edges[0].sourceHandle,
+  targetHandle: snapshot.edges[0].targetHandle,
   data: { label: "HTTPS" },
   style: CANVAS_EDGE_STYLE,
   markerEnd: CANVAS_EDGE_MARKER,
@@ -166,6 +185,108 @@ assert.equal(
   materializeAgentGraph(accepted).edges[0].style?.stroke,
   canonicalStroke,
   "materialization does not share edge constants",
+);
+
+// --- layout ownership (24-graph-layout wired into the compact contract) ---
+
+const graphWithoutPositions = {
+  version: 1 as const,
+  nodes: [
+    { id: "client", label: "Client", shape: "circle" as const, color: "blue" as const },
+    { id: "orders-api", label: "Orders API", shape: "rectangle" as const, color: "teal" as const },
+  ],
+  edges: [
+    { id: "client-to-orders", source: "client", target: "orders-api", label: "HTTPS" },
+  ],
+};
+
+const parsedWithoutPositions = parseAgentGraph(graphWithoutPositions);
+assert.ok(parsedWithoutPositions, "a graph with no x/y at all parses");
+
+const materializedWithoutPositions = materializeAgentGraph(parsedWithoutPositions!);
+const materializedWithPositions = materializeAgentGraph(parsed!);
+
+assert.deepEqual(
+  materializedWithoutPositions.nodes.map((node) => node.position),
+  materializedWithPositions.nodes.map((node) => node.position),
+  "the app's layout ignores any agent-supplied x/y and lands the same graph in the same place either way",
+);
+
+// Divided rather than `%`: the layout centres every diagram on the origin, so
+// coordinates are routinely negative, and `-200 % 20` is `-0` — which
+// `assert.equal` does not consider equal to `0`.
+for (const node of materializedWithoutPositions.nodes) {
+  assert.ok(
+    Number.isInteger(node.position.x / LAYOUT_GRID),
+    `${node.id}.x is grid-aligned`,
+  );
+  assert.ok(
+    Number.isInteger(node.position.y / LAYOUT_GRID),
+    `${node.id}.y is grid-aligned`,
+  );
+}
+
+function boxOf(node: (typeof materializedWithoutPositions)["nodes"][number]) {
+  return { x: node.position.x, y: node.position.y, width: node.width!, height: node.height! };
+}
+
+const [clientBox, ordersBox] = materializedWithoutPositions.nodes.map(boxOf);
+assert.ok(
+  clientBox.x + clientBox.width + MIN_NODE_GAP <= ordersBox.x ||
+    ordersBox.x + ordersBox.width + MIN_NODE_GAP <= clientBox.x ||
+    clientBox.y + clientBox.height + MIN_NODE_GAP <= ordersBox.y ||
+    ordersBox.y + ordersBox.height + MIN_NODE_GAP <= clientBox.y,
+  "materialized nodes do not overlap once inflated by the node gap",
+);
+
+const [materializedEdge] = materializedWithoutPositions.edges;
+assert.ok(materializedEdge.sourceHandle, "every materialized edge carries a sourceHandle");
+assert.ok(materializedEdge.targetHandle, "every materialized edge carries a targetHandle");
+assert.equal(
+  materializedEdge.sourceHandle,
+  "right",
+  "orders-api is laid out to the right of client, so the edge leaves from the right",
+);
+assert.equal(materializedEdge.targetHandle, "left", "and enters orders-api from the left");
+
+/**
+ * The widest graph the contract allows must still be *representable* by the
+ * contract after layout.
+ *
+ * A 40-node chain — the node ceiling — in the widest shape the palette has,
+ * with a label on every hop, is the widest thing the contract can describe.
+ * `agentGraphNodeSchema` only admits coordinates within ±10,000, and
+ * `projectCanvasToAgentGraph` reports anything outside that range as opaque:
+ * invisible to an agent reading the canvas back, and enough to make
+ * `collidesWithOpaque` reject its next edit with a 409. The layout centres the
+ * diagram on the origin precisely so both halves of the range are spent, and
+ * this is the assertion that keeps it honest.
+ */
+const chainGraph = {
+  version: 1 as const,
+  nodes: Array.from({ length: MAX_AGENT_GRAPH_NODES }, (_, index) => ({
+    id: `n-${index}`,
+    label: `Node ${index}`,
+    // The diamond is the widest default node size, and every edge is labelled:
+    // labels used to add their own width on top of the rank gap, which pushed a
+    // chain this long past the representable range.
+    shape: "diamond" as const,
+    color: "blue" as const,
+  })),
+  edges: Array.from({ length: MAX_AGENT_GRAPH_NODES - 1 }, (_, index) => ({
+    id: `e-${index}`,
+    source: `n-${index}`,
+    target: `n-${index + 1}`,
+    label: "publishes to",
+  })),
+};
+
+const chainSnapshot = materializeAgentGraph(chainGraph);
+
+assert.equal(
+  projectCanvasToAgentGraph(chainSnapshot).opaqueNodeIds.length,
+  0,
+  "the widest graph the contract allows still projects back through the contract with nothing opaque",
 );
 
 console.info("Agent graph contract checks passed");

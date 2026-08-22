@@ -2,17 +2,23 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
-  LAYOUT_GRID,
   MAX_DESIGN_ACTIONS,
-  MIN_NODE_GAP,
   NODE_COLOR_NAMES,
   createCursorTargets,
   describeDesignAction,
   parseDesignPlan,
   type DesignAction,
   type DesignContext,
+  type DesignPlan,
 } from "../lib/design-plan";
+import { LAYOUT_GRID, MIN_NODE_GAP } from "../lib/canvas-geometry";
+import { applyLayout, chooseHandles } from "../lib/graph-layout";
 import { SYSTEM_PROMPT, buildDesignPrompt } from "../lib/design-prompt";
+import {
+  DIAGRAM_LEGEND_PROMPT,
+  NODE_COLOR_LEGEND,
+  NODE_SHAPE_LEGEND,
+} from "../lib/diagram-legend";
 import {
   describeCanvas,
   formatChatHistory,
@@ -53,7 +59,6 @@ import {
   DEFAULT_NODE_SHAPE,
   EDGE_LABEL_CLEARANCE,
   NODE_COLORS,
-  NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
   type CanvasEdge,
@@ -95,6 +100,66 @@ function addedEdges(actions: DesignAction[]) {
   return actions.flatMap((action) =>
     action.type === "addEdge" ? [action.edge] : []
   );
+}
+
+/**
+ * `value % LAYOUT_GRID === 0` is a broken grid check once positions go
+ * negative (`layoutGraph` now centres the diagram on the origin): `-200 % 20`
+ * is `-0`, which `assert.equal` does not consider equal to `0`. This is what
+ * that check actually means, and matches `scripts/verify-graph-layout.ts`.
+ */
+function isOnGrid(value: number): boolean {
+  return Number.isInteger(value / LAYOUT_GRID);
+}
+
+interface FinalBox {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Every node's box after a plan is fully applied: adds and layout-driven
+ * moves folded in at their final position, resizes applied, deletes removed.
+ * `context` nodes not mentioned by any action keep their original box.
+ */
+function finalNodeBoxes(plan: DesignPlan, context: DesignContext): FinalBox[] {
+  const boxes = new Map<string, FinalBox>(
+    context.nodes.map((n) => [
+      n.id,
+      { id: n.id, x: n.position.x, y: n.position.y, width: n.width ?? 0, height: n.height ?? 0 },
+    ])
+  );
+
+  for (const action of plan.actions) {
+    if (action.type === "addNode") {
+      boxes.set(action.node.id, {
+        id: action.node.id,
+        x: action.node.position.x,
+        y: action.node.position.y,
+        width: action.node.width ?? 0,
+        height: action.node.height ?? 0,
+      });
+    } else if (action.type === "moveNode") {
+      const existing = boxes.get(action.id);
+
+      if (existing) {
+        boxes.set(action.id, { ...existing, x: action.position.x, y: action.position.y });
+      }
+    } else if (action.type === "resizeNode") {
+      const existing = boxes.get(action.id);
+
+      if (existing) {
+        boxes.set(action.id, { ...existing, width: action.width, height: action.height });
+      }
+    } else if (action.type === "deleteNode") {
+      boxes.delete(action.id);
+    }
+  }
+
+  return [...boxes.values()];
 }
 
 function chat(
@@ -465,18 +530,25 @@ function checkGeneratedIdsAreUnique() {
   assert.ok(!ids.includes("ai-api"), "an add must never clobber an existing node");
 }
 
-/** An existing node is addressed by its real ID, and only if it exists. */
+/**
+ * An existing node is addressed by its real ID, and only if it exists.
+ *
+ * `moveNode` is absent from this list on purpose: the model can no longer
+ * request one (`DESIGN_ACTION_TYPES`), since any position it sent would be
+ * ignored anyway. The `moveNode` this test does see is `layoutPlan`'s own —
+ * this now-taller, still-isolated node no longer sits where it was centred
+ * before the resize.
+ */
 function checkEditsOnlyTouchNodesThatExist() {
   const context: DesignContext = { nodes: [node("rectangle-abc", 0, 0)], edges: [] };
   const plan = parseDesignPlan(
     {
       actions: [
-        { type: "moveNode", id: "rectangle-abc", x: 33, y: 47 },
-        { type: "moveNode", id: "rectangle-abc", x: 10 },
-        { type: "moveNode", id: "ghost", x: 0, y: 0 },
         { type: "resizeNode", id: "rectangle-abc", width: 1, height: 99999 },
+        { type: "resizeNode", id: "ghost", width: 100, height: 100 },
         { type: "updateNodeData", id: "rectangle-abc", label: "Renamed" },
         { type: "updateNodeData", id: "rectangle-abc", color: "chartreuse" },
+        { type: "updateNodeData", id: "ghost", label: "Nope" },
         { type: "deleteNode", id: "ghost" },
       ],
     },
@@ -485,15 +557,20 @@ function checkEditsOnlyTouchNodesThatExist() {
 
   assert.deepEqual(
     plan.actions.map((action) => action.type),
-    ["moveNode", "resizeNode", "updateNodeData"]
+    ["resizeNode", "updateNodeData", "moveNode"]
   );
 
-  const [move, resize] = plan.actions;
+  const [resize, update, move] = plan.actions;
 
-  assert.equal(move.type === "moveNode" && move.position.x % LAYOUT_GRID, 0);
-  assert.equal(move.type === "moveNode" && move.position.y % LAYOUT_GRID, 0);
   assert.ok(resize.type === "resizeNode" && resize.width >= NODE_MIN_SIZE.width);
   assert.ok(resize.type === "resizeNode" && resize.height <= 600);
+  // "chartreuse" is not a palette color, so that update carried no valid
+  // field and only the label survives.
+  assert.ok(update.type === "updateNodeData" && update.data.label === "Renamed");
+  assert.ok(move.type === "moveNode" && isOnGrid(move.position.x));
+  assert.ok(move.type === "moveNode" && isOnGrid(move.position.y));
+  // The label rides along on the layout's own move — see `describeDesignAction`.
+  assert.ok(move.type === "moveNode" && move.label === "Renamed");
 }
 
 /** Deleting a node takes its edges with it, or they survive pointing at nothing. */
@@ -511,36 +588,49 @@ function checkDeletingANodeDeletesItsEdges() {
   assert.deepEqual(deleted.sort(), ["e1", "e2"]);
 }
 
-/** An edge can be deleted by ID or by the pair it connects. */
+/**
+ * An edge can be deleted by ID or by the pair it connects.
+ *
+ * Checked by presence, not by exact-array equality: deleting the edge changes
+ * the graph, and the relayout this file's changes now run on every plan is
+ * free to move `a`/`b` off this fixture's hand-picked coordinates in the same
+ * plan — that is a real, separate behaviour (covered elsewhere), not this
+ * test's concern.
+ */
 function checkEdgesCanBeDeletedByEndpoints() {
   const context: DesignContext = {
     nodes: [node("a", 0, 0), node("b", 400, 0)],
     edges: [edge("e1", "a", "b")],
   };
+  const deletesE1 = (actions: DesignAction[]) =>
+    actions.some((action) => action.type === "deleteEdge" && action.id === "e1");
 
-  assert.deepEqual(
-    parseDesignPlan({ actions: [{ type: "deleteEdge", id: "e1" }] }, context).actions,
-    [{ type: "deleteEdge", id: "e1" }]
+  assert.ok(
+    deletesE1(parseDesignPlan({ actions: [{ type: "deleteEdge", id: "e1" }] }, context).actions)
   );
-  assert.deepEqual(
-    parseDesignPlan(
-      { actions: [{ type: "deleteEdge", source: "a", target: "b" }] },
-      context
-    ).actions,
-    [{ type: "deleteEdge", id: "e1" }]
+  assert.ok(
+    deletesE1(
+      parseDesignPlan({ actions: [{ type: "deleteEdge", source: "a", target: "b" }] }, context)
+        .actions
+    )
   );
-  assert.deepEqual(
-    parseDesignPlan(
-      { actions: [{ type: "deleteEdge", source: "b", target: "a" }] },
-      context
-    ).actions,
-    []
+  assert.equal(
+    deletesE1(
+      parseDesignPlan({ actions: [{ type: "deleteEdge", source: "b", target: "a" }] }, context)
+        .actions
+    ),
+    false,
+    "the reversed pair does not match the real edge"
   );
 }
 
 /**
  * The layout rules. A model that returns no positions, or the same one for
- * every node, is the common failure and produces one unreadable pile.
+ * every node, is the common failure — and since a model-supplied position is
+ * ignored unconditionally now (`buildAddNode` never reads one), both cases
+ * are literally the same input to the layout pass. Either way, every final
+ * position — the added nodes and the pre-existing one the relayout also
+ * moves — must land clear of every other and on the grid.
  */
 function checkGeneratedNodesNeverOverlap() {
   const context: DesignContext = { nodes: [node("existing", 0, 0)], edges: [] };
@@ -553,85 +643,152 @@ function checkGeneratedNodesNeverOverlap() {
 
   for (const actions of cases) {
     const plan = parseDesignPlan({ actions }, context);
-    const boxes = addedNodes(plan.actions).map((added) => ({
-      x: added.position.x,
-      y: added.position.y,
-      width: added.width ?? 0,
-      height: added.height ?? 0,
-    }));
+    const boxes = finalNodeBoxes(plan, context);
 
-    assert.equal(boxes.length, 9);
+    assert.equal(boxes.length, 10, "the existing node plus the 9 added ones all survive");
 
     for (const box of boxes) {
-      assert.equal(box.x % LAYOUT_GRID, 0, "positions snap to the canvas grid");
-      assert.equal(box.y % LAYOUT_GRID, 0);
+      assert.ok(isOnGrid(box.x), `${box.id}.x is grid-aligned`);
+      assert.ok(isOnGrid(box.y), `${box.id}.y is grid-aligned`);
     }
 
-    const all = [
-      ...boxes,
-      { x: 0, y: 0, width: 180, height: 80 },
-    ];
-
-    for (let i = 0; i < all.length; i += 1) {
-      for (let j = i + 1; j < all.length; j += 1) {
-        const a = all[i];
-        const b = all[j];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i];
+        const b = boxes[j];
         const apart =
           a.x + a.width + MIN_NODE_GAP <= b.x ||
           b.x + b.width + MIN_NODE_GAP <= a.x ||
           a.y + a.height + MIN_NODE_GAP <= b.y ||
           b.y + b.height + MIN_NODE_GAP <= a.y;
 
-        assert.ok(apart, `nodes ${i} and ${j} are closer than the minimum gap`);
+        assert.ok(apart, `${a.id} and ${b.id} are closer than the minimum gap`);
       }
     }
   }
 }
 
 /**
- * An edge label is centred between the two nodes it connects, so the fallback
- * layout has to leave it somewhere to sit — otherwise the label is drawn across
- * a node and hides the thing it describes.
+ * An edge label is centred between the two nodes it connects. Under the old
+ * push-down fallback this space was reserved pre-emptively between every
+ * auto-placed node, in case a later edit connected any pair of them; under
+ * the new one the whole graph — the edge included — is laid out from scratch
+ * on every generation, so the clearance only has to exist where an edge
+ * actually is. (`applyLayout` itself is exercised more directly by
+ * `scripts/verify-graph-layout.ts`; this checks that `parseDesignPlan` wires
+ * a labelled edge into it correctly.)
  */
 function checkAutoLayoutLeavesRoomForEdgeLabels() {
   const plan = parseDesignPlan(
-    { actions: Array.from({ length: 8 }, () => ({ type: "addNode" })) },
+    {
+      actions: [
+        { type: "addNode", id: "a", label: "A" },
+        { type: "addNode", id: "b", label: "B" },
+        { type: "addEdge", source: "a", target: "b", label: "creates order" },
+      ],
+    },
     EMPTY
   );
-  const boxes = addedNodes(plan.actions).map((added) => ({
-    x: added.position.x,
-    y: added.position.y,
-    width: added.width ?? 0,
-    height: added.height ?? 0,
-  }));
+  const [a, b] = finalNodeBoxes(plan, EMPTY);
+  const fits =
+    a.x + a.width + EDGE_LABEL_CLEARANCE.width <= b.x ||
+    b.x + b.width + EDGE_LABEL_CLEARANCE.width <= a.x ||
+    a.y + a.height + EDGE_LABEL_CLEARANCE.height <= b.y ||
+    b.y + b.height + EDGE_LABEL_CLEARANCE.height <= a.y;
 
-  for (let i = 0; i < boxes.length; i += 1) {
-    for (let j = i + 1; j < boxes.length; j += 1) {
-      const a = boxes[i];
-      const b = boxes[j];
-      const fits =
-        a.x + a.width + EDGE_LABEL_CLEARANCE.width <= b.x ||
-        b.x + b.width + EDGE_LABEL_CLEARANCE.width <= a.x ||
-        a.y + a.height + EDGE_LABEL_CLEARANCE.height <= b.y ||
-        b.y + b.height + EDGE_LABEL_CLEARANCE.height <= a.y;
-
-      assert.ok(fits, `no room for an edge label between nodes ${i} and ${j}`);
-    }
-  }
+  assert.ok(fits, "a labelled edge leaves room for its label pill between the nodes it connects");
 }
 
-/** The model cannot avoid an overlap it was never told the dimensions of. */
-function checkPromptStatesSizesAndLabelClearance() {
-  for (const [shape, size] of Object.entries(NODE_DEFAULT_SIZES)) {
+/**
+ * A shape or color the canvas can render but the legend never names is a
+ * silent gap: the model has no idea it exists, or worse, invents its own
+ * meaning for it. `DIAGRAM_LEGEND_PROMPT` is built from the same
+ * `Record<NodeShape, string>` / `Record<NodeColor, string>` the canvas types
+ * define, so this fails the moment a new shape or color ships without a
+ * meaning to go with it.
+ */
+function checkLegendNamesEveryShapeAndColor() {
+  for (const shape of NODE_SHAPES) {
     assert.ok(
-      SYSTEM_PROMPT.includes(`${shape} ${size.width}x${size.height}`),
-      `the prompt states the default size for ${shape}`
+      DIAGRAM_LEGEND_PROMPT.includes(shape),
+      `the legend names the ${shape} shape`
     );
   }
 
-  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.width)));
-  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.height)));
-  assert.ok(SYSTEM_PROMPT.includes(String(MIN_NODE_GAP)));
+  for (const color of Object.keys(NODE_COLORS)) {
+    assert.ok(
+      DIAGRAM_LEGEND_PROMPT.includes(color),
+      `the legend names the ${color} color`
+    );
+  }
+
+  assert.ok(
+    SYSTEM_PROMPT.includes(DIAGRAM_LEGEND_PROMPT),
+    "the design agent's prompt injects the shared legend rather than its own copy"
+  );
+}
+
+/**
+ * The app now runs a deterministic dagre layout pass over every generated
+ * graph (`lib/graph-layout.ts`), so a model reasoning about coordinates,
+ * spacing or overlap is wasting its attention on arithmetic the app repeats
+ * anyway. This is what used to be `checkPromptStatesSizesAndLabelClearance`,
+ * inverted: the same phrases that check once asserted the presence of must
+ * never come back.
+ */
+function checkPromptNoLongerReasonsAboutCoordinates() {
+  for (const removedPhrase of [
+    "Layout rules",
+    "do the arithmetic",
+    "top-left corner",
+    "Nothing you add may overlap",
+    "Lay flows left to right",
+  ]) {
+    assert.ok(
+      !SYSTEM_PROMPT.includes(removedPhrase),
+      `the prompt must not reintroduce coordinate/overlap reasoning ("${removedPhrase}")`
+    );
+  }
+}
+
+/**
+ * The external `truss-diagram` skill reads its own markdown copy of this
+ * legend (`.agents/skills/truss-diagram/references/graph-schema.md`) rather
+ * than importing this module — it runs outside this build. Asserting on the
+ * *meaning* strings, not just the shape/color keys, is what catches drift: a
+ * markdown edit that renames or waters down a meaning still lists every key,
+ * so a key-only check would pass right through it.
+ */
+function checkGraphSchemaMarkdownStaysInSyncWithTheLegend() {
+  const graphSchemaMarkdown = readFileSync(
+    new URL(
+      "../.agents/skills/truss-diagram/references/graph-schema.md",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  for (const [shape, meaning] of Object.entries(NODE_SHAPE_LEGEND)) {
+    assert.ok(
+      graphSchemaMarkdown.includes(shape),
+      `graph-schema.md names the ${shape} shape`
+    );
+    assert.ok(
+      graphSchemaMarkdown.includes(meaning),
+      `graph-schema.md states the same meaning for ${shape} as the code`
+    );
+  }
+
+  for (const [color, meaning] of Object.entries(NODE_COLOR_LEGEND)) {
+    assert.ok(
+      graphSchemaMarkdown.includes(color),
+      `graph-schema.md names the ${color} color`
+    );
+    assert.ok(
+      graphSchemaMarkdown.includes(meaning),
+      `graph-schema.md states the same meaning for ${color} as the code`
+    );
+  }
 }
 
 /** One response can only ever spend one bounded write on the canvas. */
@@ -646,6 +803,143 @@ function checkActionCountIsCapped() {
   );
 
   assert.equal(addedNodes(plan.actions).length, MAX_DESIGN_ACTIONS);
+}
+
+/**
+ * `MAX_DESIGN_ACTIONS` caps what the model asked for — the slice happens on
+ * the raw actions before `layoutPlan` ever runs. The moves and handle
+ * refreshes a relayout adds afterward must not be truncated by the same cap.
+ */
+function checkLayoutMovesAreNotCappedByMaxDesignActions() {
+  const count = MAX_DESIGN_ACTIONS + 10;
+  const context: DesignContext = {
+    // Every pre-existing node crammed onto the same coordinate — the same
+    // "positions all identical" failure this file already covers for adds,
+    // now forcing the relayout to move more nodes than the model even sent.
+    nodes: Array.from({ length: count }, (_, i) => node(`n${i}`, 0, 0)),
+    edges: [],
+  };
+
+  const plan = parseDesignPlan({ actions: [] }, context);
+  const moveCount = plan.actions.filter((action) => action.type === "moveNode").length;
+
+  assert.ok(
+    moveCount > MAX_DESIGN_ACTIONS,
+    `expected more than ${MAX_DESIGN_ACTIONS} layout-driven moves, got ${moveCount}`
+  );
+}
+
+/** Every generated edge is bound to the handle pair its final geometry calls for. */
+function checkAddEdgeHandlesMatchFinalGeometry() {
+  const plan = parseDesignPlan(
+    {
+      actions: [
+        { type: "addNode", id: "a", label: "A" },
+        { type: "addNode", id: "b", label: "B" },
+        { type: "addNode", id: "c", label: "C" },
+        { type: "addEdge", source: "a", target: "b" },
+        { type: "addEdge", source: "b", target: "c" },
+      ],
+    },
+    EMPTY
+  );
+  const boxes = new Map(
+    finalNodeBoxes(plan, EMPTY).map((box) => [box.id, box])
+  );
+  const wiredEdges = addedEdges(plan.actions);
+
+  assert.equal(wiredEdges.length, 2);
+
+  for (const wired of wiredEdges) {
+    const sourceBox = boxes.get(wired.source)!;
+    const targetBox = boxes.get(wired.target)!;
+    const expected = chooseHandles(sourceBox, targetBox);
+
+    assert.ok(wired.sourceHandle && wired.targetHandle, `${wired.id} is bound to real handles`);
+    assert.equal(wired.sourceHandle, expected.sourceHandle);
+    assert.equal(wired.targetHandle, expected.targetHandle);
+  }
+}
+
+/** An added node is born at its final position — never an add-then-move pair. */
+function checkAddedNodesAreBornAtTheirFinalPosition() {
+  const context: DesignContext = { nodes: [node("hub", 0, 0)], edges: [] };
+  const plan = parseDesignPlan(
+    {
+      actions: [
+        { type: "addNode", id: "leaf-1" },
+        { type: "addNode", id: "leaf-2" },
+        { type: "addEdge", source: "hub", target: "leaf-1" },
+        { type: "addEdge", source: "hub", target: "leaf-2" },
+      ],
+    },
+    context
+  );
+  const addedIds = new Set(addedNodes(plan.actions).map((added) => added.id));
+  const movedIds = plan.actions.flatMap((action) => (action.type === "moveNode" ? [action.id] : []));
+
+  assert.ok(addedIds.size > 0, "the plan actually adds something to check");
+
+  for (const id of movedIds) {
+    assert.ok(!addedIds.has(id), `${id} was added this plan and must not also be moved`);
+  }
+}
+
+/**
+ * A pre-existing node whose relayout position does not change gets no
+ * `moveNode` at all, and one that does gets exactly one.
+ */
+function checkMovesOnlyCoverNodesThatActuallyMoved() {
+  const rawNodes = [node("a", 0, 0), node("b", 400, 0)];
+  const rawEdges = [edge("a-b", "a", "b")];
+  // A context already laid out by this exact pass — the state the canvas is
+  // in after any prior generation.
+  const laidOut = applyLayout(rawNodes, rawEdges);
+  const context: DesignContext = { nodes: laidOut.nodes, edges: laidOut.edges };
+
+  const unchanged = parseDesignPlan(
+    { actions: [{ type: "updateNodeData", id: "a", color: "teal" }] },
+    context
+  );
+
+  assert.ok(unchanged.actions.some((action) => action.type === "updateNodeData"));
+  assert.ok(
+    unchanged.actions.every((action) => action.type !== "moveNode"),
+    "a graph that is already laid out does not move on the next pass"
+  );
+
+  // Hanging a third node off "a" forces the two-node chain to reflow.
+  const changed = parseDesignPlan(
+    {
+      actions: [
+        { type: "addNode", id: "c" },
+        { type: "addEdge", source: "a", target: "c" },
+      ],
+    },
+    context
+  );
+  const movedIds = changed.actions.flatMap((action) => (action.type === "moveNode" ? [action.id] : []));
+
+  assert.ok(movedIds.length > 0, "adding a branch actually forces something to move");
+  assert.equal(new Set(movedIds).size, movedIds.length, "no node is moved more than once");
+}
+
+/** Parsing the same raw response against the same context twice gives deep-equal plans. */
+function checkParsingIsDeterministic() {
+  const context: DesignContext = {
+    nodes: [node("a", 0, 0), node("b", 400, 0)],
+    edges: [edge("a-b", "a", "b")],
+  };
+  const raw = {
+    summary: "add a cache",
+    actions: [
+      { type: "addNode", id: "cache", label: "Cache" },
+      { type: "addEdge", source: "a", target: "cache", label: "reads" },
+      { type: "updateNodeData", id: "b", color: "teal" },
+    ],
+  };
+
+  assert.deepEqual(parseDesignPlan(raw, context), parseDesignPlan(raw, context));
 }
 
 /** Status messages are read by every client, so a malformed one renders as nothing. */
@@ -1243,6 +1537,7 @@ function checkEveryActionTypeDescribesItself() {
       type: "moveNode",
       id: "api",
       position: { x: 0, y: 0 },
+      label: "Gateway",
     }),
     resizeNode: describeDesignAction({
       type: "resizeNode",
@@ -1258,6 +1553,12 @@ function checkEveryActionTypeDescribesItself() {
     deleteNode: describeDesignAction({ type: "deleteNode", id: "api" }),
     addEdge: describeDesignAction({ type: "addEdge", edge: wired }),
     deleteEdge: describeDesignAction({ type: "deleteEdge", id: wired.id }),
+    updateEdge: describeDesignAction({
+      type: "updateEdge",
+      id: wired.id,
+      sourceHandle: "right",
+      targetHandle: "left",
+    }),
   };
 
   for (const [type, description] of Object.entries(described)) {
@@ -1265,12 +1566,23 @@ function checkEveryActionTypeDescribesItself() {
   }
 
   assert.equal(described.addNode, added.data.label);
+  // A relayout's move names the node it moved, not its bare id — this is
+  // `layoutPlan` carrying the label along so this function stays a pure
+  // switch with no lookup of its own.
+  assert.equal(described.moveNode, "Gateway");
   assert.equal(described.addEdge, "api → db");
   assert.equal(described.updateNodeData, "Gateway");
 
   // Falls back to the ID when there is no label to show — a delete has nothing
   // else, and an empty row would be worse than a raw ID.
   assert.equal(described.deleteNode, "api");
+  assert.equal(described.updateEdge, wired.id);
+
+  // A moved node with no label falls back to its id the same way.
+  assert.equal(
+    describeDesignAction({ type: "moveNode", id: "ghost", position: { x: 0, y: 0 }, label: "" }),
+    "ghost"
+  );
 }
 
 function main() {
@@ -1284,7 +1596,14 @@ function main() {
   checkEdgesCanBeDeletedByEndpoints();
   checkGeneratedNodesNeverOverlap();
   checkAutoLayoutLeavesRoomForEdgeLabels();
-  checkPromptStatesSizesAndLabelClearance();
+  checkLayoutMovesAreNotCappedByMaxDesignActions();
+  checkAddEdgeHandlesMatchFinalGeometry();
+  checkAddedNodesAreBornAtTheirFinalPosition();
+  checkMovesOnlyCoverNodesThatActuallyMoved();
+  checkParsingIsDeterministic();
+  checkLegendNamesEveryShapeAndColor();
+  checkPromptNoLongerReasonsAboutCoordinates();
+  checkGraphSchemaMarkdownStaysInSyncWithTheLegend();
   checkActionCountIsCapped();
   checkStatusMessagesAreValidated();
   checkLatestStatusIsSelectedFromTheFeed();

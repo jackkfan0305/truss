@@ -1,11 +1,6 @@
-import {
-  MAX_DESIGN_ACTIONS,
-  MIN_NODE_GAP,
-  NODE_COLOR_NAMES,
-  type DesignContext,
-} from "@/lib/design-plan";
+import { MAX_DESIGN_ACTIONS, type DesignContext } from "@/lib/design-plan";
 import { describeCanvas, formatChatHistory } from "@/lib/canvas-context";
-import { EDGE_LABEL_CLEARANCE, NODE_DEFAULT_SIZES } from "@/types/canvas";
+import { DIAGRAM_LEGEND_PROMPT } from "@/lib/diagram-legend";
 import type { AiChatMessage } from "@/types/tasks";
 
 /**
@@ -20,6 +15,10 @@ import type { AiChatMessage } from "@/types/tasks";
  * The canvas and history renderings live in `lib/canvas-context.ts`, shared with
  * the orchestrator and the spec writer. Nothing else about this prompt moved:
  * the design agent's brief is unchanged by the routing work.
+ *
+ * Shape and color meaning live in `lib/diagram-legend.ts`, not here — it is the
+ * one legend shared with the external `truss-diagram` skill, so this prompt
+ * only injects it.
  */
 
 export const SYSTEM_PROMPT = [
@@ -40,36 +39,14 @@ export const SYSTEM_PROMPT = [
   "- Detail means complete, not padded. If the request really is small, keep it small.",
   "",
   "Work the problem before you answer: decide the components and how data flows",
-  "between them, then place them, then emit the actions.",
+  "between them, then emit the actions.",
   "",
-  "Node shapes carry meaning — use them:",
-  "- rectangle: general component",
-  "- diamond: decision or gateway",
-  "- circle: event or endpoint",
-  "- pill: service or process",
-  "- cylinder: database or storage",
-  "- hexagon: external system or boundary",
+  DIAGRAM_LEGEND_PROMPT,
   "",
-  `Colors are limited to: ${NODE_COLOR_NAMES.join(", ")}. Use them semantically`,
-  "(for example teal for data stores, blue for services, orange for external systems),",
-  "not decoratively. Use neutral when nothing else applies.",
-  "",
-  "Layout rules — you are placing rectangles, not points, so do the arithmetic:",
-  "- A node's x,y is its top-left corner. It occupies x..x+width by y..y+height.",
-  `- Unless you give width and height, a node is created at its shape's default size: ${Object.entries(
-    NODE_DEFAULT_SIZES
-  )
-    .map(([shape, size]) => `${shape} ${size.width}x${size.height}`)
-    .join(", ")}.`,
-  `- Leave at least ${MIN_NODE_GAP} units of clear space between any two node rectangles.`,
-  `- An edge's label is drawn as a pill centred on the middle of the edge, so it lands`,
-  `  in the space between the two nodes: budget ${EDGE_LABEL_CLEARANCE.width} units across the flow`,
-  `  direction and ${EDGE_LABEL_CLEARANCE.height} units across the other one for any edge you label.`,
-  "  Two nodes you connect with a labelled edge need that much room between them,",
-  "  on top of the minimum gap. Keep edge labels to a few words so they fit.",
-  "- Lay flows left to right, or top to bottom, consistently.",
-  "- Every existing node is listed below with its position and its size. Nothing you",
-  "  add may overlap one of those rectangles.",
+  "The app lays the diagram out for you with a deterministic layout pass after",
+  "you respond. Choose the components, the connections and the semantics above;",
+  "do not reason about coordinates, spacing or overlap — any position you send",
+  "is ignored.",
   "",
   "Working with what is already there:",
   "- Prefer editing the existing canvas over rebuilding it. Reuse the node IDs given below.",

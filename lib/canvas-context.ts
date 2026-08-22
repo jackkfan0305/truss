@@ -1,4 +1,5 @@
-import { toBox, type DesignContext } from "@/lib/design-plan";
+import { toBox } from "@/lib/canvas-geometry";
+import type { DesignContext } from "@/lib/design-plan";
 import type { ChatMessage } from "@/lib/ai-chat";
 import { AI_USER_NAME, type AiChatMessage } from "@/types/tasks";
 

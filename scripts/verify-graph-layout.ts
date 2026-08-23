@@ -923,9 +923,10 @@ function checkVerticalHandleEdgeIsLeftOutOfEveryBundle(): void {
       (edge.targetHandle === "left" || edge.targetHandle === "right");
 
     assert.equal(
-      edge.data?.lane === undefined,
-      !isSideToSide,
-      `${edge.id}: a lane is present exactly when the route is side to side`,
+      "lane" in (edge.data ?? {}),
+      isSideToSide,
+      `${edge.id}: a lane KEY is present exactly when the route is side to side — ` +
+        `absent, not present-and-undefined, which is what a bare undefined check would miss`,
     );
   }
 }

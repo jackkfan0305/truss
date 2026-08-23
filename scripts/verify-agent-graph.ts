@@ -91,20 +91,27 @@ for (const color of Object.keys(NODE_COLORS)) {
 }
 
 const snapshot = materializeAgentGraph(parsed!);
-// `sourceHandle`/`targetHandle` are asserted separately below (24-graph-layout)
-// against the laid-out geometry, so they are folded into the expected object
-// here from the actual result rather than hard-coded.
-assert.deepEqual(snapshot.edges[0], {
+// `sourceHandle`/`targetHandle` and `data.label` are asserted separately.
+// `sourceHandle`/`targetHandle` are checked against the laid-out geometry
+// (24-graph-layout), so they are folded into the expected object from the actual
+// result rather than hard-coded. `data.lane` is a layout output (varies by
+// geometry), and `data.label` is authored content.
+const { data, ...edgeWithoutData } = snapshot.edges[0];
+assert.deepEqual(edgeWithoutData, {
   id: "client-to-orders",
   type: CANVAS_EDGE_TYPE,
   source: "client",
   target: "orders-api",
   sourceHandle: snapshot.edges[0].sourceHandle,
   targetHandle: snapshot.edges[0].targetHandle,
-  data: snapshot.edges[0].data,
   style: CANVAS_EDGE_STYLE,
   markerEnd: CANVAS_EDGE_MARKER,
 });
+assert.equal(
+  snapshot.edges[0].data?.label,
+  "HTTPS",
+  "the edge's authored label survives materialization",
+);
 assert.equal(canonicalCanvasSnapshotsEqual(snapshot, structuredClone(snapshot)), true);
 assert.equal(
   canonicalCanvasSnapshotsEqual(

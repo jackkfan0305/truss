@@ -8,6 +8,8 @@ import {
   edgeTurnX,
   fanOffset,
   fanSlotIndex,
+  laneOrder,
+  edgeSplitX,
   toBox,
   type Box,
 } from "../lib/canvas-geometry";
@@ -17,6 +19,8 @@ import {
   DEFAULT_NODE_COLOR,
   NODE_DEFAULT_SIZES,
   EDGE_LABEL_CLEARANCE,
+  TRUNK_MIN,
+  LANE_STEP,
   type CanvasEdge,
   type CanvasNode,
   type NodeShape,
@@ -513,6 +517,82 @@ function checkFanSpreadsEdgesWithoutLeavingTheFace(): void {
   );
 }
 
+function checkLaneOrderPutsTheLongestTravelClosestToTheSource(): void {
+  // Two edges heading the same way. If the shorter one split first, the
+  // longer one's vertical run would cross the shorter one's horizontal run.
+  const members = [
+    { id: "short", deltaY: 50, targetX: 400 },
+    { id: "long", deltaY: 200, targetX: 400 },
+  ];
+
+  const order = laneOrder(members);
+
+  assert.equal(order.get("long"), 0, "the furthest-travelling edge splits first");
+  assert.equal(order.get("short"), 1, "the shorter one splits further out");
+
+  assert.deepEqual(
+    [...laneOrder([...members].reverse()).entries()].sort(),
+    [...order.entries()].sort(),
+    "the result does not depend on the order the members arrive in",
+  );
+}
+
+function checkLaneOrderIgnoresDirectionAndBreaksTiesStably(): void {
+  // Up and down are symmetric: an up-edge and a down-edge leave the trunk into
+  // opposite half-planes and cannot cross, so only the magnitude matters.
+  const order = laneOrder([
+    { id: "up", deltaY: -200, targetX: 400 },
+    { id: "down", deltaY: 200, targetX: 400 },
+  ]);
+
+  assert.equal(
+    new Set([order.get("up"), order.get("down")]).size,
+    2,
+    "an exact magnitude tie still yields two distinct lanes",
+  );
+
+  const nearer = laneOrder([
+    { id: "far", deltaY: 100, targetX: 900 },
+    { id: "near", deltaY: 100, targetX: 400 },
+  ]);
+
+  assert.equal(nearer.get("near"), 0, "an equal climb breaks on the nearer target");
+  assert.equal(nearer.get("far"), 1, "and the further target takes the outer lane");
+
+  const byId = laneOrder([
+    { id: "b", deltaY: 100, targetX: 400 },
+    { id: "a", deltaY: 100, targetX: 400 },
+  ]);
+
+  assert.equal(byId.get("a"), 0, "a total tie falls back to edge id, so it is deterministic");
+  assert.equal(byId.get("b"), 1);
+
+  assert.deepEqual(laneOrder([]), new Map(), "an empty bundle has no lanes");
+}
+
+function checkSplitColumnStaggersByLaneAndFollowsTheFlow(): void {
+  assert.equal(
+    edgeSplitX(100, 900, 0),
+    100 + TRUNK_MIN,
+    "lane 0 splits one trunk length past the anchor",
+  );
+  assert.equal(
+    edgeSplitX(100, 900, 2),
+    100 + TRUNK_MIN + 2 * LANE_STEP,
+    "each further lane splits one LANE_STEP further out",
+  );
+  assert.equal(
+    edgeSplitX(900, 100, 1),
+    900 - (TRUNK_MIN + LANE_STEP),
+    "a back-edge staggers backwards, not forwards",
+  );
+  assert.equal(
+    edgeSplitX(100, 100, 0),
+    100 + TRUNK_MIN,
+    "a target directly above or below still splits forwards rather than at zero",
+  );
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -530,8 +610,11 @@ function main() {
   checkSameRankEdgeKeepsTheMidpointTurn();
   checkBackEdgeTurnsBackwards();
   checkFanSpreadsEdgesWithoutLeavingTheFace();
+  checkLaneOrderPutsTheLongestTravelClosestToTheSource();
+  checkLaneOrderIgnoresDirectionAndBreaksTiesStably();
+  checkSplitColumnStaggersByLaneAndFollowsTheFlow();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out and edge cases verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, and split column positioning verified",
   );
 }
 

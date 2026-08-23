@@ -3,6 +3,8 @@ import type { XYPosition } from "@xyflow/react";
 import {
   EDGE_LABEL_CLEARANCE,
   NODE_DEFAULT_SIZES,
+  TRUNK_MIN,
+  LANE_STEP,
   type CanvasNode,
   type NodeSize,
 } from "@/types/canvas";
@@ -43,6 +45,60 @@ export const MIN_NODE_GAP = 40;
  * further without trading legibility for reachability.
  */
 export const RANK_GAP = MIN_NODE_GAP * 3 + EDGE_LABEL_CLEARANCE.width;
+
+/** One edge's claim on a lane, as `laneOrder` needs to see it. */
+export interface LaneMember {
+  id: string;
+  /** Signed vertical travel from the source anchor to the target anchor. */
+  deltaY: number;
+  /** The target anchor's x. Tie-break only. */
+  targetX: number;
+}
+
+/**
+ * Assigns each edge in one bundle its lane, keyed by edge id.
+ *
+ * Sorted by absolute `deltaY` **descending**, which is the whole reason a
+ * bundle cannot cross itself. Lane `i` turns at `TRUNK_MIN + i * LANE_STEP`
+ * past the anchor, so a later lane both turns further out *and* travels less
+ * far vertically — its run can never reach the y at which an earlier lane is
+ * already running horizontally. Sorting by target y instead would not have
+ * this property: two targets on the same side of the source still cross.
+ *
+ * Direction is deliberately ignored. An up-edge and a down-edge leave the
+ * trunk into opposite half-planes and cannot cross whatever order they take.
+ *
+ * Ties break on target x then on id, so the result is a pure function of the
+ * members and not of the order they arrived in — which is what lets
+ * `applyLayout` stay deterministic.
+ */
+export function laneOrder(members: readonly LaneMember[]): Map<string, number> {
+  const sorted = [...members].sort(
+    (a, b) =>
+      Math.abs(b.deltaY) - Math.abs(a.deltaY) ||
+      a.targetX - b.targetX ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+
+  return new Map(sorted.map((member, index) => [member.id, index]));
+}
+
+/**
+ * The column at which an edge leaves the trunk, given its lane.
+ *
+ * A target sitting at the anchor's own x has no direction to take, so it is
+ * read as forward: turning at the anchor itself would put the label on the
+ * node's own border.
+ */
+export function edgeSplitX(
+  anchorX: number,
+  targetX: number,
+  lane: number
+): number {
+  const direction = targetX >= anchorX ? 1 : -1;
+
+  return anchorX + direction * (TRUNK_MIN + lane * LANE_STEP);
+}
 
 export interface Box extends NodeSize, XYPosition {}
 

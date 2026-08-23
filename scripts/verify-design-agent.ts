@@ -898,10 +898,20 @@ function checkRelayoutRefreshesLanesNotJustHandles(): void {
     refreshed?.type === "updateEdge",
     "the pre-existing edge gets an updateEdge because its bundle grew",
   );
-  assert.equal(
-    typeof refreshed.lane,
-    "number",
-    "and that update carries the new lane, not only the handles",
+
+  // The bundle's lanes must be the fresh, complete set. If someone regressed
+  // to use edge.data?.lane (stale) instead of wired.data?.lane (fresh), the
+  // assertion would silently pass with a duplicate lane or skip the update
+  // entirely — so collect both lanes and pin them to [0, 1].
+  const addedLane = added.edge.data?.lane;
+  const refreshedLane = refreshed.lane;
+  const lanes = [addedLane, refreshedLane].sort((a, b) => a - b);
+
+  assert.deepEqual(
+    lanes,
+    [0, 1],
+    `the grown bundle's two edges hold distinct lanes 0 and 1, not a stale value ` +
+      `carried through alongside a fresh one (got ${lanes.join(", ")})`,
   );
 }
 

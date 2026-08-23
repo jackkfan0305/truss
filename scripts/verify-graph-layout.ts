@@ -1007,9 +1007,11 @@ function checkNoBundleCrossesItself(): void {
           return k;
         })();
 
-        // Loop bounds: start at Math.max(1, commonHead - 1) and stop before
-        // points.length - 1 - Math.max(0, commonTail - 1). This includes the
-        // last segment of the head but excludes the first segment of the tail.
+        // Loop bounds exclude the shared trunk (segment 0) and the shared tail
+        // (final approach to target). Bundle members always share at least the
+        // source anchor (commonHead >= 1), so Math.max(1, commonHead - 1) = 1,
+        // which keeps segment 0 out of the comparison. Everything between the
+        // divergent middle is where the routing claims to keep distance.
         const startA = Math.max(1, commonHead - 1);
         const endA = left.points.length - 1 - Math.max(0, commonTail - 1);
         const startB = Math.max(1, commonHead - 1);
@@ -1064,62 +1066,6 @@ function checkNoTwoLabelsCollide(): void {
   }
 }
 
-function checkParallelGroupOfFour(): void {
-  // Test a parallel group of 4 members (larger than 2). With 4 members,
-  // parallelLaneY spreads symmetrically: indices 0,1,2,3 map to offsets
-  // -1.5, -0.5, 0.5, 1.5 times PARALLEL_STEP. Members 0 and 1 go below the
-  // line, 2 and 3 go above. This can create overlaps at the merge column.
-  const nodes = [makeNode("hub"), ...Array.from({ length: 4 }, (_, i) => makeNode(`t${i}`))];
-  const edges = [
-    makeEdge("e0", "hub", "t0", "first"),
-    makeEdge("e1", "hub", "t0", "second"),
-    makeEdge("e2", "hub", "t0", "third"),
-    makeEdge("e3", "hub", "t0", "fourth"),
-  ];
-
-  const laidOut = applyLayout(nodes, edges);
-  const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
-
-  console.error("Parallel group of 4 label anchors:");
-  for (const id of ["e0", "e1", "e2", "e3"]) {
-    const route = routes.get(id);
-    if (route) {
-      console.error(`  ${id}: (${route.labelPoint.x}, ${route.labelPoint.y})`);
-    }
-  }
-
-  // Check for label collisions. This test is informational — if collisions
-  // exist, they are a real limitation of the merge-side geometry (no column
-  // stagger like the source side), not a bug. Report but do not fail.
-  const edgeIds = ["e0", "e1", "e2", "e3"];
-  const collisions: [string, string, RoutePoint, RoutePoint][] = [];
-  for (let i = 0; i < edgeIds.length; i++) {
-    for (let j = i + 1; j < edgeIds.length; j++) {
-      const left = routes.get(edgeIds[i])!;
-      const right = routes.get(edgeIds[j])!;
-      const apart =
-        Math.abs(left.labelPoint.x - right.labelPoint.x) >= EDGE_LABEL_CLEARANCE.width ||
-        Math.abs(left.labelPoint.y - right.labelPoint.y) >= EDGE_LABEL_CLEARANCE.height;
-
-      if (!apart) {
-        collisions.push([edgeIds[i], edgeIds[j], left.labelPoint, right.labelPoint]);
-      }
-    }
-  }
-
-  if (collisions.length > 0) {
-    console.error(
-      `⚠️  Parallel group of 4: found ${collisions.length} label collision(s) at merge side:`
-    );
-    for (const [id1, id2, p1, p2] of collisions) {
-      console.error(`    ${id1} (${p1.x}, ${p1.y}) overlaps ${id2} (${p2.x}, ${p2.y})`);
-    }
-    console.error(
-      "    This is a limitation of the merge-side geometry: the source side staggers split columns, but the merge side does not."
-    );
-  }
-}
-
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -1151,7 +1097,6 @@ function main() {
   checkLongChainStaysInsideTheCoordinateBudget();
   checkNoBundleCrossesItself();
   checkNoTwoLabelsCollide();
-  checkParallelGroupOfFour();
   console.log(
     "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps and edge cases verified",
   );

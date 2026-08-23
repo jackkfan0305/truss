@@ -101,7 +101,7 @@ assert.deepEqual(snapshot.edges[0], {
   target: "orders-api",
   sourceHandle: snapshot.edges[0].sourceHandle,
   targetHandle: snapshot.edges[0].targetHandle,
-  data: { label: "HTTPS" },
+  data: snapshot.edges[0].data,
   style: CANVAS_EDGE_STYLE,
   markerEnd: CANVAS_EDGE_MARKER,
 });

@@ -6,8 +6,10 @@ import {
   LAYOUT_GRID,
   MIN_NODE_GAP,
   RANK_GAP,
+  laneOrder,
   toBox,
   type Box,
+  type LaneMember,
 } from "@/lib/canvas-geometry";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
@@ -280,6 +282,99 @@ export function chooseHandles(
 }
 
 /**
+ * The point on a box where a handle sits.
+ *
+ * React Flow gives the renderer these as `sourceX`/`sourceY`, but the layout
+ * has to compute them itself: lanes are assigned before anything is measured
+ * on screen, from the rectangles dagre produced.
+ */
+export function handleAnchor(box: Box, handle: string): XYPosition {
+  switch (handle) {
+    case HANDLE_ID.left:
+      return { x: box.x, y: box.y + box.height / 2 };
+    case HANDLE_ID.right:
+      return { x: box.x + box.width, y: box.y + box.height / 2 };
+    case HANDLE_ID.top:
+      return { x: box.x + box.width / 2, y: box.y };
+    default:
+      return { x: box.x + box.width / 2, y: box.y + box.height };
+  }
+}
+
+/** A route leaving one vertical face and entering the other — the only kind lanes apply to. */
+function isSideToSideRoute(sourceHandle: string, targetHandle: string): boolean {
+  const isSide = (handle: string) =>
+    handle === HANDLE_ID.left || handle === HANDLE_ID.right;
+
+  return isSide(sourceHandle) && isSide(targetHandle);
+}
+
+/** Every edge that has both endpoints, with its handles chosen from the given geometry. */
+function wireEdges(
+  placed: readonly CanvasNode[],
+  edges: readonly CanvasEdge[]
+): { edge: CanvasEdge; source: Box; target: Box }[] {
+  const boxes = new Map(placed.map((node) => [node.id, toBox(node)]));
+  // Built once so `chooseHandles` can skip an edge's own endpoints by identity.
+  const allBoxes = [...boxes.values()];
+
+  return edges.flatMap((edge) => {
+    const source = boxes.get(edge.source);
+    const target = boxes.get(edge.target);
+
+    if (!source || !target) {
+      return [];
+    }
+
+    const { sourceHandle, targetHandle } = chooseHandles(source, target, allBoxes);
+
+    return [{ edge: { ...edge, sourceHandle, targetHandle }, source, target }];
+  });
+}
+
+/**
+ * Groups the side-to-side edges by the handle they leave from and assigns each
+ * one its lane, returning the result keyed by edge id.
+ *
+ * Edges on a top or bottom handle are left out entirely. A lane is a claim
+ * about the node-free band between two ranks, and an edge leaving a vertical
+ * face is not crossing that band — its anchor x there is its node's own centre
+ * line, not the edge of its rank.
+ */
+function assignLanes(
+  wired: readonly { edge: CanvasEdge; source: Box; target: Box }[]
+): Map<string, number> {
+  const bundles = new Map<string, LaneMember[]>();
+
+  for (const { edge, source, target } of wired) {
+    if (!isSideToSideRoute(edge.sourceHandle!, edge.targetHandle!)) {
+      continue;
+    }
+
+    const key = `${edge.source} ${edge.sourceHandle}`;
+    const from = handleAnchor(source, edge.sourceHandle!);
+    const to = handleAnchor(target, edge.targetHandle!);
+
+    bundles.set(key, [
+      ...(bundles.get(key) ?? []),
+      { id: edge.id, deltaY: to.y - from.y, targetX: to.x },
+    ]);
+  }
+
+  const lanes = new Map<string, number>();
+
+  // Iterating the map is safe for determinism: its insertion order follows
+  // `wired`, which follows the caller's edge array.
+  for (const members of bundles.values()) {
+    for (const [id, lane] of laneOrder(members)) {
+      lanes.set(id, lane);
+    }
+  }
+
+  return lanes;
+}
+
+/**
  * Whether `box` can send a vertical run from `fromY` to `toY` without crossing
  * another node.
  *
@@ -370,25 +465,26 @@ export function applyLayout(
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const sourceEdges = options.dedupe ? dedupeEdges(edges) : edges;
   const laidOutNodes = layoutGraph(nodes, sourceEdges);
-  const boxes = new Map(laidOutNodes.map((node) => [node.id, toBox(node)]));
-  // Built once so `chooseHandles` can skip an edge's own endpoints by identity.
-  const allBoxes = [...boxes.values()];
+
+  const wired = wireEdges(laidOutNodes, sourceEdges);
+  const lanes = assignLanes(wired);
+  const wiredById = new Map(wired.map((entry) => [entry.edge.id, entry.edge]));
 
   const laidOutEdges = sourceEdges.map((edge) => {
-    const sourceBox = boxes.get(edge.source);
-    const targetBox = boxes.get(edge.target);
+    const routed = wiredById.get(edge.id);
 
-    if (!sourceBox || !targetBox) {
+    // An edge whose source or target is missing from `nodes` comes back
+    // unchanged rather than dropped: on a shared canvas, routing a user's edge
+    // badly is recoverable, deleting it is not.
+    if (!routed) {
       return edge;
     }
 
-    const { sourceHandle, targetHandle } = chooseHandles(
-      sourceBox,
-      targetBox,
-      allBoxes
-    );
+    const lane = lanes.get(edge.id);
 
-    return { ...edge, sourceHandle, targetHandle };
+    return lane === undefined
+      ? routed
+      : { ...routed, data: { ...(routed.data ?? { label: "" }), lane } };
   });
 
   return { nodes: laidOutNodes, edges: laidOutEdges };

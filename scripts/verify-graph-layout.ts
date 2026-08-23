@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { applyLayout, chooseHandles, layoutGraph } from "../lib/graph-layout";
+import { applyLayout, chooseHandles, handleAnchor, layoutGraph } from "../lib/graph-layout";
 import {
   FAN_STEP,
   LAYOUT_GRID,
@@ -852,6 +852,84 @@ function checkDedupeDropsIdenticalTriplesOnlyWhenAsked(): void {
   );
 }
 
+function checkApplyLayoutStampsLanesOnSideToSideEdgesOnly(): void {
+  // One source fanning out to three targets at different heights: a bundle.
+  const nodes = [makeNode("hub"), makeNode("near"), makeNode("mid"), makeNode("far")];
+  const edges = [
+    makeEdge("to-near", "hub", "near", "a"),
+    makeEdge("to-mid", "hub", "mid", "b"),
+    makeEdge("to-far", "hub", "far", "c"),
+  ];
+
+  const laidOut = applyLayout(nodes, edges);
+  const boxes = new Map(laidOut.nodes.map((node) => [node.id, toBox(node)]));
+
+  const sideToSide = laidOut.edges.filter(
+    (edge) =>
+      (edge.sourceHandle === "left" || edge.sourceHandle === "right") &&
+      (edge.targetHandle === "left" || edge.targetHandle === "right"),
+  );
+
+  assert.ok(sideToSide.length > 1, "the fixture actually produces a bundle");
+
+  for (const edge of sideToSide) {
+    assert.equal(typeof edge.data?.lane, "number", `${edge.id} comes back with a lane`);
+  }
+
+  const lanes = sideToSide.map((edge) => edge.data!.lane!).sort((a, b) => a - b);
+
+  assert.deepEqual(
+    lanes,
+    lanes.map((_, index) => index),
+    "one bundle's lanes are 0..n-1 with no gaps and no repeats",
+  );
+
+  // The lane order is the travel order, measured from the final geometry.
+  const travel = (edge: (typeof sideToSide)[number]) => {
+    const from = handleAnchor(boxes.get(edge.source)!, edge.sourceHandle!);
+    const to = handleAnchor(boxes.get(edge.target)!, edge.targetHandle!);
+
+    return Math.abs(to.y - from.y);
+  };
+
+  const ordered = sideToSide
+    .slice()
+    .sort((a, b) => a.data!.lane! - b.data!.lane!)
+    .map(travel);
+
+  for (let index = 1; index < ordered.length; index += 1) {
+    assert.ok(
+      ordered[index] <= ordered[index - 1],
+      "lanes run from the longest vertical travel outwards",
+    );
+  }
+
+  assert.deepEqual(
+    applyLayout(nodes, edges),
+    laidOut,
+    "lane stamping keeps applyLayout deterministic",
+  );
+}
+
+function checkVerticalHandleEdgeIsLeftOutOfEveryBundle(): void {
+  // Two nodes in the same rank: the connection runs up the column, so both
+  // ends take a vertical handle and the lane machinery has no claim on it.
+  const nodes = [makeNode("a"), makeNode("b"), makeNode("c")];
+  const edges = [makeEdge("down", "a", "b", "x"), makeEdge("across", "a", "c", "y")];
+
+  for (const edge of applyLayout(nodes, edges).edges) {
+    const isSideToSide =
+      (edge.sourceHandle === "left" || edge.sourceHandle === "right") &&
+      (edge.targetHandle === "left" || edge.targetHandle === "right");
+
+    assert.equal(
+      edge.data?.lane === undefined,
+      !isSideToSide,
+      `${edge.id}: a lane is present exactly when the route is side to side`,
+    );
+  }
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -880,8 +958,10 @@ function main() {
   checkCloseSpanParallelBackwardDoesNotOvershoot();
   checkSlopedButUnderThresholdRouteKeepsLabelOnSegment();
   checkDedupeDropsIdenticalTriplesOnlyWhenAsked();
+  checkApplyLayoutStampsLanesOnSideToSideEdgesOnly();
+  checkVerticalHandleEdgeIsLeftOutOfEveryBundle();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, defect-2 fixes verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, lane stamping on side-to-side edges only, defect-2 fixes verified",
   );
 }
 

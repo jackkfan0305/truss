@@ -917,8 +917,9 @@ function checkRelayoutRefreshesLanesNotJustHandles(): void {
     "the refreshed lane moved off the stale 0 the fixture seeded, rather than carrying it through",
   );
 
-  // In this fixture, the pre-existing hub-a edge receives lane 0 (shifted down
-  // by the new edge joining its bundle), and the newly added hub-b edge
+  // In this fixture, the newly added hub-b edge (target at y=200) receives lane 0
+  // because laneOrder sorts by |deltaY| descending, so the target farther from
+  // the hub's anchor gets lane 0. The pre-existing hub-a edge (target at y=0)
   // receives lane 1. Together they form the complete, fresh lane set [0, 1].
   const lanes = [addedLane, refreshedLane].sort((a, b) => a - b);
 

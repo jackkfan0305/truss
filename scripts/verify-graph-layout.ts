@@ -567,6 +567,15 @@ function checkLaneOrderIgnoresDirectionAndBreaksTiesStably(): void {
   assert.equal(byId.get("a"), 0, "a total tie falls back to edge id, so it is deterministic");
   assert.equal(byId.get("b"), 1);
 
+  assert.deepEqual(
+    laneOrder([
+      { id: "a", deltaY: 100, targetX: 400 },
+      { id: "b", deltaY: 100, targetX: 400 },
+    ]),
+    byId,
+    "the id tiebreak is independent of arrival order",
+  );
+
   assert.deepEqual(laneOrder([]), new Map(), "an empty bundle has no lanes");
 }
 

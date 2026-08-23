@@ -1222,11 +1222,14 @@ function checkSingleEdgeBundlesLayOutExactlyAsBefore(): void {
 
   for (let index = 1; index < boxes.length; index += 1) {
     const previous = boxes[index - 1];
+    const gap = boxes[index].x - (previous.x + previous.width);
 
-    assert.equal(
-      boxes[index].x - (previous.x + previous.width),
-      RANK_GAP,
-      "a chain keeps exactly the rank gap it has today",
+    // Within one grid unit, not exactly equal: `layoutGraph` snaps every
+    // position to `LAYOUT_GRID` after centring the diagram on the origin, so
+    // an exact match would be asserting that the snap happens to be a no-op.
+    assert.ok(
+      Math.abs(gap - RANK_GAP) <= LAYOUT_GRID,
+      `a chain keeps the rank gap it has today (got ${gap}, want ${RANK_GAP})`,
     );
   }
 }

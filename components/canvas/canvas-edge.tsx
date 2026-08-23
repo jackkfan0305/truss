@@ -49,7 +49,7 @@ const MIN_LABEL_CHARS = 5;
 const LABEL_BASE_CLASS =
   "nodrag nopan nokey rounded-xl border px-2 py-0.5 text-xs leading-tight";
 
-/** Left and right handles sit on a vertical face, so their fan spreads on y. */
+/** Whether a handle sits on a vertical face, which is what makes a route side-to-side. */
 function isSideFace(position: Position): boolean {
   return position === Position.Left || position === Position.Right;
 }
@@ -84,13 +84,23 @@ function readLaneSlots(store: ReactFlowState, edgeId: string): string {
   const laneOf = (candidate: (typeof bundle)[number]) =>
     (candidate.data as CanvasEdgeData | undefined)?.lane;
 
+  // Stamped lanes are contiguous from 0 (`assignLanes` numbers each bundle's
+  // side-to-side members 0..n-1), so the laneless pool has to start above them
+  // or a hand-drawn edge lands in a column a laid-out edge already owns — two
+  // runs on one line, two labels on one point, which is the whole thing this
+  // routing exists to prevent.
+  const stampedCount = bundle.filter(
+    (candidate) => laneOf(candidate) !== undefined
+  ).length;
+
   const lane =
     laneOf(edge) ??
-    bundle
-      .filter((candidate) => laneOf(candidate) === undefined)
-      .map((candidate) => candidate.id)
-      .sort()
-      .indexOf(edgeId);
+    stampedCount +
+      bundle
+        .filter((candidate) => laneOf(candidate) === undefined)
+        .map((candidate) => candidate.id)
+        .sort()
+        .indexOf(edgeId);
 
   // One `Handle` per side serves both directions (`canvas-node.tsx` renders
   // them all as `type="source"`, and the canvas runs `ConnectionMode.Loose`),

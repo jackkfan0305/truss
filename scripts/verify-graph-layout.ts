@@ -12,6 +12,8 @@ import {
   parallelLaneY,
   orthogonalPath,
   type Box,
+  type RoutePoint,
+  type EdgeRoute,
 } from "../lib/canvas-geometry";
 import {
   CANVAS_EDGE_TYPE,
@@ -860,6 +862,155 @@ function checkLongChainStaysInsideTheCoordinateBudget(): void {
   );
 }
 
+/** Whether two axis-aligned segments cross in the interior, not just touching at endpoints. */
+function segmentsIntersect(
+  a1: RoutePoint,
+  a2: RoutePoint,
+  b1: RoutePoint,
+  b2: RoutePoint,
+): boolean {
+  const hasInteriorOverlap = (p: number, q: number, r: number, s: number) => {
+    const aMin = Math.min(p, q);
+    const aMax = Math.max(p, q);
+    const bMin = Math.min(r, s);
+    const bMax = Math.max(r, s);
+    // Interior overlap: the ranges overlap and it's not just a single point at the boundary
+    return Math.max(aMin, bMin) < Math.min(aMax, bMax);
+  };
+
+  return hasInteriorOverlap(a1.x, a2.x, b1.x, b2.x) && hasInteriorOverlap(a1.y, a2.y, b1.y, b2.y);
+}
+
+/** Every route in the graph, keyed by edge id, built the way the renderer builds them. */
+function routeEveryEdge(
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+): Map<string, EdgeRoute> {
+  const boxes = new Map(nodes.map((node) => [node.id, toBox(node)]));
+  const parallelKey = (edge: CanvasEdge) =>
+    `${edge.source} ${edge.target} ${edge.sourceHandle} ${edge.targetHandle}`;
+
+  const groups = new Map<string, string[]>();
+
+  for (const edge of edges) {
+    const key = parallelKey(edge);
+
+    groups.set(key, [...(groups.get(key) ?? []), edge.id].sort());
+  }
+
+  const routes = new Map<string, EdgeRoute>();
+
+  for (const edge of edges) {
+    const source = boxes.get(edge.source);
+    const target = boxes.get(edge.target);
+
+    if (!edge.sourceHandle || !edge.targetHandle || !source || !target) {
+      continue;
+    }
+
+    const group = groups.get(parallelKey(edge))!;
+
+    routes.set(
+      edge.id,
+      buildEdgeRoute({
+        source: handleAnchor(source, edge.sourceHandle),
+        target: handleAnchor(target, edge.targetHandle),
+        lane: edge.data?.lane ?? 0,
+        parallelIndex: group.indexOf(edge.id),
+        parallelCount: group.length,
+      }),
+    );
+  }
+
+  return routes;
+}
+
+function checkNoBundleCrossesItself(): void {
+  // A hub fanning out above and below, plus a parallel pair, is the shape the
+  // whole design exists for.
+  const nodes = [makeNode("hub"), ...Array.from({ length: 5 }, (_, i) => makeNode(`t${i}`))];
+  const edges = [
+    ...Array.from({ length: 5 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
+    makeEdge("dup", "hub", "t0", "second relationship"),
+  ];
+
+  const laidOut = applyLayout(nodes, edges);
+  const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
+  const bundles = new Map<string, CanvasEdge[]>();
+
+  for (const edge of laidOut.edges) {
+    const key = `${edge.source} ${edge.sourceHandle}`;
+
+    bundles.set(key, [...(bundles.get(key) ?? []), edge]);
+  }
+
+  for (const [key, members] of bundles) {
+    for (let i = 0; i < members.length; i += 1) {
+      for (let j = i + 1; j < members.length; j += 1) {
+        const left = routes.get(members[i].id);
+        const right = routes.get(members[j].id);
+
+        if (!left || !right) {
+          continue;
+        }
+
+        // Segment 0 is the shared trunk — every member of a bundle runs along
+        // it by construction, so it is excluded. Everything after it must be
+        // disjoint.
+        for (let a = 1; a < left.points.length - 1; a += 1) {
+          for (let b = 1; b < right.points.length - 1; b += 1) {
+            assert.ok(
+              !segmentsIntersect(
+                left.points[a],
+                left.points[a + 1],
+                right.points[b],
+                right.points[b + 1],
+              ),
+              `${key}: ${members[i].id} segment ${a} crosses ${members[j].id} segment ${b}`,
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+function checkNoTwoLabelsCollide(): void {
+  // Two sources, not one. The spec promises no two label anchors *within one
+  // rank gap* fall within a pill of each other — a rank gap, not a bundle. A
+  // single-hub fixture can only ever prove the bundle-local case, and every
+  // edge leaving a rank shares that gap: `edgeSplitX` derives its column from
+  // the anchor's x, which is identical for every node in a rank, so lane 0 of
+  // one bundle lands in the same column as lane 0 of the next.
+  const nodes = [
+    makeNode("hub"),
+    makeNode("other"),
+    ...Array.from({ length: 4 }, (_, i) => makeNode(`t${i}`)),
+  ];
+  const edges = [
+    ...Array.from({ length: 4 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
+    makeEdge("p1", "hub", "t0", "one"),
+    makeEdge("p2", "hub", "t0", "two"),
+    makeEdge("o1", "other", "t1", "from other"),
+    makeEdge("o2", "other", "t2", "also other"),
+  ];
+
+  const laidOut = applyLayout(nodes, edges);
+  const anchors = [...routeEveryEdge(laidOut.nodes, laidOut.edges).entries()];
+
+  for (let i = 0; i < anchors.length; i += 1) {
+    for (let j = i + 1; j < anchors.length; j += 1) {
+      const [leftId, left] = anchors[i];
+      const [rightId, right] = anchors[j];
+      const apart =
+        Math.abs(left.labelPoint.x - right.labelPoint.x) >= EDGE_LABEL_CLEARANCE.width ||
+        Math.abs(left.labelPoint.y - right.labelPoint.y) >= EDGE_LABEL_CLEARANCE.height;
+
+      assert.ok(apart, `${leftId} and ${rightId} put their label pills on top of each other`);
+    }
+  }
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -889,8 +1040,10 @@ function main() {
   checkWideBundleGetsRoomForItsLabelsAndStaysInBudget();
   checkSingleEdgeBundlesLayOutExactlyAsBefore();
   checkLongChainStaysInsideTheCoordinateBudget();
+  checkNoBundleCrossesItself();
+  checkNoTwoLabelsCollide();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, lane stamping on side-to-side edges only, wide bundles get room for labels, single-edge bundles unchanged, long chains fit in budget, defect-2 fixes verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps and edge cases verified",
   );
 }
 

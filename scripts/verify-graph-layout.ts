@@ -734,7 +734,7 @@ function checkOrthogonalPathRoundsCornersAndDropsCollinearPoints(): void {
   assert.equal(orthogonalPath([]), "", "no points draw nothing");
 }
 
-function checkCloseSpanParallelForwardDoesNotOvershooot(): void {
+function checkCloseSpanParallelForwardDoesNotOvershoot(): void {
   const route = buildEdgeRoute({
     source: { x: 100, y: 0 },
     target: { x: 280, y: 0 },
@@ -785,24 +785,18 @@ function checkSlopedButUnderThresholdRouteKeepsLabelOnSegment(): void {
     parallelCount: 1,
   });
 
+  const end = route.points[route.points.length - 1];
+  const start = route.points[route.points.length - 2];
+
   assert.equal(
     route.labelPoint.y,
-    20,
-    "the label rides the final horizontal at target.y, not source.y",
-  );
-
-  // Verify labelPoint is on the final horizontal segment (x: splitX ... 900, y: 20)
-  const lastSegmentStart = route.points[route.points.length - 2];
-  const lastSegmentEnd = route.points[route.points.length - 1];
-
-  assert.equal(
-    lastSegmentEnd.y,
-    20,
-    "the last segment ends at target.y",
+    end.y,
+    "the label rides the final horizontal, not the source's row",
   );
   assert.ok(
-    route.labelPoint.y === lastSegmentEnd.y,
-    "label y is on the final segment",
+    route.labelPoint.x >= Math.min(start.x, end.x) &&
+      route.labelPoint.x <= Math.max(start.x, end.x),
+    `the label's x (${route.labelPoint.x}) is on the drawn segment ${start.x}..${end.x}, not beside it`,
   );
 }
 
@@ -830,7 +824,7 @@ function main() {
   checkFlatRouteKeepsItsLabelOffTheNodeFace();
   checkParallelGroupBowsToItsOwnLane();
   checkOrthogonalPathRoundsCornersAndDropsCollinearPoints();
-  checkCloseSpanParallelForwardDoesNotOvershooot();
+  checkCloseSpanParallelForwardDoesNotOvershoot();
   checkCloseSpanParallelBackwardDoesNotOvershoot();
   checkSlopedButUnderThresholdRouteKeepsLabelOnSegment();
   console.log(

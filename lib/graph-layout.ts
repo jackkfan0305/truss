@@ -11,6 +11,13 @@ import {
   type Box,
   type LaneMember,
 } from "@/lib/canvas-geometry";
+import {
+  TRUNK_MIN,
+  LANE_STEP,
+  LABEL_GAP,
+  LAYOUT_WIDTH_BUDGET,
+  EDGE_LABEL_CLEARANCE,
+} from "@/types/canvas";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 /**
@@ -46,6 +53,47 @@ import type { CanvasEdge, CanvasNode } from "@/types/canvas";
  */
 const RANK_ROW_GAP = MIN_NODE_GAP * 3;
 
+/**
+ * The rank gap this graph's widest bundle needs, clamped to what the compact
+ * agent graph contract can represent.
+ *
+ * A wide bundle and a long chain never co-occur — a chain stacks nothing, so
+ * its bundles have one member each and it lands on the `RANK_GAP` floor — so
+ * the clamp only bites on graphs that are genuinely both. Rather than guess a
+ * ceiling, it is computed from the rank count this layout actually produced.
+ *
+ * When the clamp does bite the lanes compress evenly, which is the same
+ * give-up-evenly behaviour the old face fan had for a crowded node face:
+ * squeezed still reads, overshot reads as labels anchored to thin air.
+ */
+function computedRankSep(maxLane: number, placed: readonly CanvasNode[]): number {
+  const needed = Math.max(
+    RANK_GAP,
+    TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width / 2 + LABEL_GAP
+  );
+
+  // Nodes in one rank share an x centre, so counting distinct centres counts
+  // ranks, and the widest node in each is what that rank costs in width.
+  const columns = new Map<number, number>();
+
+  for (const node of placed) {
+    const box = toBox(node);
+    const center = box.x + box.width / 2;
+
+    columns.set(center, Math.max(columns.get(center) ?? 0, box.width));
+  }
+
+  // A single-rank graph has no rank gap to size.
+  if (columns.size < 2) {
+    return needed;
+  }
+
+  const nodeWidth = [...columns.values()].reduce((total, width) => total + width, 0);
+  const affordable = (LAYOUT_WIDTH_BUDGET - nodeWidth) / (columns.size - 1);
+
+  return Math.max(MIN_NODE_GAP, Math.min(needed, affordable));
+}
+
 /** The four handle ids `canvas-node.tsx` renders, named once instead of
  * scattered as string literals through the geometry below. */
 export const HANDLE_ID = {
@@ -71,7 +119,8 @@ export const HANDLE_ID = {
  */
 export function layoutGraph(
   nodes: readonly CanvasNode[],
-  edges: readonly CanvasEdge[]
+  edges: readonly CanvasEdge[],
+  ranksep: number = RANK_GAP
 ): CanvasNode[] {
   if (nodes.length === 0) {
     return [];
@@ -90,7 +139,7 @@ export function layoutGraph(
   graph.setGraph({
     rankdir: "LR",
     nodesep: RANK_ROW_GAP,
-    ranksep: RANK_GAP,
+    ranksep,
   });
   graph.setDefaultEdgeLabel(() => ({}));
 
@@ -464,10 +513,30 @@ export function applyLayout(
   options: ApplyLayoutOptions = {}
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const sourceEdges = options.dedupe ? dedupeEdges(edges) : edges;
-  const laidOutNodes = layoutGraph(nodes, sourceEdges);
 
-  const wired = wireEdges(laidOutNodes, sourceEdges);
-  const lanes = assignLanes(wired);
+  // Pass 1 exists only to learn the shape: how many ranks, and how wide the
+  // widest bundle is. Both need handles, handles need positions, and positions
+  // need a rank gap — so the first gap is the floor and the second is derived.
+  const probe = layoutGraph(nodes, sourceEdges);
+  const probeLanes = assignLanes(wireEdges(probe, sourceEdges));
+  let maxLane = Math.max(0, ...probeLanes.values());
+
+  // Compute initial ranksep and lay out. Repeat if maxLane changed, since
+  // larger ranksep can cause more edges to become side-to-side, widening the
+  // bundle.
+  let laidOutNodes = layoutGraph(nodes, sourceEdges, computedRankSep(maxLane, probe));
+  let wired = wireEdges(laidOutNodes, sourceEdges);
+  let lanes = assignLanes(wired);
+  let newMaxLane = Math.max(0, ...lanes.values());
+
+  while (newMaxLane > maxLane) {
+    maxLane = newMaxLane;
+    laidOutNodes = layoutGraph(nodes, sourceEdges, computedRankSep(maxLane, probe));
+    wired = wireEdges(laidOutNodes, sourceEdges);
+    lanes = assignLanes(wired);
+    newMaxLane = Math.max(0, ...lanes.values());
+  }
+
   const wiredById = new Map(wired.map((entry) => [entry.edge.id, entry.edge]));
 
   const laidOutEdges = sourceEdges.map((edge) => {

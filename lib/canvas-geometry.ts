@@ -31,20 +31,17 @@ export const LAYOUT_GRID = 20;
 export const MIN_NODE_GAP = 40;
 
 /**
- * The empty corridor the layout leaves between one rank of nodes and the next,
- * in flow units. Dagre reads it as `ranksep` — the literal edge-to-edge
- * distance between ranks — and `CanvasEdgeRenderer` reads it to find the
- * node-free channel to turn a long edge in.
+ * The FLOOR for the empty corridor the layout leaves between one rank of nodes
+ * and the next, in flow units.
+ *
+ * `applyLayout` passes dagre a `ranksep` computed from the graph's widest
+ * bundle and clamped to the coordinate budget (`computedRankSep` in
+ * `lib/graph-layout.ts`). This is the value a graph of single-edge bundles
+ * lands on, and the value the corridor had before lanes existed.
  *
  * It holds an edge label's pill (`EDGE_LABEL_CLEARANCE.width`) plus clear space
- * on both sides of it, so a label sits in the corridor rather than against
- * whichever node is closer. The ceiling is the compact agent graph contract
- * (`lib/agent-graph.ts`), which only represents coordinates in ±10,000: the
- * widest graph it allows is a 40-node chain, which at default node sizes comes
- * to `40 * 200 + 39 * 280 = 18,920` and so ±9,460 once `boundingCenter` puts it
- * either side of the origin. A node outside that range projects as *opaque* —
- * invisible to an agent reading the canvas back — so this cannot grow much
- * further without trading legibility for reachability.
+ * on both sides of it, so a lone label sits in the corridor rather than against
+ * whichever node is closer.
  */
 export const RANK_GAP = MIN_NODE_GAP * 3 + EDGE_LABEL_CLEARANCE.width;
 

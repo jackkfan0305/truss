@@ -5,6 +5,7 @@ import {
   FAN_STEP,
   LAYOUT_GRID,
   MIN_NODE_GAP,
+  RANK_GAP,
   edgeTurnX,
   fanOffset,
   fanSlotIndex,
@@ -24,6 +25,8 @@ import {
   EDGE_LABEL_CLEARANCE,
   TRUNK_MIN,
   LANE_STEP,
+  LABEL_GAP,
+  LAYOUT_WIDTH_BUDGET,
   PARALLEL_STEP,
   type CanvasEdge,
   type CanvasNode,
@@ -931,6 +934,75 @@ function checkVerticalHandleEdgeIsLeftOutOfEveryBundle(): void {
   }
 }
 
+function checkWideBundleGetsRoomForItsLabelsAndStaysInBudget(): void {
+  // One hub with six targets: six lanes, so six split columns plus a pill.
+  const nodes = [makeNode("hub"), ...Array.from({ length: 6 }, (_, i) => makeNode(`t${i}`))];
+  const edges = Array.from({ length: 6 }, (_, i) =>
+    makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`),
+  );
+
+  const { nodes: laidOut, edges: laidOutEdges } = applyLayout(nodes, edges);
+  const boxes = new Map(laidOut.map((node) => [node.id, toBox(node)]));
+  const hub = boxes.get("hub")!;
+  const target = boxes.get("t0")!;
+  const gap = Math.abs(target.x - (hub.x + hub.width));
+  const maxLane = Math.max(...laidOutEdges.map((edge) => edge.data?.lane ?? 0));
+
+  assert.ok(
+    gap >= TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width / 2,
+    `the rank gap (${gap}) holds every split column and the outermost label`,
+  );
+
+  const xs = laidOut.flatMap((node) => [
+    node.position.x,
+    node.position.x + (node.width ?? 0),
+  ]);
+
+  assert.ok(
+    Math.max(...xs) - Math.min(...xs) <= LAYOUT_WIDTH_BUDGET,
+    "and the whole diagram still fits the compact contract's coordinate budget",
+  );
+}
+
+function checkSingleEdgeBundlesLayOutExactlyAsBefore(): void {
+  // Every bundle here has one member, so the computed ranksep must land on the
+  // RANK_GAP floor and nothing about this graph may move.
+  const nodes = [makeNode("a"), makeNode("b"), makeNode("c")];
+  const edges = [makeEdge("ab", "a", "b", "x"), makeEdge("bc", "b", "c", "y")];
+  const boxes = applyLayout(nodes, edges)
+    .nodes.map((node) => toBox(node))
+    .sort((left, right) => left.x - right.x);
+
+  for (let index = 1; index < boxes.length; index += 1) {
+    const previous = boxes[index - 1];
+    const gap = boxes[index].x - (previous.x + previous.width);
+
+    // Within one grid unit, not exactly equal: `layoutGraph` snaps every
+    // position to `LAYOUT_GRID` after centring the diagram on the origin, so
+    // an exact match would be asserting that the snap happens to be a no-op.
+    assert.ok(
+      Math.abs(gap - RANK_GAP) <= LAYOUT_GRID,
+      `a chain keeps the rank gap it has today (got ${gap}, want ${RANK_GAP})`,
+    );
+  }
+}
+
+function checkLongChainStaysInsideTheCoordinateBudget(): void {
+  const nodes = Array.from({ length: 40 }, (_, i) => makeNode(`n${i}`));
+  const edges = Array.from({ length: 39 }, (_, i) =>
+    makeEdge(`e${i}`, `n${i}`, `n${i + 1}`, ""),
+  );
+  const xs = applyLayout(nodes, edges).nodes.flatMap((node) => [
+    node.position.x,
+    node.position.x + (node.width ?? 0),
+  ]);
+
+  assert.ok(
+    Math.max(...xs) <= 10000 && Math.min(...xs) >= -10000,
+    "a 40-node chain — the widest the compact contract allows — stays representable",
+  );
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -961,8 +1033,11 @@ function main() {
   checkDedupeDropsIdenticalTriplesOnlyWhenAsked();
   checkApplyLayoutStampsLanesOnSideToSideEdgesOnly();
   checkVerticalHandleEdgeIsLeftOutOfEveryBundle();
+  checkWideBundleGetsRoomForItsLabelsAndStaysInBudget();
+  checkSingleEdgeBundlesLayOutExactlyAsBefore();
+  checkLongChainStaysInsideTheCoordinateBudget();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, lane stamping on side-to-side edges only, defect-2 fixes verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, lane stamping on side-to-side edges only, wide bundles get room for labels, single-edge bundles unchanged, long chains fit in budget, defect-2 fixes verified",
   );
 }
 

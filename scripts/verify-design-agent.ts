@@ -861,6 +861,50 @@ function checkAddEdgeHandlesMatchFinalGeometry() {
   }
 }
 
+function checkRelayoutRefreshesLanesNotJustHandles(): void {
+  // A hub that already has one edge, with a second added by the plan. The
+  // existing edge's lane has to move: it is no longer the only member.
+  const context: DesignContext = {
+    nodes: [node("hub", 0, 0), node("a", 400, 0), node("b", 400, 200)],
+    edges: [
+      {
+        ...edge("hub-a", "hub", "a"),
+        sourceHandle: "right",
+        targetHandle: "left",
+        data: { label: "first", lane: 0 },
+      },
+    ],
+  };
+
+  const { actions } = parseDesignPlan(
+    { actions: [{ type: "addEdge", source: "hub", target: "b", label: "second" }] },
+    context,
+  );
+
+  const added = actions.find(
+    (action) => action.type === "addEdge" && action.edge.target === "b",
+  );
+
+  assert.ok(
+    added?.type === "addEdge" && typeof added.edge.data?.lane === "number",
+    "a newly added edge is born with its lane, never lane-less then patched",
+  );
+
+  const refreshed = actions.find(
+    (action) => action.type === "updateEdge" && action.id === "hub-a",
+  );
+
+  assert.ok(
+    refreshed?.type === "updateEdge",
+    "the pre-existing edge gets an updateEdge because its bundle grew",
+  );
+  assert.equal(
+    typeof refreshed.lane,
+    "number",
+    "and that update carries the new lane, not only the handles",
+  );
+}
+
 /** An added node is born at its final position — never an add-then-move pair. */
 function checkAddedNodesAreBornAtTheirFinalPosition() {
   const context: DesignContext = { nodes: [node("hub", 0, 0)], edges: [] };
@@ -1598,6 +1642,7 @@ function main() {
   checkAutoLayoutLeavesRoomForEdgeLabels();
   checkLayoutMovesAreNotCappedByMaxDesignActions();
   checkAddEdgeHandlesMatchFinalGeometry();
+  checkRelayoutRefreshesLanesNotJustHandles();
   checkAddedNodesAreBornAtTheirFinalPosition();
   checkMovesOnlyCoverNodesThatActuallyMoved();
   checkParsingIsDeterministic();

@@ -86,7 +86,19 @@ export type DesignAction =
   // Never built from raw model output (see `DESIGN_ACTION_TYPES`) — only
   // `layoutPlan` emits this, to refresh a pre-existing edge's handles after
   // a relayout moved one of its endpoints.
-  | { type: "updateEdge"; id: string; sourceHandle: string; targetHandle: string };
+  | {
+      type: "updateEdge";
+      id: string;
+      sourceHandle: string;
+      targetHandle: string;
+      /**
+       * The edge's refreshed lane, when layout moved it. App-emitted like the
+       * handles either side of it — `DESIGN_ACTION_TYPES` deliberately keeps
+       * `updateEdge` out of what raw model output can produce, and a model has
+       * no geometry to derive a lane from anyway.
+       */
+      lane?: number;
+    };
 
 export interface DesignPlan {
   summary: string;
@@ -182,12 +194,27 @@ export function applyDesignAction(
     case "deleteEdge":
       flow.removeEdge(action.id);
       break;
-    case "updateEdge":
-      flow.updateEdge(action.id, {
-        sourceHandle: action.sourceHandle,
-        targetHandle: action.targetHandle,
-      });
+    case "updateEdge": {
+      if (action.lane === undefined) {
+        flow.updateEdge(action.id, {
+          sourceHandle: action.sourceHandle,
+          targetHandle: action.targetHandle,
+        });
+      } else {
+        const existing = flow.getEdge(action.id);
+        const label = existing?.data?.label ?? "";
+        flow.updateEdge(action.id, {
+          sourceHandle: action.sourceHandle,
+          targetHandle: action.targetHandle,
+          data: {
+            label,
+            ...(existing?.data || {}),
+            lane: action.lane,
+          },
+        });
+      }
       break;
+    }
   }
 }
 
@@ -612,16 +639,24 @@ function layoutPlan(
     if (action.type === "addEdge") {
       const wired = laidOutEdgesById.get(action.edge.id);
 
-      return wired?.sourceHandle && wired.targetHandle
-        ? {
-            ...action,
-            edge: {
-              ...action.edge,
-              sourceHandle: wired.sourceHandle,
-              targetHandle: wired.targetHandle,
-            },
-          }
-        : action;
+      if (!wired?.sourceHandle || !wired.targetHandle) {
+        return action;
+      }
+
+      const data = {
+        label: action.edge.data?.label ?? "",
+        ...(wired.data?.lane === undefined ? {} : { lane: wired.data.lane }),
+      };
+
+      return {
+        ...action,
+        edge: {
+          ...action.edge,
+          sourceHandle: wired.sourceHandle,
+          targetHandle: wired.targetHandle,
+          data,
+        },
+      };
     }
 
     return action;
@@ -651,16 +686,28 @@ function layoutPlan(
   const handleRefreshes = context.edges.flatMap((edge): DesignAction[] => {
     const wired = laidOutEdgesById.get(edge.id);
 
-    if (
-      !wired?.sourceHandle ||
-      !wired.targetHandle ||
-      (wired.sourceHandle === edge.sourceHandle && wired.targetHandle === edge.targetHandle)
-    ) {
+    if (!wired?.sourceHandle || !wired.targetHandle) {
+      return [];
+    }
+
+    const laneChanged = wired.data?.lane !== edge.data?.lane;
+    const handlesChanged =
+      wired.sourceHandle !== edge.sourceHandle ||
+      wired.targetHandle !== edge.targetHandle;
+
+    // A no-op update is a pointless AI-cursor trip and a junk activity row.
+    if (!laneChanged && !handlesChanged) {
       return [];
     }
 
     return [
-      { type: "updateEdge", id: edge.id, sourceHandle: wired.sourceHandle, targetHandle: wired.targetHandle },
+      {
+        type: "updateEdge",
+        id: edge.id,
+        sourceHandle: wired.sourceHandle,
+        targetHandle: wired.targetHandle,
+        ...(wired.data?.lane === undefined ? {} : { lane: wired.data.lane }),
+      },
     ];
   });
 

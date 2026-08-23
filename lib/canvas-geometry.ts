@@ -5,6 +5,8 @@ import {
   NODE_DEFAULT_SIZES,
   TRUNK_MIN,
   LANE_STEP,
+  PARALLEL_STEP,
+  CORNER_RADIUS,
   type CanvasNode,
   type NodeSize,
 } from "@/types/canvas";
@@ -216,4 +218,215 @@ export function fanSlotIndex(
   const index = [...memberIds].sort().indexOf(edgeId);
 
   return index === -1 ? 0 : index;
+}
+
+export interface RoutePoint {
+  x: number;
+  y: number;
+}
+
+/** A drawn route: its corner points, and where its label pill centres. */
+export interface EdgeRoute {
+  /** Corner points, source anchor first, target anchor last. */
+  points: RoutePoint[];
+  /** Always on a drawn segment, never floating beside one. */
+  labelPoint: RoutePoint;
+}
+
+/**
+ * The y a parallel group's member runs at across the corridor.
+ *
+ * Parallel edges between the same pair on the same row have no vertical run to
+ * stagger — a split column alone would draw them as one overlapping line — so
+ * they bow to their own lane instead, symmetrically about the y a single edge
+ * would have taken.
+ */
+export function parallelLaneY(
+  targetY: number,
+  index: number,
+  count: number
+): number {
+  return targetY + (index - (count - 1) / 2) * PARALLEL_STEP;
+}
+
+/**
+ * The corner points and label anchor for one side-to-side edge.
+ *
+ * Two shapes. A lone edge turns once, at its lane's column, and hangs its
+ * label on the vertical run — a run no other lane in the bundle occupies,
+ * because no other lane turns at that column. A parallel group member turns
+ * twice more, running the corridor at its own `parallelLaneY`, and hangs its
+ * label there instead — a y no other member occupies.
+ *
+ * Either way the label sits mid-segment with drawn line on both sides of it.
+ * That is the attribution cue the old corner-anchored label lacked: a pill at
+ * a corner has nothing to its left, so a column of them reads as a list rather
+ * than as one label per line.
+ */
+export function buildEdgeRoute({
+  source,
+  target,
+  lane,
+  parallelIndex,
+  parallelCount,
+}: {
+  source: RoutePoint;
+  target: RoutePoint;
+  lane: number;
+  parallelIndex: number;
+  parallelCount: number;
+}): EdgeRoute {
+  const direction = target.x >= source.x ? 1 : -1;
+  const splitX = edgeSplitX(source.x, target.x, lane);
+
+  if (parallelCount > 1) {
+    const laneY = parallelLaneY(target.y, parallelIndex, parallelCount);
+    // The merge column has to leave a pill's worth of straight run after the
+    // split, or the label would sit on a corner. Endpoints closer together
+    // than that push it out rather than letting the pill overhang the target.
+    const wanted = direction * (target.x - direction * TRUNK_MIN - splitX);
+    const mergeX = splitX + direction * Math.max(EDGE_LABEL_CLEARANCE.width, wanted);
+
+    return {
+      points: [
+        source,
+        { x: splitX, y: source.y },
+        { x: splitX, y: laneY },
+        { x: mergeX, y: laneY },
+        { x: mergeX, y: target.y },
+        target,
+      ],
+      labelPoint: { x: (splitX + mergeX) / 2, y: laneY },
+    };
+  }
+
+  if (Math.abs(target.y - source.y) <= EDGE_LABEL_CLEARANCE.height) {
+    // No vertical run worth hanging a pill on. The label goes on the trunk,
+    // far enough past the split that the pill clears the node's face.
+    return {
+      points: [source, target],
+      labelPoint: {
+        x: splitX + (direction * EDGE_LABEL_CLEARANCE.width) / 2,
+        y: source.y,
+      },
+    };
+  }
+
+  return {
+    points: [
+      source,
+      { x: splitX, y: source.y },
+      { x: splitX, y: target.y },
+      target,
+    ],
+    labelPoint: { x: splitX, y: (source.y + target.y) / 2 },
+  };
+}
+
+/**
+ * An SVG path through a list of corner points, with the corners rounded.
+ *
+ * Written here rather than taken from React Flow because `getSmoothStepPath`
+ * accepts a single `centerX` and so can only express one turn. A parallel
+ * group member turns three times. Using this for the single-turn case too
+ * means one corner-rounding rule instead of two that have to be kept in sync.
+ *
+ * Collinear points are dropped, so a route that degenerates to a straight line
+ * draws one segment. Each corner's radius is clamped to half of the shorter of
+ * its two segments, so a tight corner rounds less rather than doubling back.
+ */
+export function orthogonalPath(
+  points: readonly RoutePoint[],
+  radius: number = CORNER_RADIUS
+): string {
+  const corners = dropCollinear(points);
+
+  if (corners.length === 0) {
+    return "";
+  }
+
+  const [start] = corners;
+  let path = `M ${round(start.x)},${round(start.y)}`;
+
+  if (corners.length === 1) {
+    return path;
+  }
+
+  for (let index = 1; index < corners.length - 1; index += 1) {
+    const previous = corners[index - 1];
+    const corner = corners[index];
+    const next = corners[index + 1];
+
+    const r = Math.min(
+      radius,
+      distance(previous, corner) / 2,
+      distance(corner, next) / 2
+    );
+
+    const entry = along(corner, previous, r);
+    const exit = along(corner, next, r);
+
+    path += ` L ${round(entry.x)},${round(entry.y)}`;
+    path += ` Q ${round(corner.x)},${round(corner.y)} ${round(exit.x)},${round(exit.y)}`;
+  }
+
+  const end = corners[corners.length - 1];
+
+  return `${path} L ${round(end.x)},${round(end.y)}`;
+}
+
+/**
+ * Removes duplicate and collinear points, so the corner loop only ever sees
+ * real turns. Both cases arise honestly: a straight hop produces two identical
+ * turn points, and a target level with its source produces three collinear
+ * ones.
+ */
+function dropCollinear(points: readonly RoutePoint[]): RoutePoint[] {
+  const kept: RoutePoint[] = [];
+
+  for (const point of points) {
+    const last = kept[kept.length - 1];
+
+    if (last && last.x === point.x && last.y === point.y) {
+      continue;
+    }
+
+    const beforeLast = kept[kept.length - 2];
+
+    if (
+      last &&
+      beforeLast &&
+      (beforeLast.x - last.x) * (last.y - point.y) ===
+        (beforeLast.y - last.y) * (last.x - point.x)
+    ) {
+      kept.pop();
+    }
+
+    kept.push(point);
+  }
+
+  return kept;
+}
+
+function distance(a: RoutePoint, b: RoutePoint): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+/** `length` units from `from` in the direction of `toward`. */
+function along(from: RoutePoint, toward: RoutePoint, length: number): RoutePoint {
+  const span = distance(from, toward);
+
+  if (span === 0) {
+    return { x: from.x, y: from.y };
+  }
+
+  return {
+    x: from.x + ((toward.x - from.x) / span) * length,
+    y: from.y + ((toward.y - from.y) / span) * length,
+  };
+}
+
+/** Keeps the emitted `d` free of float noise, so two identical routes compare equal. */
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
 }

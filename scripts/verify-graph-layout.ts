@@ -11,6 +11,9 @@ import {
   laneOrder,
   edgeSplitX,
   toBox,
+  buildEdgeRoute,
+  parallelLaneY,
+  orthogonalPath,
   type Box,
 } from "../lib/canvas-geometry";
 import {
@@ -21,6 +24,7 @@ import {
   EDGE_LABEL_CLEARANCE,
   TRUNK_MIN,
   LANE_STEP,
+  PARALLEL_STEP,
   type CanvasEdge,
   type CanvasNode,
   type NodeShape,
@@ -602,6 +606,134 @@ function checkSplitColumnStaggersByLaneAndFollowsTheFlow(): void {
   );
 }
 
+function checkNonParallelRouteIsTrunkThenTurn(): void {
+  const route = buildEdgeRoute({
+    source: { x: 100, y: 0 },
+    target: { x: 900, y: 300 },
+    lane: 1,
+    parallelIndex: 0,
+    parallelCount: 1,
+  });
+
+  const splitX = 100 + TRUNK_MIN + LANE_STEP;
+
+  assert.deepEqual(
+    route.points,
+    [
+      { x: 100, y: 0 },
+      { x: splitX, y: 0 },
+      { x: splitX, y: 300 },
+      { x: 900, y: 300 },
+    ],
+    "trunk out, turn at the lane's own column, then straight in",
+  );
+  assert.deepEqual(
+    route.labelPoint,
+    { x: splitX, y: 150 },
+    "the label rides the middle of the vertical run, which no other lane shares",
+  );
+}
+
+function checkFlatRouteKeepsItsLabelOffTheNodeFace(): void {
+  const route = buildEdgeRoute({
+    source: { x: 100, y: 0 },
+    target: { x: 900, y: 0 },
+    lane: 0,
+    parallelIndex: 0,
+    parallelCount: 1,
+  });
+
+  assert.deepEqual(
+    route.points,
+    [
+      { x: 100, y: 0 },
+      { x: 900, y: 0 },
+    ],
+    "a straight hop collapses to two points rather than drawing a zero-height turn",
+  );
+  assert.equal(route.labelPoint.y, 0, "its label stays on the line");
+  assert.equal(
+    route.labelPoint.x,
+    100 + TRUNK_MIN + EDGE_LABEL_CLEARANCE.width / 2,
+    "and sits a pill's half-width past the split, so the pill clears the node",
+  );
+}
+
+function checkParallelGroupBowsToItsOwnLane(): void {
+  const shared = {
+    source: { x: 100, y: 0 },
+    target: { x: 900, y: 0 },
+    lane: 0,
+  } as const;
+
+  const first = buildEdgeRoute({ ...shared, parallelIndex: 0, parallelCount: 2 });
+  const second = buildEdgeRoute({ ...shared, parallelIndex: 1, parallelCount: 2 });
+
+  assert.equal(first.points.length, 6, "a parallel member needs five segments");
+  assert.equal(
+    Math.abs(first.labelPoint.y - second.labelPoint.y),
+    PARALLEL_STEP,
+    "and its label is a full PARALLEL_STEP clear of its neighbour's",
+  );
+  assert.ok(
+    Math.abs(first.labelPoint.y - second.labelPoint.y) > EDGE_LABEL_CLEARANCE.height,
+    "which is more than a pill height, so the two cannot overlap",
+  );
+  assert.equal(
+    (first.labelPoint.y + second.labelPoint.y) / 2,
+    0,
+    "the group straddles the line a single edge would have taken",
+  );
+}
+
+function checkOrthogonalPathRoundsCornersAndDropsCollinearPoints(): void {
+  const straight = orthogonalPath([
+    { x: 0, y: 0 },
+    { x: 50, y: 0 },
+    { x: 100, y: 0 },
+  ]);
+
+  assert.equal(
+    straight,
+    "M 0,0 L 100,0",
+    "three points on one line draw one segment, not two",
+  );
+
+  const corner = orthogonalPath(
+    [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+    ],
+    8,
+  );
+
+  assert.ok(corner.includes("Q"), "a real corner is rounded, not mitred");
+  assert.ok(corner.startsWith("M 0,0"), "the path starts at the source anchor");
+  assert.ok(corner.trim().endsWith("100,100"), "and ends at the target anchor");
+
+  const tight = orthogonalPath(
+    [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+    ],
+    8,
+  );
+
+  assert.ok(
+    !tight.includes("NaN") && !tight.includes("-"),
+    "a corner shorter than the radius clamps instead of overshooting backwards",
+  );
+
+  assert.equal(
+    orthogonalPath([{ x: 5, y: 5 }]),
+    "M 5,5",
+    "a single point is a degenerate but valid path",
+  );
+  assert.equal(orthogonalPath([]), "", "no points draw nothing");
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -622,8 +754,12 @@ function main() {
   checkLaneOrderPutsTheLongestTravelClosestToTheSource();
   checkLaneOrderIgnoresDirectionAndBreaksTiesStably();
   checkSplitColumnStaggersByLaneAndFollowsTheFlow();
+  checkNonParallelRouteIsTrunkThenTurn();
+  checkFlatRouteKeepsItsLabelOffTheNodeFace();
+  checkParallelGroupBowsToItsOwnLane();
+  checkOrthogonalPathRoundsCornersAndDropsCollinearPoints();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, and split column positioning verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows verified",
   );
 }
 

@@ -1921,11 +1921,23 @@ function checkNoBundleCrossesItself(): void {
 }
 
 function checkNoTwoLabelsCollide(): void {
-  const nodes = [makeNode("hub"), ...Array.from({ length: 4 }, (_, i) => makeNode(`t${i}`))];
+  // Two sources, not one. The spec promises no two label anchors *within one
+  // rank gap* fall within a pill of each other — a rank gap, not a bundle. A
+  // single-hub fixture can only ever prove the bundle-local case, and every
+  // edge leaving a rank shares that gap: `edgeSplitX` derives its column from
+  // the anchor's x, which is identical for every node in a rank, so lane 0 of
+  // one bundle lands in the same column as lane 0 of the next.
+  const nodes = [
+    makeNode("hub"),
+    makeNode("other"),
+    ...Array.from({ length: 4 }, (_, i) => makeNode(`t${i}`)),
+  ];
   const edges = [
     ...Array.from({ length: 4 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
     makeEdge("p1", "hub", "t0", "one"),
     makeEdge("p2", "hub", "t0", "two"),
+    makeEdge("o1", "other", "t1", "from other"),
+    makeEdge("o2", "other", "t2", "also other"),
   ];
 
   const laidOut = applyLayout(nodes, edges);

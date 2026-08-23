@@ -905,6 +905,21 @@ function checkRelayoutRefreshesLanesNotJustHandles(): void {
   // entirely — so collect both lanes and pin them to [0, 1].
   const addedLane = added.edge.data?.lane;
   const refreshedLane = refreshed.lane;
+
+  // The precondition the `updateEdge` above rests on, stated outright rather
+  // than left implicit: hub-a's handles do not change across this relayout, so
+  // the ONLY thing that can have emitted an update for it is its lane moving
+  // off the stale 0 it was seeded with. Without this line the [0, 1] pin below
+  // is only falsifiable by an argument that lives outside the test.
+  assert.notEqual(
+    refreshedLane,
+    0,
+    "the refreshed lane moved off the stale 0 the fixture seeded, rather than carrying it through",
+  );
+
+  // In this fixture, the pre-existing hub-a edge receives lane 0 (shifted down
+  // by the new edge joining its bundle), and the newly added hub-b edge
+  // receives lane 1. Together they form the complete, fresh lane set [0, 1].
   const lanes = [addedLane, refreshedLane].sort((a, b) => a - b);
 
   assert.deepEqual(

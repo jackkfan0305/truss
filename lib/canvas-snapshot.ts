@@ -133,7 +133,17 @@ function parseEdge(value: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | n
     target,
     ...(typeof sourceHandle === "string" ? { sourceHandle } : {}),
     ...(typeof targetHandle === "string" ? { targetHandle } : {}),
-    data: { label: typeof edgeData.label === "string" ? edgeData.label : "" },
+    data: {
+      label: typeof edgeData.label === "string" ? edgeData.label : "",
+      // Whitelisted, not trusted: a lane is an index into a bundle, so a
+      // fractional, negative or non-numeric one names no slot. Dropping it
+      // degrades to the renderer's id-sort fallback instead of throwing.
+      ...(typeof edgeData.lane === "number" &&
+      Number.isInteger(edgeData.lane) &&
+      edgeData.lane >= 0
+        ? { lane: edgeData.lane }
+        : {}),
+    },
     // Reapplied from the constants rather than trusted from the blob: they are
     // the same for every edge, so storing them would only create a way for a
     // stored value to drift from the palette or to carry arbitrary CSS.

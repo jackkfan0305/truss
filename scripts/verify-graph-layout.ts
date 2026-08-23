@@ -800,6 +800,36 @@ function checkSlopedButUnderThresholdRouteKeepsLabelOnSegment(): void {
   );
 }
 
+function checkDedupeDropsIdenticalTriplesOnlyWhenAsked(): void {
+  const nodes = [makeNode("a"), makeNode("b")];
+  const edges = [
+    makeEdge("e1", "a", "b", "OAuth + refresh"),
+    makeEdge("e2", "a", "b", "OAuth + refresh"),
+    makeEdge("e3", "a", "b", "encrypted tokens"),
+    makeEdge("e4", "b", "a", "OAuth + refresh"),
+  ];
+
+  assert.equal(
+    applyLayout(nodes, edges).edges.length,
+    4,
+    "the default path never deletes a user's edge",
+  );
+
+  assert.deepEqual(
+    applyLayout(nodes, edges, { dedupe: true }).edges.map((edge) => edge.id),
+    ["e1", "e3", "e4"],
+    "only the exact source+target+label repeat goes, and the first occurrence is kept",
+  );
+
+  assert.equal(
+    applyLayout(nodes, [makeEdge("u1", "a", "b"), makeEdge("u2", "a", "b")], {
+      dedupe: true,
+    }).edges.length,
+    1,
+    "two unlabelled edges between the same pair are the same duplicate case",
+  );
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -827,8 +857,9 @@ function main() {
   checkCloseSpanParallelForwardDoesNotOvershoot();
   checkCloseSpanParallelBackwardDoesNotOvershoot();
   checkSlopedButUnderThresholdRouteKeepsLabelOnSegment();
+  checkDedupeDropsIdenticalTriplesOnlyWhenAsked();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, defect-2 fixes verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, edge deduplication, defect-2 fixes verified",
   );
 }
 

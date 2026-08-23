@@ -312,6 +312,42 @@ function isColumnClear(
   });
 }
 
+export interface ApplyLayoutOptions {
+  /**
+   * Drop edges that repeat an earlier edge's `source`, `target` and label.
+   *
+   * Off by default, and deliberately so: dropping an edge is a real deletion,
+   * and on a shared canvas losing a user's connection is not recoverable. Only
+   * the generated paths — where a model has just emitted the same relationship
+   * twice — turn it on.
+   */
+  dedupe?: boolean;
+}
+
+/**
+ * Removes edges repeating an earlier `source + target + label`, keeping the
+ * first occurrence.
+ *
+ * Two edges differing only in label are genuinely two relationships and both
+ * survive. Direction is part of the key, so a request and its response are not
+ * collapsed into one.
+ */
+function dedupeEdges(edges: readonly CanvasEdge[]): CanvasEdge[] {
+  const seen = new Set<string>();
+
+  return edges.filter((edge) => {
+    const key = `${edge.source} ${edge.target} ${edge.data?.label ?? ""}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+
+    return true;
+  });
+}
+
 /**
  * Runs `layoutGraph`, then stamps every edge with the handle pair its final
  * geometry calls for. The one function callers need.
@@ -322,14 +358,16 @@ function isColumnClear(
  */
 export function applyLayout(
   nodes: readonly CanvasNode[],
-  edges: readonly CanvasEdge[]
+  edges: readonly CanvasEdge[],
+  options: ApplyLayoutOptions = {}
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  const laidOutNodes = layoutGraph(nodes, edges);
+  const sourceEdges = options.dedupe ? dedupeEdges(edges) : edges;
+  const laidOutNodes = layoutGraph(nodes, sourceEdges);
   const boxes = new Map(laidOutNodes.map((node) => [node.id, toBox(node)]));
   // Built once so `chooseHandles` can skip an edge's own endpoints by identity.
   const allBoxes = [...boxes.values()];
 
-  const laidOutEdges = edges.map((edge) => {
+  const laidOutEdges = sourceEdges.map((edge) => {
     const sourceBox = boxes.get(edge.source);
     const targetBox = boxes.get(edge.target);
 

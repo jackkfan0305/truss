@@ -190,7 +190,9 @@ export function materializeAgentGraph(graph: AgentGraphView["graph"]): CanvasSna
     markerEnd: { ...CANVAS_EDGE_MARKER },
   }));
 
-  return applyLayout(nodes, edges);
+  // Generated content: a model that emits the same relationship twice should
+  // not cost the diagram two overlapping lines and two stacked labels.
+  return applyLayout(nodes, edges, { dedupe: true });
 }
 
 /**

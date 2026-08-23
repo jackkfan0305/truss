@@ -1,6 +1,7 @@
 import type { XYPosition } from "@xyflow/react";
 
 import {
+  EDGE_LABEL_CLEARANCE,
   NODE_DEFAULT_SIZES,
   type CanvasNode,
   type NodeSize,
@@ -25,6 +26,24 @@ export const LAYOUT_GRID = 20;
 /** The clear space every generated node keeps from its neighbours, in flow units. */
 export const MIN_NODE_GAP = 40;
 
+/**
+ * The empty corridor the layout leaves between one rank of nodes and the next,
+ * in flow units. Dagre reads it as `ranksep` — the literal edge-to-edge
+ * distance between ranks — and `CanvasEdgeRenderer` reads it to find the
+ * node-free channel to turn a long edge in.
+ *
+ * It holds an edge label's pill (`EDGE_LABEL_CLEARANCE.width`) plus clear space
+ * on both sides of it, so a label sits in the corridor rather than against
+ * whichever node is closer. The ceiling is the compact agent graph contract
+ * (`lib/agent-graph.ts`), which only represents coordinates in ±10,000: the
+ * widest graph it allows is a 40-node chain, which at default node sizes comes
+ * to `40 * 200 + 39 * 280 = 18,920` and so ±9,460 once `boundingCenter` puts it
+ * either side of the origin. A node outside that range projects as *opaque* —
+ * invisible to an agent reading the canvas back — so this cannot grow much
+ * further without trading legibility for reachability.
+ */
+export const RANK_GAP = MIN_NODE_GAP * 3 + EDGE_LABEL_CLEARANCE.width;
+
 export interface Box extends NodeSize, XYPosition {}
 
 /**
@@ -43,4 +62,102 @@ export function toBox(node: CanvasNode): Box {
     width: node.width ?? fallback.width,
     height: node.height ?? fallback.height,
   };
+}
+
+/**
+ * Where an edge makes its vertical turn, and so where its label sits.
+ *
+ * Left to itself `getSmoothStepPath` turns at the midpoint between the two
+ * endpoints. For a hop between adjacent ranks that midpoint is the middle of
+ * the corridor the layout left empty, which is right — but an edge spanning
+ * several ranks has its midpoint *inside* an intervening rank, so the vertical
+ * run is drawn straight down a column of nodes and the label pill lands on top
+ * of one of them. That is most of what makes a generated diagram look tangled.
+ *
+ * Turning half a `RANK_GAP` past the source keeps the turn in the corridor
+ * immediately after the source's own rank, which `lib/graph-layout.ts`
+ * guarantees is clear of nodes however many ranks the edge goes on to cross.
+ * Adjacent ranks are exactly the case where that is already the midpoint, so
+ * the short hops are unchanged.
+ *
+ * `undefined` — meaning "use the midpoint" — covers the two cases the corridor
+ * argument does not: a same-rank edge running up or down its column, and a
+ * hand-dragged node sitting closer than a rank gap, where turning a fixed
+ * distance out could overshoot the target.
+ */
+export function edgeTurnX(sourceX: number, targetX: number): number | undefined {
+  const span = targetX - sourceX;
+
+  if (Math.abs(span) < RANK_GAP) {
+    return undefined;
+  }
+
+  return sourceX + Math.sign(span) * (RANK_GAP / 2);
+}
+
+/**
+ * The gap the fan aims to leave between two edges meeting the same handle.
+ *
+ * A label rides its own line, so what two neighbouring edges need at a shared
+ * handle is the room their two pills need in order not to overlap — the pill's
+ * height, not a hairline that only keeps the strokes apart. This is the whole
+ * of "an edge label takes up room too" as far as the fan is concerned.
+ */
+export const FAN_STEP = EDGE_LABEL_CLEARANCE.height;
+
+/**
+ * Keeps the outermost edge of a fan off the corner of the node's face, so a
+ * crowded handle still reads as edges meeting a side rather than clipping the
+ * node's rounding.
+ */
+const FAN_FACE_MARGIN = 10;
+
+/**
+ * How far along its face an edge sits, given its slot among the edges sharing
+ * one handle. Signed, measured from the handle's own centre point, along the
+ * face: y for a left or right handle, x for a top or bottom one.
+ *
+ * The fan aims for `FAN_STEP` between neighbours and gives the room up evenly
+ * when the face is too short for that — five edges on an 80-unit face take 15
+ * apiece rather than spilling past the node's corners. Squeezed still reads;
+ * overshot reads as edges anchored to thin air beside the node.
+ */
+export function fanOffset(
+  index: number,
+  count: number,
+  faceLength: number
+): number {
+  if (count < 2) {
+    return 0;
+  }
+
+  const usable = Math.max(0, faceLength - FAN_FACE_MARGIN * 2);
+  const step = Math.min(FAN_STEP, usable / (count - 1));
+
+  return (index - (count - 1) / 2) * step;
+}
+
+/**
+ * Orders the edges meeting one handle and returns where `edgeId` sits in that
+ * order, or `0` if it is not among them.
+ *
+ * Sorted by edge id, which is arbitrary but *fixed*. The tempting alternative
+ * is to sort by where each edge's far end sits, so the fan comes out in the
+ * order the lines leave and never crosses itself just off the node. That reads
+ * better at rest and badly in the hand: the comparator is recomputed from live
+ * positions, so dragging one node past another flips it and two edges swap
+ * slots in a single jump of twice `FAN_STEP`, taking their labels with them.
+ * Lines that snap rather than slide past each other are harder to follow than
+ * lines that cross, so the order stays put and the crossing is allowed.
+ *
+ * Being independent of geometry also means the fan needs no recomputing while
+ * a node is being dragged.
+ */
+export function fanSlotIndex(
+  memberIds: readonly string[],
+  edgeId: string
+): number {
+  const index = [...memberIds].sort().indexOf(edgeId);
+
+  return index === -1 ? 0 : index;
 }

@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 
 import { applyLayout, chooseHandles, layoutGraph } from "../lib/graph-layout";
-import { LAYOUT_GRID, MIN_NODE_GAP, toBox, type Box } from "../lib/canvas-geometry";
+import {
+  FAN_STEP,
+  LAYOUT_GRID,
+  MIN_NODE_GAP,
+  edgeTurnX,
+  fanOffset,
+  fanSlotIndex,
+  toBox,
+  type Box,
+} from "../lib/canvas-geometry";
 import {
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
@@ -184,18 +193,63 @@ function checkChooseHandlesFollowsTheFlowDirection(): void {
     "same rank, target above: top-to-bottom",
   );
 
-  // The regression this rule was rewritten for. Weighing horizontal against
-  // vertical separation sent this one out through the source's top, because
-  // the target sits further up than it does across — even though the edge
-  // advances exactly one rank and the layout runs left to right.
+  // A one-rank hop whose target sits only a little way up is still a
+  // horizontal edge: it advances the flow, and the layout runs left to right.
+  // Letting the vertical offset win on a tie is what used to send this out
+  // through the source's top and read as a diagonal fighting the layout.
   assert.deepEqual(
-    chooseHandles(base, { x: 300, y: -600, width: 100, height: 50 }),
+    chooseHandles(base, { x: 300, y: -180, width: 100, height: 50 }),
     { sourceHandle: "right", targetHandle: "left" },
-    "a one-rank hop to a node far above still leaves from the right",
+    "a one-rank hop to a node slightly above still leaves from the right",
+  );
+
+  // Travelling three times further up than across, with nothing in either
+  // column, is the case vertical handles exist for.
+  const farAbove: Box = { x: 300, y: -600, width: 100, height: 50 };
+  assert.deepEqual(
+    chooseHandles(base, farAbove),
+    { sourceHandle: "top", targetHandle: "bottom" },
+    "a mostly-vertical hop over a clear column leaves from the top",
+  );
+
+  // The regression that made this rule horizontal-only in the first place: the
+  // same geometry inside a populated rank. A node standing in the source's own
+  // column is exactly what a vertical run would be drawn straight through.
+  const inSourceColumn: Box = { x: 0, y: -300, width: 100, height: 50 };
+  assert.deepEqual(
+    chooseHandles(base, farAbove, [base, farAbove, inSourceColumn]),
+    { sourceHandle: "right", targetHandle: "bottom" },
+    "a node stacked above the source pushes that end back to its side face",
+  );
+
+  // Blocking the other end instead moves only that end back.
+  const inTargetColumn: Box = { x: 300, y: -300, width: 100, height: 50 };
+  assert.deepEqual(
+    chooseHandles(base, farAbove, [base, farAbove, inTargetColumn]),
+    { sourceHandle: "top", targetHandle: "left" },
+    "a node stacked below the target pushes only that end back to its side face",
+  );
+
+  // Both blocked is the six-deep rank in a real diagram: unchanged from the
+  // horizontal-only rule.
+  assert.deepEqual(
+    chooseHandles(base, farAbove, [base, farAbove, inSourceColumn, inTargetColumn]),
+    { sourceHandle: "right", targetHandle: "left" },
+    "both columns blocked falls all the way back to side-to-side",
+  );
+
+  // An endpoint never blocks its own edge, even though callers pass the whole
+  // canvas without filtering.
+  assert.deepEqual(
+    chooseHandles(base, farAbove, [base, farAbove]),
+    { sourceHandle: "top", targetHandle: "bottom" },
+    "the edge's own endpoints are not obstacles to it",
   );
 
   // A tall node beside a short one: the centres are mostly vertically offset,
-  // but the two rectangles still clear each other on x.
+  // but the two rectangles still clear each other on x — and they overlap on y,
+  // so there is no vertical travel to put on a top or bottom handle. Comparing
+  // centre distances rather than edge-to-edge gaps got this one wrong.
   const tall: Box = { x: 0, y: 0, width: 50, height: 400 };
   const shortBeside: Box = { x: 200, y: 350, width: 50, height: 50 };
 
@@ -203,6 +257,11 @@ function checkChooseHandlesFollowsTheFlowDirection(): void {
     chooseHandles(tall, shortBeside),
     { sourceHandle: "right", targetHandle: "left" },
     "a tall node beside a short one still reads as horizontal",
+  );
+  assert.deepEqual(
+    chooseHandles(tall, shortBeside, [tall, shortBeside]),
+    { sourceHandle: "right", targetHandle: "left" },
+    "and stays horizontal when the obstacle list proves both columns are clear",
   );
 }
 
@@ -313,6 +372,147 @@ function checkLabelsDoNotWidenTheLayout(): void {
   );
 }
 
+/**
+ * The claim `edgeTurnX` rests on: an edge that skips ranks turns in a corridor
+ * no node occupies.
+ *
+ * `getSmoothStepPath` would otherwise turn at the midpoint between the two
+ * endpoints, which for a multi-rank span sits inside an intervening rank — the
+ * vertical run drawn down a column of nodes, the label pill on top of one. The
+ * fixture is a four-rank chain plus a `a → d` edge that jumps all three.
+ */
+function checkLongEdgeTurnsInACorridorNoNodeOccupies(): void {
+  const nodes = [makeNode("a"), makeNode("b"), makeNode("c"), makeNode("d")];
+  const edges = [
+    makeEdge("a-b", "a", "b"),
+    makeEdge("b-c", "b", "c"),
+    makeEdge("c-d", "c", "d"),
+    makeEdge("a-d", "a", "d", "skips the middle"),
+  ];
+
+  const laidOut = layoutGraph(nodes, edges);
+  const boxes = new Map(laidOut.map((node) => [node.id, toBox(node)]));
+  const a = boxes.get("a")!;
+  const d = boxes.get("d")!;
+
+  // The handle coordinates React Flow hands the renderer: right face of the
+  // source, left face of the target.
+  const turn = edgeTurnX(a.x + a.width, d.x);
+
+  assert.ok(
+    turn !== undefined,
+    "an edge spanning three ranks turns at the corridor, not at its midpoint",
+  );
+
+  const midpoint = (a.x + a.width + d.x) / 2;
+  assert.ok(
+    turn! < midpoint,
+    `the turn at ${turn} is short of the ${midpoint} midpoint the default would use`,
+  );
+
+  for (const [id, box] of boxes) {
+    assert.ok(
+      turn! <= box.x || turn! >= box.x + box.width,
+      `the turn at ${turn} is clear of ${id}, which spans x ${box.x}..${box.x + box.width}`,
+    );
+  }
+}
+
+/** A same-rank edge has no corridor to aim for, so it keeps the midpoint. */
+function checkSameRankEdgeKeepsTheMidpointTurn(): void {
+  assert.equal(
+    edgeTurnX(500, 500),
+    undefined,
+    "an edge running up or down its own column falls back to the default turn",
+  );
+}
+
+/** A back-edge turns into the corridor on its own side, not past the target. */
+function checkBackEdgeTurnsBackwards(): void {
+  const forward = edgeTurnX(0, 1000);
+  const backward = edgeTurnX(1000, 0);
+
+  assert.ok(forward !== undefined && forward > 0, "a forward edge turns to the right of its source");
+  assert.ok(
+    backward !== undefined && backward < 1000,
+    "a back-edge turns to the left of its source",
+  );
+  assert.equal(
+    1000 - backward!,
+    forward!,
+    "both directions turn the same distance out from the source",
+  );
+}
+
+/**
+ * The fan that keeps several edges off one handle's single pixel.
+ *
+ * Two claims worth pinning: the slots stay inside the face however many edges
+ * crowd onto it, and they come out in the order the lines leave so the fan does
+ * not cross itself the moment it clears the node.
+ */
+function checkFanSpreadsEdgesWithoutLeavingTheFace(): void {
+  assert.equal(fanOffset(0, 1, 80), 0, "a lone edge stays on its handle");
+
+  // Room to spare: neighbours get the full label-height step, centred on the
+  // handle rather than growing off one side of it.
+  const roomy = [0, 1, 2].map((index) => fanOffset(index, 3, 200));
+  assert.deepEqual(
+    roomy,
+    [-FAN_STEP, 0, FAN_STEP],
+    "three edges on a tall face sit a label-height apart, centred on the handle",
+  );
+
+  // The measured worst case on a real diagram: five edges on an 80-unit face.
+  // 4 * FAN_STEP is 96, which does not fit, so the fan gives the room up
+  // evenly instead of hanging the outer two off the node's corners.
+  const crowded = [0, 1, 2, 3, 4].map((index) => fanOffset(index, 5, 80));
+  const faceHalf = 80 / 2;
+
+  for (const offset of crowded) {
+    assert.ok(
+      Math.abs(offset) < faceHalf,
+      `a crowded fan stays on the face: ${offset} is inside ±${faceHalf}`,
+    );
+  }
+  assert.ok(
+    crowded[1]! - crowded[0]! < FAN_STEP,
+    "and gets there by shrinking the step, not by clipping slots",
+  );
+  // `+ 0` normalises the `-0` that negating the middle slot produces: equal to
+  // `0` under `===` but not under `deepStrictEqual`, the same trap `assertOnGrid`
+  // documents above.
+  assert.deepEqual(
+    crowded.map((offset) => -offset + 0).reverse(),
+    crowded.map((offset) => offset + 0),
+    "a fan is symmetric about its handle",
+  );
+
+  // Slot order is fixed, not geometric. Sorting by where each edge's far end
+  // sits reads better at rest, but the comparator is then recomputed from live
+  // positions: dragging one node past another flips it and two edges swap
+  // slots in a single jump of twice FAN_STEP, labels and all. A stable order
+  // lets the lines cross instead of snapping.
+  const members = ["c-edge", "a-edge", "b-edge"];
+
+  assert.deepEqual(
+    members.map((id) => fanSlotIndex(members, id)),
+    [2, 0, 1],
+    "slots follow edge id, not the order the edges arrive in",
+  );
+  assert.deepEqual(
+    ["b-edge", "c-edge", "a-edge"].map((id) => fanSlotIndex(members, id)),
+    [1, 2, 0],
+    "and do not depend on how the member list happens to be ordered",
+  );
+
+  assert.equal(
+    fanSlotIndex(members, "not-here"),
+    0,
+    "an edge missing from its own group falls back to the handle's centre slot",
+  );
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -326,8 +526,12 @@ function main() {
   checkSelfLoopIsSkippedInLayoutButKeptOnTheCanvas();
   checkDisconnectedNodeIsPlacedCleanly();
   checkLabelledEdgeReservesClearanceBetweenNodes();
+  checkLongEdgeTurnsInACorridorNoNodeOccupies();
+  checkSameRankEdgeKeepsTheMidpointTurn();
+  checkBackEdgeTurnsBackwards();
+  checkFanSpreadsEdgesWithoutLeavingTheFace();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry and edge cases verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out and edge cases verified",
   );
 }
 

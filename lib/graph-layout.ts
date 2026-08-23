@@ -2,12 +2,14 @@ import dagre from "@dagrejs/dagre";
 import type { EdgeLabel, GraphLabel, NodeLabel } from "@dagrejs/dagre";
 import type { XYPosition } from "@xyflow/react";
 
-import { LAYOUT_GRID, MIN_NODE_GAP, toBox, type Box } from "@/lib/canvas-geometry";
 import {
-  EDGE_LABEL_CLEARANCE,
-  type CanvasEdge,
-  type CanvasNode,
-} from "@/types/canvas";
+  LAYOUT_GRID,
+  MIN_NODE_GAP,
+  RANK_GAP,
+  toBox,
+  type Box,
+} from "@/lib/canvas-geometry";
+import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 /**
  * Deterministic diagram layout.
@@ -31,29 +33,16 @@ import {
 
 /**
  * Gap between nodes stacked in the same rank (perpendicular to the LR flow).
- * Twice `MIN_NODE_GAP` so a column of nodes reads as separate rows rather
- * than a dense stack that only just clears the overlap check.
- */
-const RANK_ROW_GAP = MIN_NODE_GAP * 2;
-
-/**
- * Gap between ranks (along the LR flow), and the space an edge label's pill has
- * to sit in at the midpoint. Dagre treats `ranksep` as the literal edge-to-edge
- * distance between one rank's nodes and the next's, so `MIN_NODE_GAP +
- * EDGE_LABEL_CLEARANCE.width` clears the pill with the node gap left over; a
- * bare `MIN_NODE_GAP` would draw it across whichever node is closer.
+ * Three times `MIN_NODE_GAP` so a column of nodes reads as separate rows rather
+ * than a dense stack that only just clears the overlap check, and so the
+ * horizontal runs of the edges threading between them stay distinguishable
+ * from the node borders they pass.
  *
- * Every rank gap gets this, labelled or not, and that uniformity is deliberate.
- * The alternative — declaring each labelled edge's label size to dagre and
- * letting it size the gap per edge — reserves the label's width *on top of*
- * `ranksep` rather than inside it, so a 40-node chain (the compact contract's
- * own node ceiling) with a label on every hop grew to ±11,000. That is outside
- * the ±10,000 the contract can represent, and a node outside it projects as
- * opaque: see `boundingCenter` below for what that costs. A fixed gap keeps the
- * widest graph the contract allows inside the range the contract can express,
- * whatever share of its edges carry labels.
+ * Unbounded in the way `RANK_GAP` is not: the widest graph the compact contract
+ * allows is a chain, which stacks nothing, and 40 nodes stacked in a single
+ * rank still only spans ±3,940.
  */
-const RANK_GAP = MIN_NODE_GAP + EDGE_LABEL_CLEARANCE.width;
+const RANK_ROW_GAP = MIN_NODE_GAP * 3;
 
 /** The four handle ids `canvas-node.tsx` renders, named once instead of
  * scattered as string literals through the geometry below. */
@@ -182,42 +171,145 @@ function boundingCenter(centers: readonly XYPosition[]): XYPosition {
 }
 
 /**
- * Picks the handle pair for an edge from its endpoints' final rectangles.
+ * Picks the handle pair for an edge from its endpoints' final rectangles, and
+ * from the rectangles of everything else on the canvas.
  *
- * Horizontal separation wins outright rather than competing with the vertical
- * offset. The layout is left-to-right, so two rectangles that clear each other
- * on x are in different ranks, and the edge between them advances the flow —
- * it belongs on the right and left faces however far apart the two ranks sit
- * vertically. Weighing the two gaps against each other instead sends a
- * one-rank hop out through the top of its source the moment its target happens
- * to sit a couple of rows up, which reads as a diagonal fighting the layout.
+ * Three cases, in order.
  *
- * Vertical handles are for the case that actually calls for them: two nodes in
- * the same rank, overlapping on x, where the connection genuinely runs up or
- * down the column.
+ * **Same rank.** The two rectangles overlap on x, so the connection genuinely
+ * runs up or down the column: bottom to top, or top to bottom.
+ *
+ * **A rank-advancing edge travelling further vertically than horizontally.**
+ * Here a side handle sends the line straight out of the face and then on a long
+ * climb, when what the edge actually does is go up or down. Each end
+ * independently takes the vertical face it is heading for — but *only* if its
+ * own column is clear that way, which is what `obstacles` is for. In a rank
+ * stacked six deep, leaving the bottom of the top node means drawing straight
+ * through the five below it, which is worse than the side handle it replaced.
+ * A blocked end falls back to its side face on its own, so a mixed pair like
+ * top-to-left is a normal outcome, not a defect.
+ *
+ * **Everything else.** Side faces. The layout is left-to-right, so two
+ * rectangles that clear each other on x are in different ranks and the edge
+ * between them advances the flow. Letting a merely-larger vertical offset win
+ * sends a one-rank hop out through the top of its source the moment its target
+ * sits a couple of rows up, which reads as a diagonal fighting the layout —
+ * hence the vertical case above needs to beat the horizontal gap outright, not
+ * just tie with it.
+ *
+ * `obstacles` may contain `source` and `target` themselves; both are skipped by
+ * identity, so callers can pass the whole canvas without filtering. Omitting it
+ * disables the vertical case for rank-advancing edges and restores the pure
+ * two-rectangle behaviour.
  */
 export function chooseHandles(
   source: Box,
-  target: Box
+  target: Box,
+  obstacles: readonly Box[] = []
 ): { sourceHandle: string; targetHandle: string } {
-  // A forward hop: the target's left edge clears the source's right one.
-  if (target.x >= source.x + source.width) {
-    return { sourceHandle: HANDLE_ID.right, targetHandle: HANDLE_ID.left };
-  }
-
-  // A back-edge, the same test mirrored.
-  if (source.x >= target.x + target.width) {
-    return { sourceHandle: HANDLE_ID.left, targetHandle: HANDLE_ID.right };
-  }
-
-  // Same rank: the rectangles overlap on x, so the connection really does run
-  // up or down the column.
   const sourceCenterY = source.y + source.height / 2;
   const targetCenterY = target.y + target.height / 2;
 
-  return targetCenterY >= sourceCenterY
-    ? { sourceHandle: HANDLE_ID.bottom, targetHandle: HANDLE_ID.top }
-    : { sourceHandle: HANDLE_ID.top, targetHandle: HANDLE_ID.bottom };
+  // A forward hop: the target's left edge clears the source's right one.
+  const isForward = target.x >= source.x + source.width;
+  // A back-edge, the same test mirrored.
+  const isBackward = source.x >= target.x + target.width;
+
+  if (!isForward && !isBackward) {
+    return targetCenterY >= sourceCenterY
+      ? { sourceHandle: HANDLE_ID.bottom, targetHandle: HANDLE_ID.top }
+      : { sourceHandle: HANDLE_ID.top, targetHandle: HANDLE_ID.bottom };
+  }
+
+  const sideHandles = isForward
+    ? { sourceHandle: HANDLE_ID.right, targetHandle: HANDLE_ID.left }
+    : { sourceHandle: HANDLE_ID.left, targetHandle: HANDLE_ID.right };
+
+  const gapX = isForward
+    ? target.x - (source.x + source.width)
+    : source.x - (target.x + target.width);
+
+  // Both gaps are edge-to-edge, so they are the same kind of measurement and
+  // can be compared directly. Centre-to-centre distance cannot: a tall node
+  // beside a short one has centres far apart on y while the two rectangles
+  // still overlap, and an edge between them has no vertical travel to make.
+  const isDownward = target.y >= source.y + source.height;
+  const isUpward = source.y >= target.y + target.height;
+
+  if (!isDownward && !isUpward) {
+    return sideHandles;
+  }
+
+  const gapY = isDownward
+    ? target.y - (source.y + source.height)
+    : source.y - (target.y + target.height);
+
+  if (gapY <= gapX) {
+    return sideHandles;
+  }
+
+  // Each end's vertical run: out of the face it would leave by, as far as the
+  // other end's centre line, which is where the route turns to cross the gap.
+  const sourceIsClear = isColumnClear(
+    source,
+    isDownward ? source.y + source.height : source.y,
+    targetCenterY,
+    obstacles,
+    target
+  );
+  const targetIsClear = isColumnClear(
+    target,
+    isDownward ? target.y : target.y + target.height,
+    sourceCenterY,
+    obstacles,
+    source
+  );
+
+  return {
+    sourceHandle: sourceIsClear
+      ? isDownward
+        ? HANDLE_ID.bottom
+        : HANDLE_ID.top
+      : sideHandles.sourceHandle,
+    targetHandle: targetIsClear
+      ? isDownward
+        ? HANDLE_ID.top
+        : HANDLE_ID.bottom
+      : sideHandles.targetHandle,
+  };
+}
+
+/**
+ * Whether `box` can send a vertical run from `fromY` to `toY` without crossing
+ * another node.
+ *
+ * "Its column" is any rectangle overlapping `box` on x — which is the same test
+ * `chooseHandles` uses to recognise a shared rank, so this is asking whether
+ * anything in `box`'s own rank stands in the way. `box` and `other` are the
+ * edge's own endpoints and are skipped by identity.
+ */
+function isColumnClear(
+  box: Box,
+  fromY: number,
+  toY: number,
+  obstacles: readonly Box[],
+  other: Box
+): boolean {
+  const top = Math.min(fromY, toY);
+  const bottom = Math.max(fromY, toY);
+
+  return !obstacles.some((obstacle) => {
+    if (obstacle === box || obstacle === other) {
+      return false;
+    }
+
+    return (
+      obstacle.x < box.x + box.width &&
+      obstacle.x + obstacle.width > box.x &&
+      obstacle.y < bottom &&
+      obstacle.y + obstacle.height > top
+    );
+  });
 }
 
 /**
@@ -234,6 +326,8 @@ export function applyLayout(
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const laidOutNodes = layoutGraph(nodes, edges);
   const boxes = new Map(laidOutNodes.map((node) => [node.id, toBox(node)]));
+  // Built once so `chooseHandles` can skip an edge's own endpoints by identity.
+  const allBoxes = [...boxes.values()];
 
   const laidOutEdges = edges.map((edge) => {
     const sourceBox = boxes.get(edge.source);
@@ -243,7 +337,11 @@ export function applyLayout(
       return edge;
     }
 
-    const { sourceHandle, targetHandle } = chooseHandles(sourceBox, targetBox);
+    const { sourceHandle, targetHandle } = chooseHandles(
+      sourceBox,
+      targetBox,
+      allBoxes
+    );
 
     return { ...edge, sourceHandle, targetHandle };
   });

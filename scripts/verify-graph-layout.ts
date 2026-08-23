@@ -828,6 +828,28 @@ function checkDedupeDropsIdenticalTriplesOnlyWhenAsked(): void {
     1,
     "two unlabelled edges between the same pair are the same duplicate case",
   );
+
+  // Collision-safety test: space-delimited keys would collide for these two
+  // edges, but JSON keying prevents that. Without this guard, a future caller
+  // with arbitrary node ids could silently delete a distinct edge.
+  const collisionTestNodes = [
+    makeNode("foo bar"),
+    makeNode("baz"),
+    makeNode("foo"),
+    makeNode("bar baz"),
+  ];
+  const collisionTestEdges = [
+    makeEdge("edge-1", "foo bar", "baz"),
+    makeEdge("edge-2", "foo", "bar baz"),
+  ];
+
+  assert.deepEqual(
+    applyLayout(collisionTestNodes, collisionTestEdges, { dedupe: true }).edges.map(
+      (edge) => edge.id,
+    ),
+    ["edge-1", "edge-2"],
+    "two edges that would collide with space-delimited keys are kept distinct",
+  );
 }
 
 function main() {

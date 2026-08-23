@@ -336,7 +336,14 @@ function dedupeEdges(edges: readonly CanvasEdge[]): CanvasEdge[] {
   const seen = new Set<string>();
 
   return edges.filter((edge) => {
-    const key = `${edge.source} ${edge.target} ${edge.data?.label ?? ""}`;
+    // JSON rather than a delimited string: node ids are only space-free
+    // because the agent graph contract happens to validate them that way
+    // (`AGENT_GRAPH_ID_PATTERN`), and human-authored nodes carry arbitrary
+    // ids. A delimited key lets `"foo bar" + "baz"` collide with
+    // `"foo" + "bar baz"`, and a collision here silently deletes a real
+    // edge. Encoding the three fields as a structure makes that impossible
+    // regardless of what a future caller passes in.
+    const key = JSON.stringify([edge.source, edge.target, edge.data?.label ?? ""]);
 
     if (seen.has(key)) {
       return false;

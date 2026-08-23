@@ -862,23 +862,42 @@ function checkLongChainStaysInsideTheCoordinateBudget(): void {
   );
 }
 
-/** Whether two axis-aligned segments cross in the interior, not just touching at endpoints. */
+/** Whether two axis-aligned segments cross. Shared endpoints are not crossings. */
 function segmentsIntersect(
   a1: RoutePoint,
   a2: RoutePoint,
   b1: RoutePoint,
   b2: RoutePoint,
 ): boolean {
-  const hasInteriorOverlap = (p: number, q: number, r: number, s: number) => {
-    const aMin = Math.min(p, q);
-    const aMax = Math.max(p, q);
-    const bMin = Math.min(r, s);
-    const bMax = Math.max(r, s);
-    // Interior overlap: the ranges overlap and it's not just a single point at the boundary
-    return Math.max(aMin, bMin) < Math.min(aMax, bMax);
-  };
+  const span = (p: number, q: number) => [Math.min(p, q), Math.max(p, q)] as const;
+  const [axMin, axMax] = span(a1.x, a2.x);
+  const [ayMin, ayMax] = span(a1.y, a2.y);
+  const [bxMin, bxMax] = span(b1.x, b2.x);
+  const [byMin, byMax] = span(b1.y, b2.y);
 
-  return hasInteriorOverlap(a1.x, a2.x, b1.x, b2.x) && hasInteriorOverlap(a1.y, a2.y, b1.y, b2.y);
+  const ixMin = Math.max(axMin, bxMin);
+  const ixMax = Math.min(axMax, bxMax);
+  const iyMin = Math.max(ayMin, byMin);
+  const iyMax = Math.min(ayMax, byMax);
+
+  if (ixMin > ixMax || iyMin > iyMax) {
+    return false;
+  }
+
+  // A region rather than a point: either a perpendicular crossing with real
+  // extent, or two collinear runs lying on top of each other. Both count.
+  if (ixMax > ixMin || iyMax > iyMin) {
+    return true;
+  }
+
+  // A single shared point. Two routes meeting where they are built to meet —
+  // the trunk they both leave, the target they both arrive at — is not a
+  // crossing. A single point anywhere else is one.
+  const at = { x: ixMin, y: iyMin };
+  const isEndpointOf = (p: RoutePoint, s1: RoutePoint, s2: RoutePoint) =>
+    (p.x === s1.x && p.y === s1.y) || (p.x === s2.x && p.y === s2.y);
+
+  return !(isEndpointOf(at, a1, a2) && isEndpointOf(at, b1, b2));
 }
 
 /** Every route in the graph, keyed by edge id, built the way the renderer builds them. */
@@ -976,23 +995,17 @@ function checkNoBundleCrossesItself(): void {
 }
 
 function checkNoTwoLabelsCollide(): void {
-  // Two sources, not one. The spec promises no two label anchors *within one
-  // rank gap* fall within a pill of each other — a rank gap, not a bundle. A
-  // single-hub fixture can only ever prove the bundle-local case, and every
-  // edge leaving a rank shares that gap: `edgeSplitX` derives its column from
-  // the anchor's x, which is identical for every node in a rank, so lane 0 of
-  // one bundle lands in the same column as lane 0 of the next.
-  const nodes = [
-    makeNode("hub"),
-    makeNode("other"),
-    ...Array.from({ length: 4 }, (_, i) => makeNode(`t${i}`)),
-  ];
+  // Two sources in one rank, each with a parallel pair to the same target:
+  // the defect case where edgeSplitX (column from anchor.x) and per-source
+  // lane numbering cause lane 0 of one bundle to occupy the same column as
+  // lane 0 of the next.
+  const nodes = [makeNode("identity"), makeNode("provider"), makeNode("postgres"), makeNode("redis")];
   const edges = [
-    ...Array.from({ length: 4 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
-    makeEdge("p1", "hub", "t0", "one"),
-    makeEdge("p2", "hub", "t0", "two"),
-    makeEdge("o1", "other", "t1", "from other"),
-    makeEdge("o2", "other", "t2", "also other"),
+    makeEdge("i1", "identity", "postgres", "users"),
+    makeEdge("i2", "identity", "postgres", "sessions"),
+    makeEdge("p1", "provider", "postgres", "OAuth + refresh"),
+    makeEdge("p2", "provider", "postgres", "encrypted tokens"),
+    makeEdge("p3", "provider", "redis", "token cache"),
   ];
 
   const laidOut = applyLayout(nodes, edges);

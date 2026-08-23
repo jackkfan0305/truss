@@ -400,9 +400,15 @@ function assignLanes(
       continue;
     }
 
-    const key = `${edge.source} ${edge.sourceHandle}`;
     const from = handleAnchor(source, edge.sourceHandle!);
     const to = handleAnchor(target, edge.targetHandle!);
+
+    // Key by rank (source.x centre) and handle, not by source node id.
+    // This ensures all edges leaving the same rank on the same handle share a
+    // continuous lane space, preventing lane 0 of one source from occupying the
+    // same column as lane 0 of another source in the same rank.
+    const rankX = source.x + source.width / 2;
+    const key = `${rankX} ${edge.sourceHandle}`;
 
     bundles.set(key, [
       ...(bundles.get(key) ?? []),

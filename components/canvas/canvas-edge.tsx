@@ -14,13 +14,15 @@ import {
 
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import {
-  edgeTurnX,
-  fanOffset,
-  fanSlotIndex,
+  buildEdgeRoute,
+  orthogonalPath,
+  type EdgeRoute,
 } from "@/lib/canvas-geometry";
 import {
   CANVAS_EDGE_STYLE,
+  CORNER_RADIUS,
   type CanvasEdge,
+  type CanvasEdgeData,
   type CanvasNode,
 } from "@/types/canvas";
 
@@ -53,60 +55,58 @@ function isSideFace(position: Position): boolean {
 }
 
 /**
- * The slot this edge takes at each of its two handles, and how long each of
- * those faces is: `sourceIndex:sourceCount:sourceFace:targetIndex:...`.
+ * This edge's lane, and its place among any parallel edges sharing both its
+ * endpoints: `lane:parallelIndex:parallelCount`.
  *
  * Packed into a string on purpose. A selector returning an object hands back a
  * fresh reference on every store change, and the default `Object.is` compare
  * would then re-render every edge on every frame of a node drag. A string
- * compares by value, so an edge re-renders only when its own slot actually
- * moves — which it should, since dragging a node past its neighbours really
- * does reorder the fan.
+ * compares by value.
+ *
+ * The lane comes from `data.lane`, stamped by `applyLayout`, so dragging never
+ * reshuffles a bundle. A hand-drawn edge that never went through layout has no
+ * lane; those fall back to an id sort among the laneless members of their own
+ * bundle — arbitrary but fixed, which is all the fallback has to be.
  */
-function readFanSlots(store: ReactFlowState, edgeId: string): string {
+function readLaneSlots(store: ReactFlowState, edgeId: string): string {
   const edge = store.edgeLookup.get(edgeId);
 
   if (!edge) {
-    return "0:1:0:0:1:0";
+    return "0:0:1";
   }
 
-  const ends = (
-    [
-      [edge.source, edge.sourceHandle],
-      [edge.target, edge.targetHandle],
-    ] as const
-  ).map(([nodeId, handleId]) => {
-    const node = store.nodeLookup.get(nodeId);
+  const bundle = store.edges.filter(
+    (candidate) =>
+      candidate.source === edge.source &&
+      candidate.sourceHandle === edge.sourceHandle
+  );
 
-    if (!node) {
-      return "0:1:0";
-    }
+  const laneOf = (candidate: (typeof bundle)[number]) =>
+    (candidate.data as CanvasEdgeData | undefined)?.lane;
 
-    // One `Handle` per side serves both directions (`canvas-node.tsx` renders
-    // them all as `type="source"`, and the canvas runs `ConnectionMode.Loose`),
-    // so an arrival and a departure genuinely land on the same point and belong
-    // in the same fan.
-    const memberIds = store.edges
-      .filter(
-        (candidate) =>
-          (candidate.source === nodeId &&
-            candidate.sourceHandle === handleId) ||
-          (candidate.target === nodeId && candidate.targetHandle === handleId)
-      )
-      .map((candidate) => candidate.id);
+  const lane =
+    laneOf(edge) ??
+    bundle
+      .filter((candidate) => laneOf(candidate) === undefined)
+      .map((candidate) => candidate.id)
+      .sort()
+      .indexOf(edgeId);
 
-    // React Flow leaves `measured` empty until it has seen the node on screen.
-    // `fanOffset` reads a zero-length face as "no room to spread" and leaves
-    // the edges on the handle until the measurement lands.
-    const faceLength =
-      (handleId === "left" || handleId === "right"
-        ? node.measured.height
-        : node.measured.width) ?? 0;
+  // One `Handle` per side serves both directions (`canvas-node.tsx` renders
+  // them all as `type="source"`, and the canvas runs `ConnectionMode.Loose`),
+  // so a parallel group is keyed on all four of these.
+  const parallel = bundle
+    .filter(
+      (candidate) =>
+        candidate.target === edge.target &&
+        candidate.targetHandle === edge.targetHandle
+    )
+    .map((candidate) => candidate.id)
+    .sort();
 
-    return `${fanSlotIndex(memberIds, edgeId)}:${memberIds.length}:${faceLength}`;
-  });
-
-  return ends.join(":");
+  return `${Math.max(0, lane)}:${Math.max(0, parallel.indexOf(edgeId))}:${
+    parallel.length || 1
+  }`;
 }
 
 export function CanvasEdgeRenderer({
@@ -127,68 +127,41 @@ export function CanvasEdgeRenderer({
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // A handle is one coordinate, so without this every edge sharing one starts
-  // or ends at the identical pixel — five arrowheads on a single point. Each
-  // edge takes a slot along the face instead.
-  const fanSlots = useStore(
-    useCallback((store: ReactFlowState) => readFanSlots(store, id), [id])
+  const laneSlots = useStore(
+    useCallback((store: ReactFlowState) => readLaneSlots(store, id), [id])
   );
 
-  const [source, target] = useMemo(() => {
-    const [si, sc, sFace, ti, tc, tFace] = fanSlots.split(":").map(Number);
-    const sourceShift = fanOffset(si, sc, sFace);
-    const targetShift = fanOffset(ti, tc, tFace);
+  // A lane is a claim about the node-free band between two ranks. An edge on a
+  // top or bottom handle is not crossing that band — its `sourceX` there is the
+  // node's own centre line, not the edge of its rank — so those keep React
+  // Flow's own route and label point.
+  const isSideToSide = isSideFace(sourcePosition) && isSideFace(targetPosition);
 
-    return [
-      isSideFace(sourcePosition)
-        ? { x: sourceX, y: sourceY + sourceShift }
-        : { x: sourceX + sourceShift, y: sourceY },
-      isSideFace(targetPosition)
-        ? { x: targetX, y: targetY + targetShift }
-        : { x: targetX + targetShift, y: targetY },
-    ];
-  }, [fanSlots, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition]);
+  const route = useMemo((): EdgeRoute => {
+    const [lane, parallelIndex, parallelCount] = laneSlots.split(":").map(Number);
 
-  // The corridor turn is a claim about the empty band between two ranks, so it
-  // only holds for an edge that actually leaves one face and enters the other
-  // across that band. An end on a top or bottom handle is somewhere else
-  // entirely — `sourceX` there is the node's own centre line, not the edge of
-  // its rank — so those routes keep React Flow's default turn.
-  const isSideToSide =
-    isSideFace(sourcePosition) && isSideFace(targetPosition);
+    return buildEdgeRoute({
+      source: { x: sourceX, y: sourceY },
+      target: { x: targetX, y: targetY },
+      lane,
+      parallelIndex,
+      parallelCount,
+    });
+  }, [laneSlots, sourceX, sourceY, targetX, targetY]);
 
-  // `labelX`/`labelY` are the path's own turning point, computed by the same
-  // call that produced the path — deriving it from the endpoints instead would
-  // put the label off the line wherever the route bends. Fanning the endpoints
-  // moves that turning point with them, which is what pulls two labels sharing
-  // a corridor apart.
-  const [path, turnLabelX, turnLabelY] = getSmoothStepPath({
-    sourceX: source.x,
-    sourceY: source.y,
+  const [smoothPath, smoothLabelX, smoothLabelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
     sourcePosition,
-    targetX: target.x,
-    targetY: target.y,
+    targetX,
+    targetY,
     targetPosition,
-    centerX: isSideToSide ? edgeTurnX(source.x, target.x) : undefined,
+    borderRadius: CORNER_RADIUS,
   });
 
-  // The label rides the corner where the edge leaves its source, not the middle
-  // of the route.
-  //
-  // A midpoint averages two rows, so two edges between unrelated pairs land on
-  // the same y whenever their rows happen to straddle it — measured on a real
-  // diagram, that is exactly how "OAuth + refresh" ended up under "verified
-  // transitions". Anchoring to the source instead makes a label inherit the
-  // separation the layout has already paid for: `RANK_ROW_GAP` between rows,
-  // and `FAN_STEP` — one pill height — between two edges off the same handle.
-  //
-  // Both coordinates stay on the drawn line. `turnLabelX` is the corridor turn,
-  // and the route runs horizontally at `source.y` until it reaches that turn,
-  // so their intersection is the corner itself. Only a side-to-side edge has
-  // that corner; anything through a top or bottom handle keeps the path's own
-  // label point.
-  const labelX = turnLabelX;
-  const labelY = isSideToSide ? source.y : turnLabelY;
+  const path = isSideToSide ? orthogonalPath(route.points) : smoothPath;
+  const labelX = isSideToSide ? route.labelPoint.x : smoothLabelX;
+  const labelY = isSideToSide ? route.labelPoint.y : smoothLabelY;
 
   const label = data?.label ?? "";
   const isActive = isHovered || selected === true || isEditing;

@@ -281,46 +281,49 @@ export function buildEdgeRoute({
 
   if (parallelCount > 1) {
     const laneY = parallelLaneY(target.y, parallelIndex, parallelCount);
-    // The merge column has to leave a pill's worth of straight run after the
-    // split, or the label would sit on a corner. Endpoints closer together
-    // than that push it out rather than letting the pill overhang the target.
-    const wanted = direction * (target.x - direction * TRUNK_MIN - splitX);
-    const mergeX = splitX + direction * Math.max(EDGE_LABEL_CLEARANCE.width, wanted);
+    // Never past the target. A merge column beyond the approach point makes the
+    // route overshoot and double back on itself, which is worse than the thing
+    // the pill-width floor was trying to buy. When the endpoints are too close
+    // to leave a full pill's width of bow, the pill overhangs its own segment
+    // instead — it stays centred on the drawn line either way, which is the
+    // invariant that actually matters.
+    const approach = target.x - direction * TRUNK_MIN;
+    const mergeX = direction * (approach - splitX) > 0 ? approach : splitX;
 
     return {
-      points: [
+      points: dropCollinear([
         source,
         { x: splitX, y: source.y },
         { x: splitX, y: laneY },
         { x: mergeX, y: laneY },
         { x: mergeX, y: target.y },
         target,
-      ],
+      ]),
       labelPoint: { x: (splitX + mergeX) / 2, y: laneY },
     };
   }
 
-  if (Math.abs(target.y - source.y) <= EDGE_LABEL_CLEARANCE.height) {
-    // No vertical run worth hanging a pill on. The label goes on the trunk,
-    // far enough past the split that the pill clears the node's face.
-    return {
-      points: [source, target],
-      labelPoint: {
-        x: splitX + (direction * EDGE_LABEL_CLEARANCE.width) / 2,
-        y: source.y,
-      },
-    };
-  }
+  const points = [
+    source,
+    { x: splitX, y: source.y },
+    { x: splitX, y: target.y },
+    target,
+  ];
 
-  return {
-    points: [
-      source,
-      { x: splitX, y: source.y },
-      { x: splitX, y: target.y },
-      target,
-    ],
-    labelPoint: { x: splitX, y: (source.y + target.y) / 2 },
-  };
+  // A vertical run shorter than the pill has nowhere to hang one, so the label
+  // rides the final horizontal instead, a half pill-width past the split. Both
+  // coordinates are on a segment the path actually draws: that run is at
+  // `target.y`, not `source.y` — pinning it to the source's y would leave the
+  // pill beside the line rather than on it whenever the two ends differ.
+  const labelPoint =
+    Math.abs(target.y - source.y) <= EDGE_LABEL_CLEARANCE.height
+      ? {
+          x: splitX + (direction * EDGE_LABEL_CLEARANCE.width) / 2,
+          y: target.y,
+        }
+      : { x: splitX, y: (source.y + target.y) / 2 };
+
+  return { points: dropCollinear(points), labelPoint };
 }
 
 /**

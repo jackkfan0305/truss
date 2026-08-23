@@ -734,6 +734,78 @@ function checkOrthogonalPathRoundsCornersAndDropsCollinearPoints(): void {
   assert.equal(orthogonalPath([]), "", "no points draw nothing");
 }
 
+function checkCloseSpanParallelForwardDoesNotOvershooot(): void {
+  const route = buildEdgeRoute({
+    source: { x: 100, y: 0 },
+    target: { x: 280, y: 0 },
+    lane: 0,
+    parallelIndex: 0,
+    parallelCount: 2,
+  });
+
+  for (const point of route.points) {
+    assert.ok(
+      point.x >= 100 && point.x <= 280,
+      `point x=${point.x} is within [100, 280]`,
+    );
+  }
+  assert.ok(
+    route.points.every((p) => p.x >= 100 && p.x <= 280),
+    "all points stay between source and target, no overshooting",
+  );
+}
+
+function checkCloseSpanParallelBackwardDoesNotOvershoot(): void {
+  const route = buildEdgeRoute({
+    source: { x: 280, y: 0 },
+    target: { x: 100, y: 0 },
+    lane: 0,
+    parallelIndex: 0,
+    parallelCount: 2,
+  });
+
+  for (const point of route.points) {
+    assert.ok(
+      point.x >= 100 && point.x <= 280,
+      `point x=${point.x} is within [100, 280]`,
+    );
+  }
+  assert.ok(
+    route.points.every((p) => p.x >= 100 && p.x <= 280),
+    "all points stay between target and source, no overshooting",
+  );
+}
+
+function checkSlopedButUnderThresholdRouteKeepsLabelOnSegment(): void {
+  const route = buildEdgeRoute({
+    source: { x: 100, y: 0 },
+    target: { x: 900, y: 20 },
+    lane: 0,
+    parallelIndex: 0,
+    parallelCount: 1,
+  });
+
+  assert.equal(
+    route.labelPoint.y,
+    20,
+    "the label rides the final horizontal at target.y, not source.y",
+  );
+
+  // Verify labelPoint is on the final horizontal segment (x: splitX ... 900, y: 20)
+  const lastSegmentStart = route.points[route.points.length - 2];
+  const lastSegmentEnd = route.points[route.points.length - 1];
+
+  assert.equal(
+    lastSegmentEnd.y,
+    20,
+    "the last segment ends at target.y",
+  );
+  assert.ok(
+    route.labelPoint.y === lastSegmentEnd.y,
+    "label y is on the final segment",
+  );
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -758,8 +830,11 @@ function main() {
   checkFlatRouteKeepsItsLabelOffTheNodeFace();
   checkParallelGroupBowsToItsOwnLane();
   checkOrthogonalPathRoundsCornersAndDropsCollinearPoints();
+  checkCloseSpanParallelForwardDoesNotOvershooot();
+  checkCloseSpanParallelBackwardDoesNotOvershoot();
+  checkSlopedButUnderThresholdRouteKeepsLabelOnSegment();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, corridor turns, handle fan-out, lane ordering, split column positioning, orthogonal edge routes with parallel bows, defect-2 fixes verified",
   );
 }
 

@@ -166,27 +166,34 @@ function applyDiff(
   }
 
   /*
-   * Handles are a rendering detail the compact graph contract has no concept
-   * of (`AgentGraphEdge` carries no handle field), so `diffAgentGraph`'s
-   * `edgesEqual` never flags a handle-only change and the loop above never
-   * touches it. Every relayout can still move an edge's handle even when its
-   * source/target/label do not change — the whole point of laying out on
-   * every edit — so every edge that survives this diff (updated above or
-   * untouched) is checked against the live room's handles here and stamped
-   * only when they actually differ.
+   * Handles and lane are rendering details the compact graph contract has no
+   * concept of (`AgentGraphEdge` carries neither field), so `diffAgentGraph`'s
+   * `edgesEqual` never flags a handle- or lane-only change and the loop above
+   * never touches them. Every relayout can still move an edge's handle or
+   * shift its lane even when its source/target/label do not change — the
+   * whole point of laying out on every edit — so every edge that survives
+   * this diff (updated above or untouched) is checked against the live
+   * room's handles and lane here and stamped only when either actually
+   * differs.
    */
   const liveEdgesById = new Map(live.edges.map((edge) => [edge.id, edge]));
 
   for (const edge of desired.edges) {
     const liveEdge = liveEdgesById.get(edge.id);
 
-    if (
-      liveEdge &&
-      (liveEdge.sourceHandle !== edge.sourceHandle || liveEdge.targetHandle !== edge.targetHandle)
-    ) {
+    if (!liveEdge) {
+      continue;
+    }
+
+    const handlesChanged =
+      liveEdge.sourceHandle !== edge.sourceHandle || liveEdge.targetHandle !== edge.targetHandle;
+    const laneChanged = liveEdge.data?.lane !== edge.data?.lane;
+
+    if (handlesChanged || laneChanged) {
       flow.updateEdge(edge.id, {
         sourceHandle: edge.sourceHandle,
         targetHandle: edge.targetHandle,
+        data: edge.data,
       } satisfies Partial<CanvasEdge>);
     }
   }

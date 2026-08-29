@@ -622,9 +622,6 @@ export function applyLayout(
   const laidOutEdges = sourceEdges.map((edge) => {
     const routed = wiredById.get(edge.id);
 
-    // An edge whose source or target is missing from `nodes` comes back
-    // unchanged rather than dropped: on a shared canvas, routing a user's edge
-    // badly is recoverable, deleting it is not.
     if (!routed) {
       return edge;
     }

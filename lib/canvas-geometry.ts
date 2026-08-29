@@ -58,7 +58,7 @@ export interface LaneMember {
  * Assigns each edge in one bundle its lane, keyed by edge id.
  *
  * Sorted by absolute `deltaY` **descending**, which is the whole reason a
- * bundle cannot cross itself. Lane `i` turns at `TRUNK_MIN + i * LANE_STEP`
+ * single-turn bundle avoids crossing itself. Lane `i` turns at `TRUNK_MIN + i * LANE_STEP`
  * past the anchor, so a later lane both turns further out *and* travels less
  * far vertically — its run can never reach the y at which an earlier lane is
  * already running horizontally. Sorting by target y instead would not have
@@ -66,6 +66,10 @@ export interface LaneMember {
  *
  * Direction is deliberately ignored. An up-edge and a down-edge leave the
  * trunk into opposite half-planes and cannot cross whatever order they take.
+ *
+ * Parallel groups (multiple edges sharing both source and target) are proven not
+ * to cross only at exactly 2 members. Groups of 3 or more draw overlapping lines
+ * because all members share one merge column and placement mechanics break down.
  *
  * Ties break on target x then on id, so the result is a pure function of the
  * members and not of the order they arrived in — which is what lets
@@ -143,9 +147,11 @@ export interface EdgeRoute {
  * `laneRank` is this member's position when the group is sorted by lane
  * ascending (0 = the smallest lane, which splits closest to the source) — not
  * an arbitrary id-sort index. The row set is the same symmetric offsets
- * either way; what changed is which member gets which row, and that pairing
- * is what keeps one member's vertical run from crossing another's horizontal
- * one (see `buildEdgeRoute`'s doc comment for why).
+ * either way; what changed is which member gets which row. This pairing
+ * mitigates crossings in the group, but only at exactly 2 members are row
+ * crossings proven impossible (see `buildEdgeRoute`'s doc comment). Groups of
+ * 3 or more draw with measured crossing or overlap because the shared merge
+ * column breaks the mechanism.
  */
 export function parallelLaneY(
   sourceY: number,
@@ -187,11 +193,9 @@ export function parallelLaneY(
  * `parallelIndex` is the member's rank within its group sorted by lane
  * ascending, not by id — see `parallelLaneY`'s `laneRank`. Pairing the lane
  * that splits closest to the source with the row farthest from the source
- * mirrors why `laneOrder` sorts a bundle by descending `|deltaY|`: the member
- * whose split is closer (and so whose horizontal run at its own row reaches
- * all the way out to the shared merge column) never has its row crossed by a
- * later member's vertical run, because that run is confined to a *shorter*
- * distance from the source than the closer split's own row already is.
+ * mirrors why `laneOrder` sorts a bundle by descending `|deltaY|`. This
+ * pairing keeps row crossings minimal: at exactly 2 members, rows do not
+ * cross; at 3 or more, the shared merge column causes crossings or overlaps.
  */
 export function buildEdgeRoute({
   source,

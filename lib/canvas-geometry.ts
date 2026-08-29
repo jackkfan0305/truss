@@ -137,6 +137,27 @@ export interface EdgeRoute {
 }
 
 /**
+ * The `count` mid-lane rows a parallel group spreads across, as signed
+ * offsets from the target row (not yet added to `targetY`).
+ *
+ * Symmetric about zero for an even count. An odd count is shifted by half a
+ * step instead: the unshifted symmetric spread always puts one row at offset
+ * zero — exactly the target's own row — and that member's route collapses
+ * through `dropCollinear` into a single straight segment running the full
+ * width of the bow, overlapping every other member's final approach. Shifting
+ * clears every row of the target's own y at the cost of the spread no longer
+ * straddling it evenly, which is the trade the task accepted.
+ */
+function parallelRowOffsets(count: number): number[] {
+  const shift = count % 2 === 1 ? 0.5 : 0;
+
+  return Array.from(
+    { length: count },
+    (_, index) => (index - (count - 1) / 2 + shift) * PARALLEL_STEP
+  );
+}
+
+/**
  * The y a parallel group's member runs at across the corridor.
  *
  * Parallel edges between the same pair on the same row have no vertical run to
@@ -146,12 +167,13 @@ export interface EdgeRoute {
  *
  * `laneRank` is this member's position when the group is sorted by lane
  * ascending (0 = the smallest lane, which splits closest to the source) — not
- * an arbitrary id-sort index. The row set is the same symmetric offsets
- * either way; what changed is which member gets which row. This pairing
- * mitigates crossings in the group, but only at exactly 2 members are row
- * crossings proven impossible (see `buildEdgeRoute`'s doc comment). Groups of
- * 3 or more draw with measured crossing or overlap because the shared merge
- * column breaks the mechanism.
+ * an arbitrary id-sort index. The row set is the same offsets either way;
+ * what changed is which member gets which row. This pairing mitigates
+ * crossings in the group, but only at exactly 2 members are row crossings
+ * proven impossible (see `buildEdgeRoute`'s doc comment): a shared merge
+ * column and this pairing prevent them there, but a staggered merge column —
+ * tried and rejected, see that comment — does not extend the guarantee to
+ * groups of 3 or more.
  */
 export function parallelLaneY(
   sourceY: number,
@@ -159,10 +181,7 @@ export function parallelLaneY(
   laneRank: number,
   count: number
 ): number {
-  const rows = Array.from(
-    { length: count },
-    (_, index) => targetY + (index - (count - 1) / 2) * PARALLEL_STEP
-  );
+  const rows = parallelRowOffsets(count).map((offset) => targetY + offset);
 
   // Descending by distance from the source: the member whose lane splits
   // earliest (laneRank 0, closest to the trunk) takes the row FARTHEST from
@@ -195,7 +214,30 @@ export function parallelLaneY(
  * that splits closest to the source with the row farthest from the source
  * mirrors why `laneOrder` sorts a bundle by descending `|deltaY|`. This
  * pairing keeps row crossings minimal: at exactly 2 members, rows do not
- * cross; at 3 or more, the shared merge column causes crossings or overlaps.
+ * cross; at 3 or more, the shared merge column below causes crossings.
+ *
+ * A merge column staggered per row — mirroring `edgeSplitX`'s split-column
+ * stagger, keyed on distance from the target row instead of the source —
+ * was tried and rejected. It does stop a farther row's merge-vertical from
+ * crossing a nearer row's bow (the defect a shared column causes): giving
+ * the row nearest the target the largest offset means its merge column
+ * always sits farthest out, so a farther row's own (smaller-offset, nearer)
+ * vertical never reaches into a nearer row's horizontal run, and a nearer
+ * row's vertical only spans its own row down to the target row, which a
+ * farther row's row value sits outside of. But every member of a parallel
+ * group still shares one physical target point, and staggering the merge
+ * column means their final approach segments — (mergeX, target.y) to target
+ * — start at different x on the same y line and so nest, which is a
+ * genuine, differently-shaped overlap the harness correctly flags; two
+ * members sharing an offset (the same absolute row distance) draw the same
+ * final approach and are fine, but any two at different distances are not.
+ * Measured with the real route builder across counts 2..6: the row shift
+ * below already cuts crossings at every odd count with no cost anywhere;
+ * adding the merge stagger on top made every count from 3 up WORSE, not
+ * better (see `.superpowers/sdd/2026-08-23-diagram-edge-branching/
+ * parallel-edges-report.md`). Shipping a change that measurably worsens the
+ * defect it was meant to fix is not the right call, so only the row shift
+ * below is in the routing; the merge column stays a single value.
  */
 export function buildEdgeRoute({
   source,

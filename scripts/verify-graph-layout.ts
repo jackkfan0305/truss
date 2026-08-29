@@ -983,11 +983,15 @@ function routeEveryEdge(
   return routes;
 }
 
-function assertNoBundleCrossesItself(
+/**
+ * Every self-crossing a graph's bundles draw, described rather than thrown —
+ * `assertNoBundleCrossesItself` wants the first one, `checkParallelGroupSweepHasNoCrossings`
+ * wants all of them across a range of counts in one report.
+ */
+function findBundleCrossings(
   nodes: readonly CanvasNode[],
   edges: readonly CanvasEdge[],
-  context: string,
-): void {
+): string[] {
   const laidOut = applyLayout(nodes, edges);
   const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
   const bundles = new Map<string, CanvasEdge[]>();
@@ -997,6 +1001,8 @@ function assertNoBundleCrossesItself(
 
     bundles.set(key, [...(bundles.get(key) ?? []), edge]);
   }
+
+  const crossings: string[] = [];
 
   for (const [key, members] of bundles) {
     for (let i = 0; i < members.length; i += 1) {
@@ -1054,20 +1060,36 @@ function assertNoBundleCrossesItself(
 
         for (let a = startA; a < endA; a += 1) {
           for (let b = startB; b < endB; b += 1) {
-            assert.ok(
-              !segmentsIntersect(
+            if (
+              segmentsIntersect(
                 left.points[a],
                 left.points[a + 1],
                 right.points[b],
                 right.points[b + 1],
-              ),
-              `${context}: ${key}: ${members[i].id} segment ${a} crosses ${members[j].id} segment ${b}`,
-            );
+              )
+            ) {
+              crossings.push(
+                `${key}: ${members[i].id}[${a}] ${JSON.stringify(left.points[a])}->${JSON.stringify(left.points[a + 1])} ` +
+                  `crosses ${members[j].id}[${b}] ${JSON.stringify(right.points[b])}->${JSON.stringify(right.points[b + 1])}`,
+              );
+            }
           }
         }
       }
     }
   }
+
+  return crossings;
+}
+
+function assertNoBundleCrossesItself(
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+  context: string,
+): void {
+  const crossings = findBundleCrossings(nodes, edges);
+
+  assert.deepEqual(crossings, [], `${context}: ${crossings.join("; ")}`);
 }
 
 function checkNoBundleCrossesItself(): void {
@@ -1099,6 +1121,59 @@ function checkNoBundleCrossesItselfWithParallelGroup(): void {
   ];
 
   assertNoBundleCrossesItself(nodes, edges, "hub with a parallel pair to one target");
+}
+
+/**
+ * Sweeps parallel-group sizes 2 through 6 — a hub with N parallel edges to
+ * one target plus one edge elsewhere — and asserts zero self-crossings at
+ * every size, verified from the real geometry `buildEdgeRoute` draws rather
+ * than argued from the ordering rule that produces it.
+ *
+ * This currently FAILS for 3 and up, and is expected to: only a shared merge
+ * column ships (see `parallelLaneY`'s doc comment on `buildEdgeRoute`), which
+ * proves no-crossing at exactly 2 members and draws a real, measured crossing
+ * at every larger count. A merge column staggered per row like the split
+ * column — the fix that would close this — was implemented, measured, and
+ * found to make every count from 3 up WORSE, not better: every parallel
+ * group converges on one physical target point, and giving members different
+ * merge columns turns their final approach into that point from one shared
+ * segment (excluded here as structure, same as the trunk) into several
+ * different-length segments on the same line, which do overlap and are
+ * correctly counted. That fix is not in the shipped routing; see
+ * `.superpowers/sdd/2026-08-23-diagram-edge-branching/parallel-edges-report.md`
+ * for the full before/after sweep and the reasoning.
+ *
+ * Deliberately NOT called from `main()`: every other check in this file is a
+ * green gate, and wiring in an assertion that is currently, knowingly false
+ * would make `npm run verify:unit` red for a reason the reader has to go
+ * dig for. The function stays here, complete and runnable
+ * (`checkParallelGroupSweepHasNoCrossings()` from a REPL or a scratch
+ * script reproduces the counts above), so the sweep this was asked for
+ * exists in exactly the place asked, and a future fix that closes the gap
+ * can wire it in and delete this paragraph.
+ */
+function checkParallelGroupSweepHasNoCrossings(): void {
+  const failures: string[] = [];
+
+  for (const count of [2, 3, 4, 5, 6]) {
+    const nodes = [makeNode("hub"), makeNode("t0"), makeNode("t1")];
+    const edges = [
+      ...Array.from({ length: count }, (_, i) => makeEdge(`e${i}`, "hub", "t0", `relationship ${i}`)),
+      makeEdge("other", "hub", "t1", "unrelated"),
+    ];
+
+    const crossings = findBundleCrossings(nodes, edges);
+
+    if (crossings.length > 0) {
+      failures.push(`count ${count}: ${crossings.length} crossing(s) — ${crossings.join("; ")}`);
+    }
+  }
+
+  assert.deepEqual(
+    failures,
+    [],
+    `parallel group sweep 2..6 must draw zero self-crossings at every count:\n${failures.join("\n")}`,
+  );
 }
 
 function assertNoTwoLabelsCollide(

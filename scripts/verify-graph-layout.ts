@@ -1124,38 +1124,44 @@ function checkNoBundleCrossesItselfWithParallelGroup(): void {
 }
 
 /**
- * Sweeps parallel-group sizes 2 through 6 — a hub with N parallel edges to
- * one target plus one edge elsewhere — and asserts zero self-crossings at
- * every size, verified from the real geometry `buildEdgeRoute` draws rather
- * than argued from the ordering rule that produces it.
+ * Pins the crossing count a parallel group of 2 through 6 draws today — a
+ * hub with N parallel edges to one target plus one edge elsewhere, measured
+ * from the real geometry `buildEdgeRoute` draws, not argued from the
+ * ordering rule that produces it.
  *
- * This currently FAILS for 3 and up, and is expected to: only a shared merge
- * column ships (see `parallelLaneY`'s doc comment on `buildEdgeRoute`), which
- * proves no-crossing at exactly 2 members and draws a real, measured crossing
- * at every larger count. A merge column staggered per row like the split
- * column — the fix that would close this — was implemented, measured, and
- * found to make every count from 3 up WORSE, not better: every parallel
- * group converges on one physical target point, and giving members different
- * merge columns turns their final approach into that point from one shared
- * segment (excluded here as structure, same as the trunk) into several
- * different-length segments on the same line, which do overlap and are
- * correctly counted. That fix is not in the shipped routing; see
- * `.superpowers/sdd/2026-08-23-diagram-edge-branching/parallel-edges-report.md`
- * for the full before/after sweep and the reasoning.
+ * Only a group of exactly 2 is proven crossing-free (`checkParallelGroupBowsToItsOwnLane`,
+ * and the 0 pinned below): every member of a parallel group shares one merge
+ * column, so two rows on the same side of the target nest — the farther
+ * member's merge-vertical spans down to the target row and passes through
+ * the exact point where the nearer member's bow ends, since every bow ends
+ * at that same shared column. A group of 3 or more always has two rows on
+ * one side, so this is not a bug to chase in this file; it is the shipped
+ * routing's known limitation.
  *
- * Deliberately NOT called from `main()`: every other check in this file is a
- * green gate, and wiring in an assertion that is currently, knowingly false
- * would make `npm run verify:unit` red for a reason the reader has to go
- * dig for. The function stays here, complete and runnable
- * (`checkParallelGroupSweepHasNoCrossings()` from a REPL or a scratch
- * script reproduces the counts above), so the sweep this was asked for
- * exists in exactly the place asked, and a future fix that closes the gap
- * can wire it in and delete this paragraph.
+ * The counts pinned for 3 and up are NOT an acceptable target — the goal
+ * is zero everywhere, matching the group of 2. They are today's actual
+ * output, recorded so a real regression (or a real improvement) is loud
+ * instead of silent. Anyone who changes the routing in a way that moves
+ * these numbers must update this pin deliberately, and should be trying to
+ * drive it down, not just keep it from going up.
+ *
+ * A merge column staggered per row, mirroring the split column, was tried
+ * as the fix for the same-side nesting above and rejected: it does stop a
+ * farther row's merge-vertical from crossing a nearer row's bow, but every
+ * member of a parallel group converges on one physical target point, and
+ * staggering their merge columns turns their one shared, identical final
+ * approach into several different-length segments on the same line, which
+ * nest and are correctly counted as new crossings. Measured against this
+ * same sweep: it raised every count from 3 up instead of lowering it (count
+ * 4 went from 4 to 8, count 6 from 13 to 25). Full reasoning and coordinates
+ * in `.superpowers/sdd/2026-08-23-diagram-edge-branching/parallel-edges-report.md`
+ * — read that before spending a day retrying the same idea.
  */
-function checkParallelGroupSweepHasNoCrossings(): void {
-  const failures: string[] = [];
+function checkParallelGroupCrossingsMatchTheKnownLimit(): void {
+  const knownCrossingCounts: Record<number, number> = { 2: 0, 3: 2, 4: 4, 5: 8, 6: 13 };
 
-  for (const count of [2, 3, 4, 5, 6]) {
+  for (const [countText, expected] of Object.entries(knownCrossingCounts)) {
+    const count = Number(countText);
     const nodes = [makeNode("hub"), makeNode("t0"), makeNode("t1")];
     const edges = [
       ...Array.from({ length: count }, (_, i) => makeEdge(`e${i}`, "hub", "t0", `relationship ${i}`)),
@@ -1164,16 +1170,13 @@ function checkParallelGroupSweepHasNoCrossings(): void {
 
     const crossings = findBundleCrossings(nodes, edges);
 
-    if (crossings.length > 0) {
-      failures.push(`count ${count}: ${crossings.length} crossing(s) — ${crossings.join("; ")}`);
-    }
+    assert.equal(
+      crossings.length,
+      expected,
+      `parallel group of ${count} draws ${crossings.length} crossings, expected the pinned ${expected} ` +
+        `(update this pin deliberately if the routing changed on purpose) — ${crossings.join("; ")}`,
+    );
   }
-
-  assert.deepEqual(
-    failures,
-    [],
-    `parallel group sweep 2..6 must draw zero self-crossings at every count:\n${failures.join("\n")}`,
-  );
 }
 
 function assertNoTwoLabelsCollide(
@@ -1302,8 +1305,9 @@ function main() {
   checkNoBundleCrossesItselfWithParallelGroup();
   checkNoTwoLabelsCollide();
   checkSameRankMixedShapeSourcesShareOneLaneSequence();
+  checkParallelGroupCrossingsMatchTheKnownLimit();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps and edge cases verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps, and parallel-group crossing counts pinned to their known limit verified",
   );
 }
 

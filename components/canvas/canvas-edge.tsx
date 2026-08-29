@@ -67,6 +67,11 @@ function isSideFace(position: Position): boolean {
  * reshuffles a bundle. A hand-drawn edge that never went through layout has no
  * lane; those fall back to an id sort among the laneless members of their own
  * bundle — arbitrary but fixed, which is all the fallback has to be.
+ *
+ * `parallelIndex` is this edge's rank among the parallel group sorted by
+ * *lane* ascending, not by id: `buildEdgeRoute` pairs the member whose lane
+ * splits closest to the source with the row farthest from it, and an id sort
+ * has no relationship to which member that is (see `parallelLaneY`).
  */
 function readLaneSlots(store: ReactFlowState, edgeId: string): string {
   const edge = store.edgeLookup.get(edgeId);
@@ -75,6 +80,12 @@ function readLaneSlots(store: ReactFlowState, edgeId: string): string {
     return "0:0:1";
   }
 
+  // O(E) per call — this scans every edge in the store to find `edge`'s
+  // bundle-mates — and a `useStore` selector like this one runs once per
+  // edge on screen, so a full store update costs O(E squared) overall. Fine
+  // at the 40-node/edge ceiling `lib/agent-graph.ts`'s compact contract
+  // allows; worth a real index (e.g. a bundle-keyed Map built once per store
+  // change) if that ceiling ever grows.
   const bundle = store.edges.filter(
     (candidate) =>
       candidate.source === edge.source &&
@@ -93,14 +104,18 @@ function readLaneSlots(store: ReactFlowState, edgeId: string): string {
     (candidate) => laneOf(candidate) !== undefined
   ).length;
 
-  const lane =
-    laneOf(edge) ??
-    stampedCount +
-      bundle
-        .filter((candidate) => laneOf(candidate) === undefined)
-        .map((candidate) => candidate.id)
-        .sort()
-        .indexOf(edgeId);
+  const lanelessSorted = bundle
+    .filter((candidate) => laneOf(candidate) === undefined)
+    .map((candidate) => candidate.id)
+    .sort();
+
+  // Every bundle member's lane, computed the same way as `edge`'s own — a
+  // parallel group's rank has to be built from this, not from `laneOf`
+  // directly, since a laneless member only gets its slot from the fallback.
+  const resolvedLaneOf = (candidate: (typeof bundle)[number]) =>
+    laneOf(candidate) ?? stampedCount + lanelessSorted.indexOf(candidate.id);
+
+  const lane = resolvedLaneOf(edge);
 
   // One `Handle` per side serves both directions (`canvas-node.tsx` renders
   // them all as `type="source"`, and the canvas runs `ConnectionMode.Loose`),
@@ -111,12 +126,13 @@ function readLaneSlots(store: ReactFlowState, edgeId: string): string {
         candidate.target === edge.target &&
         candidate.targetHandle === edge.targetHandle
     )
-    .map((candidate) => candidate.id)
-    .sort();
+    .map((candidate) => ({ id: candidate.id, lane: resolvedLaneOf(candidate) }))
+    .sort((a, b) => a.lane - b.lane || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
-  return `${Math.max(0, lane)}:${Math.max(0, parallel.indexOf(edgeId))}:${
-    parallel.length || 1
-  }`;
+  return `${Math.max(0, lane)}:${Math.max(
+    0,
+    parallel.findIndex((member) => member.id === edgeId)
+  )}:${parallel.length || 1}`;
 }
 
 export function CanvasEdgeRenderer({

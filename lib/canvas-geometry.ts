@@ -119,10 +119,6 @@ export function toBox(node: CanvasNode): Box {
   };
 }
 
-
-
-
-
 export interface RoutePoint {
   x: number;
   y: number;
@@ -143,13 +139,35 @@ export interface EdgeRoute {
  * stagger — a split column alone would draw them as one overlapping line — so
  * they bow to their own lane instead, symmetrically about the y a single edge
  * would have taken.
+ *
+ * `laneRank` is this member's position when the group is sorted by lane
+ * ascending (0 = the smallest lane, which splits closest to the source) — not
+ * an arbitrary id-sort index. The row set is the same symmetric offsets
+ * either way; what changed is which member gets which row, and that pairing
+ * is what keeps one member's vertical run from crossing another's horizontal
+ * one (see `buildEdgeRoute`'s doc comment for why).
  */
 export function parallelLaneY(
+  sourceY: number,
   targetY: number,
-  index: number,
+  laneRank: number,
   count: number
 ): number {
-  return targetY + (index - (count - 1) / 2) * PARALLEL_STEP;
+  const rows = Array.from(
+    { length: count },
+    (_, index) => targetY + (index - (count - 1) / 2) * PARALLEL_STEP
+  );
+
+  // Descending by distance from the source: the member whose lane splits
+  // earliest (laneRank 0, closest to the trunk) takes the row FARTHEST from
+  // the source. `Array.prototype.sort` is stable, so a genuine tie (the
+  // source sitting exactly level with the target) keeps the rows in their
+  // original, deterministic order rather than an arbitrary one.
+  const byDistanceFromSource = [...rows].sort(
+    (a, b) => Math.abs(b - sourceY) - Math.abs(a - sourceY)
+  );
+
+  return byDistanceFromSource[laneRank];
 }
 
 /**
@@ -165,6 +183,15 @@ export function parallelLaneY(
  * That is the attribution cue the old corner-anchored label lacked: a pill at
  * a corner has nothing to its left, so a column of them reads as a list rather
  * than as one label per line.
+ *
+ * `parallelIndex` is the member's rank within its group sorted by lane
+ * ascending, not by id — see `parallelLaneY`'s `laneRank`. Pairing the lane
+ * that splits closest to the source with the row farthest from the source
+ * mirrors why `laneOrder` sorts a bundle by descending `|deltaY|`: the member
+ * whose split is closer (and so whose horizontal run at its own row reaches
+ * all the way out to the shared merge column) never has its row crossed by a
+ * later member's vertical run, because that run is confined to a *shorter*
+ * distance from the source than the closer split's own row already is.
  */
 export function buildEdgeRoute({
   source,
@@ -183,7 +210,7 @@ export function buildEdgeRoute({
   const splitX = edgeSplitX(source.x, target.x, lane);
 
   if (parallelCount > 1) {
-    const laneY = parallelLaneY(target.y, parallelIndex, parallelCount);
+    const laneY = parallelLaneY(source.y, target.y, parallelIndex, parallelCount);
     // Never past the target. A merge column beyond the approach point makes the
     // route overshoot and double back on itself, which is worse than the thing
     // the pill-width floor was trying to buy. When the endpoints are too close
@@ -192,6 +219,24 @@ export function buildEdgeRoute({
     // invariant that actually matters.
     const approach = target.x - direction * TRUNK_MIN;
     const mergeX = direction * (approach - splitX) > 0 ? approach : splitX;
+
+    // Anchored to its own splitX, not the bow's midpoint: the midpoint of
+    // `splitX..mergeX` only moves by half of whatever `splitX` moved, since
+    // `mergeX` is the same shared merge column for every member of the group.
+    // Lanes a full `LANE_STEP` apart would then anchor labels only half a
+    // `LANE_STEP` apart — under the pill width — so this matches the
+    // non-parallel branch below instead: the pill's near edge sits on the
+    // split column, which inherits the full lane spacing. Clamped to the
+    // bow's own span so a bow shorter than a pill still anchors on drawn
+    // line — the pill itself is allowed to overhang past `mergeX`, the same
+    // tradeoff the `mergeX` clamp above already accepted, but the anchor
+    // point is not.
+    const bowLow = Math.min(splitX, mergeX);
+    const bowHigh = Math.max(splitX, mergeX);
+    const labelX = Math.min(
+      Math.max(splitX + (direction * EDGE_LABEL_CLEARANCE.width) / 2, bowLow),
+      bowHigh
+    );
 
     return {
       points: dropCollinear([
@@ -202,7 +247,7 @@ export function buildEdgeRoute({
         { x: mergeX, y: target.y },
         target,
       ]),
-      labelPoint: { x: (splitX + mergeX) / 2, y: laneY },
+      labelPoint: { x: labelX, y: laneY },
     };
   }
 

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 
-import { applyLayout, chooseHandles, handleAnchor, layoutGraph } from "../lib/graph-layout";
+import {
+  applyLayout,
+  chooseHandles,
+  handleAnchor,
+  isSideToSideRoute,
+  layoutGraph,
+} from "../lib/graph-layout";
 import {
   LAYOUT_GRID,
   MIN_NODE_GAP,
@@ -900,7 +906,22 @@ function segmentsIntersect(
   return !(isEndpointOf(at, a1, a2) && isEndpointOf(at, b1, b2));
 }
 
-/** Every route in the graph, keyed by edge id, built the way the renderer builds them. */
+/**
+ * Every route in the graph, keyed by edge id, built the way the renderer
+ * builds them.
+ *
+ * Two things mirror `components/canvas/canvas-edge.tsx` on purpose:
+ *
+ * - Edges on a top or bottom handle are skipped entirely, the same gate the
+ *   renderer's `isSideToSide` applies — those keep React Flow's own
+ *   `getSmoothStepPath` and label point, so building a lane route for one
+ *   here would validate geometry nobody actually draws.
+ * - A parallel group is ordered by *lane* ascending, not by id, matching
+ *   `readLaneSlots`: `buildEdgeRoute` pairs the member whose lane splits
+ *   closest to the source with the row farthest from it (Critical 3 in the
+ *   branch review), and an id sort has no relationship to which member that
+ *   is.
+ */
 function routeEveryEdge(
   nodes: readonly CanvasNode[],
   edges: readonly CanvasEdge[],
@@ -909,25 +930,43 @@ function routeEveryEdge(
   const parallelKey = (edge: CanvasEdge) =>
     `${edge.source} ${edge.target} ${edge.sourceHandle} ${edge.targetHandle}`;
 
-  const groups = new Map<string, string[]>();
+  const routable = edges.filter(
+    (edge): edge is CanvasEdge & { sourceHandle: string; targetHandle: string } =>
+      !!edge.sourceHandle &&
+      !!edge.targetHandle &&
+      isSideToSideRoute(edge.sourceHandle, edge.targetHandle),
+  );
 
-  for (const edge of edges) {
+  const groups = new Map<string, CanvasEdge[]>();
+
+  for (const edge of routable) {
     const key = parallelKey(edge);
 
-    groups.set(key, [...(groups.get(key) ?? []), edge.id].sort());
+    groups.set(key, [...(groups.get(key) ?? []), edge]);
   }
+
+  const ordered = new Map(
+    [...groups.entries()].map(([key, members]) => [
+      key,
+      [...members].sort(
+        (a, b) =>
+          (a.data?.lane ?? 0) - (b.data?.lane ?? 0) ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      ),
+    ]),
+  );
 
   const routes = new Map<string, EdgeRoute>();
 
-  for (const edge of edges) {
+  for (const edge of routable) {
     const source = boxes.get(edge.source);
     const target = boxes.get(edge.target);
 
-    if (!edge.sourceHandle || !edge.targetHandle || !source || !target) {
+    if (!source || !target) {
       continue;
     }
 
-    const group = groups.get(parallelKey(edge))!;
+    const group = ordered.get(parallelKey(edge))!;
 
     routes.set(
       edge.id,
@@ -935,7 +974,7 @@ function routeEveryEdge(
         source: handleAnchor(source, edge.sourceHandle),
         target: handleAnchor(target, edge.targetHandle),
         lane: edge.data?.lane ?? 0,
-        parallelIndex: group.indexOf(edge.id),
+        parallelIndex: group.findIndex((member) => member.id === edge.id),
         parallelCount: group.length,
       }),
     );
@@ -944,15 +983,11 @@ function routeEveryEdge(
   return routes;
 }
 
-function checkNoBundleCrossesItself(): void {
-  // A hub fanning out above and below, plus a parallel pair, is the shape the
-  // whole design exists for.
-  const nodes = [makeNode("hub"), ...Array.from({ length: 5 }, (_, i) => makeNode(`t${i}`))];
-  const edges = [
-    ...Array.from({ length: 5 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
-    makeEdge("dup", "hub", "t0", "second relationship"),
-  ];
-
+function assertNoBundleCrossesItself(
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+  context: string,
+): void {
   const laidOut = applyLayout(nodes, edges);
   const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
   const bundles = new Map<string, CanvasEdge[]>();
@@ -1026,11 +1061,64 @@ function checkNoBundleCrossesItself(): void {
                 right.points[b],
                 right.points[b + 1],
               ),
-              `${key}: ${members[i].id} segment ${a} crosses ${members[j].id} segment ${b}`,
+              `${context}: ${key}: ${members[i].id} segment ${a} crosses ${members[j].id} segment ${b}`,
             );
           }
         }
       }
+    }
+  }
+}
+
+function checkNoBundleCrossesItself(): void {
+  // A hub fanning out above and below, plus a parallel pair, is the shape the
+  // whole design exists for.
+  const nodes = [makeNode("hub"), ...Array.from({ length: 5 }, (_, i) => makeNode(`t${i}`))];
+  const edges = [
+    ...Array.from({ length: 5 }, (_, i) => makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`)),
+    makeEdge("dup", "hub", "t0", "second relationship"),
+  ];
+
+  assertNoBundleCrossesItself(nodes, edges, "five-way fan with a parallel pair");
+}
+
+/**
+ * The minimal reproduction for Critical 3 in the branch review: a hub with a
+ * parallel pair to one target and a single edge to another. An outer member's
+ * vertical descent (longer, since its lane splits further out) used to cross
+ * an inner member's mid-lane horizontal run, because `parallelLaneY` handed
+ * out its row offsets by an id-sorted `parallelIndex` that had no relationship
+ * to which member's lane split closer to the source.
+ */
+function checkNoBundleCrossesItselfWithParallelGroup(): void {
+  const nodes = [makeNode("hub"), makeNode("t0"), makeNode("t1")];
+  const edges = [
+    makeEdge("e0", "hub", "t0", "first relationship"),
+    makeEdge("e1", "hub", "t0", "second relationship"),
+    makeEdge("e2", "hub", "t1", "unrelated"),
+  ];
+
+  assertNoBundleCrossesItself(nodes, edges, "hub with a parallel pair to one target");
+}
+
+function assertNoTwoLabelsCollide(
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+  context: string,
+): void {
+  const laidOut = applyLayout(nodes, edges);
+  const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
+  const anchors = [...routes.entries()];
+
+  for (let i = 0; i < anchors.length; i += 1) {
+    for (let j = i + 1; j < anchors.length; j += 1) {
+      const [leftId, left] = anchors[i];
+      const [rightId, right] = anchors[j];
+      const apart =
+        Math.abs(left.labelPoint.x - right.labelPoint.x) >= EDGE_LABEL_CLEARANCE.width ||
+        Math.abs(left.labelPoint.y - right.labelPoint.y) >= EDGE_LABEL_CLEARANCE.height;
+
+      assert.ok(apart, `${context}: ${leftId} and ${rightId} put their label pills on top of each other`);
     }
   }
 }
@@ -1049,21 +1137,61 @@ function checkNoTwoLabelsCollide(): void {
     makeEdge("p3", "provider", "redis", "token cache"),
   ];
 
+  assertNoTwoLabelsCollide(nodes, edges, "same-rank same-shape sources");
+}
+
+/**
+ * The same topology as `checkNoTwoLabelsCollide`, but the two same-rank
+ * sources are different shapes (Critical 2 in the branch review).
+ *
+ * `assignLanes` used to key a bundle by `source.x + source.width / 2`
+ * reconstructed from the *snapped* position, which only recovers dagre's true
+ * rank centre when every node in the rank shares one width — snapping
+ * `center.x - width/2` and adding `width/2` back does not undo the rounding
+ * the same way for a different width. Two nodes genuinely in the same rank
+ * then produced two different bundle keys, each bundle restarting at lane 0.
+ *
+ * This is checked as a lane-contiguity invariant rather than by measuring
+ * `labelPoint` distances the way `checkNoTwoLabelsCollide` does: `identity`
+ * and `provider` are in the same rank but different *rows* of it, and dagre's
+ * `nodesep` (`RANK_ROW_GAP`) keeps different rows of one rank further apart
+ * in y than any bundle spread could close — so two rows' labels never
+ * actually land within `EDGE_LABEL_CLEARANCE` of each other regardless of
+ * this bug. The lane sequence is what the geometry check can't see: with the
+ * bug, `identity` and `provider` each restart their own bundle at lane 0
+ * (`[0,1]` and `[0,1,2]`, duplicated), instead of sharing one continuous
+ * `[0,1,2,3,4]` — which is the actual mechanism that keeps split columns,
+ * and so labels, from ever landing on the same column in the first place.
+ */
+function checkSameRankMixedShapeSourcesShareOneLaneSequence(): void {
+  const nodes = [
+    makeNode("identity", { x: 0, y: 0 }, "circle"),
+    makeNode("provider", { x: 0, y: 0 }, "diamond"),
+    makeNode("postgres"),
+    makeNode("redis"),
+  ];
+  const edges = [
+    makeEdge("i1", "identity", "postgres", "users"),
+    makeEdge("i2", "identity", "postgres", "sessions"),
+    makeEdge("p1", "provider", "postgres", "OAuth + refresh"),
+    makeEdge("p2", "provider", "postgres", "encrypted tokens"),
+    makeEdge("p3", "provider", "redis", "token cache"),
+  ];
+
   const laidOut = applyLayout(nodes, edges);
-  const routes = routeEveryEdge(laidOut.nodes, laidOut.edges);
-  const anchors = [...routes.entries()];
+  const lanes = laidOut.edges
+    .filter((edge) => edge.source === "identity" || edge.source === "provider")
+    .map((edge) => edge.data?.lane)
+    .filter((lane): lane is number => typeof lane === "number")
+    .sort((a, b) => a - b);
 
-  for (let i = 0; i < anchors.length; i += 1) {
-    for (let j = i + 1; j < anchors.length; j += 1) {
-      const [leftId, left] = anchors[i];
-      const [rightId, right] = anchors[j];
-      const apart =
-        Math.abs(left.labelPoint.x - right.labelPoint.x) >= EDGE_LABEL_CLEARANCE.width ||
-        Math.abs(left.labelPoint.y - right.labelPoint.y) >= EDGE_LABEL_CLEARANCE.height;
-
-      assert.ok(apart, `${leftId} and ${rightId} put their label pills on top of each other`);
-    }
-  }
+  assert.deepEqual(
+    lanes,
+    lanes.map((_, index) => index),
+    `identity (circle) and provider (diamond) are in the same rank, so their bundles ` +
+      `must share one continuous lane sequence 0..n-1 rather than each restarting at 0 ` +
+      `(got ${JSON.stringify(lanes)})`,
+  );
 }
 
 function main() {
@@ -1096,7 +1224,9 @@ function main() {
   checkSingleEdgeBundlesLayOutExactlyAsBefore();
   checkLongChainStaysInsideTheCoordinateBudget();
   checkNoBundleCrossesItself();
+  checkNoBundleCrossesItselfWithParallelGroup();
   checkNoTwoLabelsCollide();
+  checkSameRankMixedShapeSourcesShareOneLaneSequence();
   console.log(
     "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps and edge cases verified",
   );

@@ -174,7 +174,20 @@ rejected({ ...graph, nodes: [{ ...graph.nodes[0], y: 10_001 }], edges: [] }, "re
 assert.ok(parseAgentGraph({ ...graph, nodes: [{ ...graph.nodes[0], x: -10_000, y: 10_000 }], edges: [] }), "accepts coordinate bounds");
 rejected({ ...graph, nodes: [graph.nodes[0], graph.nodes[0]], edges: [] }, "rejects duplicate node IDs");
 rejected({ ...graph, edges: [{ ...graph.edges[0], id: "edge" }, { ...graph.edges[0], id: "edge" }] }, "rejects duplicate edge IDs");
-rejected({ ...graph, edges: [{ ...graph.edges[0], id: "other" }, graph.edges[0]] }, "rejects duplicate endpoint pairs");
+rejected(
+  { ...graph, edges: [{ ...graph.edges[0], id: "other" }, graph.edges[0]] },
+  "rejects an edge repeating an earlier edge's source, target and label",
+);
+assert.ok(
+  parseAgentGraph({
+    ...graph,
+    edges: [
+      graph.edges[0],
+      { ...graph.edges[0], id: "client-to-orders-2", label: "gRPC" },
+    ],
+  }),
+  "accepts two edges sharing a source and target when their labels differ — two relationships, not a collision",
+);
 rejected({ ...graph, edges: [{ ...graph.edges[0], target: "missing" }] }, "rejects dangling endpoints");
 rejected({ ...graph, edges: [{ ...graph.edges[0], target: "client" }] }, "rejects self loops");
 rejected({ ...graph, edges: [{ ...graph.edges[0], label: "x".repeat(41) }] }, "rejects overlong edge labels");
@@ -294,6 +307,48 @@ assert.equal(
   projectCanvasToAgentGraph(chainSnapshot).opaqueNodeIds.length,
   0,
   "the widest graph the contract allows still projects back through the contract with nothing opaque",
+);
+
+/**
+ * The diagram from the user's original bug report: four edges between one
+ * source/target pair. Before the schema and dagre fixes, this was rejected
+ * outright (`Source/target edge pairs must be unique.`) and, even past that,
+ * crashed `layoutGraph` ("Not possible to find intersection inside of the
+ * rectangle") — dagre ranked one edge per pair, but every duplicate still
+ * asked it to find rank space for a target three or more sources reached.
+ * Both must now pass end to end, whatever the drawn geometry looks like — a
+ * closed dagre crash and an open schema are Parts 1 and 2 of this fix; Part 3
+ * (routing 3+ parallel edges without crossings) is tracked separately and its
+ * limits are documented in `checkParallelGroupSweepHasNoCrossings` in
+ * `scripts/verify-graph-layout.ts`, not here.
+ */
+const fourParallelEdgesGraph = {
+  version: 1 as const,
+  nodes: [
+    { id: "identity", label: "Identity & Sessions", shape: "rectangle" as const, color: "blue" as const },
+    { id: "postgres", label: "PostgreSQL", shape: "cylinder" as const, color: "teal" as const },
+  ],
+  edges: [
+    { id: "e0", source: "identity", target: "postgres", label: "reads users" },
+    { id: "e1", source: "identity", target: "postgres", label: "reads sessions" },
+    { id: "e2", source: "identity", target: "postgres", label: "writes audit log" },
+    { id: "e3", source: "identity", target: "postgres", label: "reads refresh tokens" },
+  ],
+};
+
+const parsedFourParallelEdges = parseAgentGraph(fourParallelEdgesGraph);
+assert.ok(parsedFourParallelEdges, "four parallel edges between one pair now parse");
+
+assert.doesNotThrow(
+  () => materializeAgentGraph(parsedFourParallelEdges!),
+  "four parallel edges between one pair now lay out without dagre throwing",
+);
+
+const fourParallelEdgesSnapshot = materializeAgentGraph(parsedFourParallelEdges!);
+assert.equal(
+  fourParallelEdgesSnapshot.edges.length,
+  4,
+  "all four edges come back, not deduplicated — they carry four different labels",
 );
 
 console.info("Agent graph contract checks passed");

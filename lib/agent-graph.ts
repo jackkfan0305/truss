@@ -89,7 +89,22 @@ function buildAgentGraphSchema(minimumNodes: 0 | 1) {
       }
 
       const edgeIds = new Set<string>();
-      const endpointPairs = new Set<string>();
+      // Keyed on source+target+label, not just source+target: two edges
+      // between the same pair are two distinct relationships as long as their
+      // labels differ, and rejecting that outright is what made
+      // `dedupeEdges` (lib/graph-layout.ts) unreachable and left an agent no
+      // way to express a request edge and a response edge between one pair.
+      // An exact repeat of all three fields is still rejected here rather
+      // than left for `dedupeEdges` to quietly drop: `parseAgentGraph` is
+      // documented as strict, all-or-nothing, "no malformed field or entry is
+      // repaired" — silently discarding one of two edges an agent explicitly
+      // asked for would break that promise, and a validation error the agent
+      // can see and correct is better than a diagram missing an edge it
+      // thinks it drew. `dedupeEdges` still runs on every materialize call —
+      // it stays live for content that reaches it by some path other than
+      // this schema (a future direct caller, e.g.), it just never fires for
+      // agent-authored graphs, which all pass through here first.
+      const endpointTriples = new Set<string>();
 
       for (const [index, edge] of graph.edges.entries()) {
         if (edgeIds.has(edge.id)) {
@@ -125,15 +140,19 @@ function buildAgentGraphSchema(minimumNodes: 0 | 1) {
           });
         }
 
-        const pair = `${edge.source}\u0000${edge.target}`;
-        if (endpointPairs.has(pair)) {
+        // JSON-encoded rather than delimited: source/target stay space-free
+        // under `agentGraphIdSchema`, but the label is arbitrary text, and a
+        // delimited join would let a label containing the delimiter collide
+        // with a different source/target/label combination.
+        const triple = JSON.stringify([edge.source, edge.target, edge.label]);
+        if (endpointTriples.has(triple)) {
           context.addIssue({
             code: "custom",
-            message: "Source/target edge pairs must be unique.",
+            message: "Edges cannot repeat an earlier edge's source, target and label.",
             path: ["edges", index],
           });
         }
-        endpointPairs.add(pair);
+        endpointTriples.add(triple);
       }
     });
 }
@@ -310,18 +329,23 @@ export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphV
   const edges: AgentGraphEdge[] = [];
   const opaqueEdgeIds: string[] = [];
   const seenEdgeIds = new Set<string>();
-  const seenPairs = new Set<string>();
+  // Keyed on source+target+label, matching `buildAgentGraphSchema`'s own
+  // triple: two edges sharing a pair but differing in label are two distinct
+  // relationships, not a collision, so only an exact triple repeat makes a
+  // later edge opaque. JSON-encoded rather than delimited for the same reason
+  // as the schema's key — the label is arbitrary text, not constrained to be
+  // delimiter-free the way an ID is.
+  const seenTriples = new Set<string>();
 
   for (const edge of snapshot.edges) {
+    const label = edge.data?.label ?? "";
     const parsed = agentGraphEdgeSchema.safeParse({
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      label: edge.data?.label ?? "",
+      label,
     });
-    // NUL-joined, matching the schema's own pair key above: unambiguous by
-    // construction rather than by relying on the ID pattern excluding spaces.
-    const pair = `${edge.source}\u0000${edge.target}`;
+    const triple = JSON.stringify([edge.source, edge.target, label]);
 
     if (
       !parsed.success ||
@@ -329,14 +353,14 @@ export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphV
       !representableNodeIds.has(edge.target) ||
       edge.source === edge.target ||
       seenEdgeIds.has(edge.id) ||
-      seenPairs.has(pair)
+      seenTriples.has(triple)
     ) {
       opaqueEdgeIds.push(edge.id);
       continue;
     }
 
     seenEdgeIds.add(parsed.data.id);
-    seenPairs.add(pair);
+    seenTriples.add(triple);
     edges.push(parsed.data);
   }
 

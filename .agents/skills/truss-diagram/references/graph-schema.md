@@ -36,7 +36,7 @@ Rules:
 - Use lowercase kebab-case IDs (`[a-z0-9]+(?:-[a-z0-9]+)*`), 1–48 characters, unique across nodes and separately across edges.
 - Give every node a trimmed 1–80 character label; use only `rectangle`, `diamond`, `circle`, `pill`, `cylinder`, or `hexagon` as its shape; and use only `neutral`, `blue`, `purple`, `orange`, `red`, `pink`, `green`, or `teal` as its color — see the legend below for what each one means.
 - `x` and `y` are optional integers from -10,000 through 10,000. The app lays out every graph itself and ignores whatever you send, so omit them — it keeps the encoded launch fragment well under its budget.
-- Give every edge an existing, different source and target, with no repeated source/target pair. Its label is trimmed and 0–40 characters.
+- Give every edge an existing, different source and target. Its label is trimmed and 0–40 characters. Two edges may share a source and target — that's two relationships between the same pair, drawn as parallel lines — but not with the same label too; an edge repeating an earlier edge's source, target and label is rejected.
 - Never include React Flow fields, dimensions, viewport state, groups, metadata, or unknown keys. The launcher rejects the entire graph if any rule is violated.
 - The encoded launch fragment must not exceed 16,384 characters. Keep the graph compact; the launcher never truncates it.
 

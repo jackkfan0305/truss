@@ -917,6 +917,15 @@ function checkRelayoutRefreshesLanesNotJustHandles(): void {
     "the refreshed lane moved off the stale 0 the fixture seeded, rather than carrying it through",
   );
 
+  // Narrowed before the sort, not coerced with `?? 0`: a lane of 0 is a real,
+  // distinct value from "missing", so defaulting either side to it would sort
+  // an absent lane as if it were lane 0 and silently pass a case where a lane
+  // never got stamped at all.
+  assert.ok(
+    typeof addedLane === "number" && typeof refreshedLane === "number",
+    `both edges in the grown bundle come back with a numeric lane (got added=${addedLane}, refreshed=${refreshedLane})`,
+  );
+
   // In this fixture, the newly added hub-b edge (target at y=200) receives lane 0
   // because laneOrder sorts by |deltaY| descending, so the target farther from
   // the hub's anchor gets lane 0. The pre-existing hub-a edge (target at y=0)

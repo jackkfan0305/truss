@@ -163,9 +163,15 @@ function layoutGraphWithRanks(
   const nodeIds = new Set(nodes.map((node) => node.id));
   const boxes = new Map(nodes.map((node) => [node.id, toBox(node)]));
 
-  // multigraph: true — two nodes can be joined by more than one edge (e.g. a
-  // request edge and a response edge), and each needs its own rank-space
-  // reservation rather than silently overwriting the other's.
+  // multigraph: true because every `setEdge` call below passes `edge.id` as
+  // a name (graphlib throws "Cannot set a named edge when isMultigraph =
+  // false" otherwise) — not because dagre needs to rank more than one edge
+  // per (source, target) pair. It doesn't: no label size is declared on the
+  // edge (see the comment below), so a second edge between a pair dagre has
+  // already seen reserves no rank space a first one didn't, and ranking both
+  // is what throws "Not possible to find intersection inside of the
+  // rectangle" once a third source also targets the same node. The guard
+  // below keeps dagre to one edge per pair for exactly that reason.
   const graph = new dagre.graphlib.Graph<GraphLabel, NodeLabel, EdgeLabel>({
     multigraph: true,
   });
@@ -183,6 +189,17 @@ function layoutGraphWithRanks(
     graph.setNode(node.id, { width: box.width, height: box.height });
   }
 
+  // Dagre only needs one edge per (source, target) pair to rank the two
+  // nodes; a second, third, etc. edge between the same pair asks it to find
+  // rank space for a label it was never told the size of (see the comment
+  // above `graph.setEdge` below), and once a third source also targets the
+  // node the second pair shares, dagre throws trying to route two edges
+  // through the same rectangle. This only changes what dagre sees for
+  // ranking — the caller's edge list, and every edge in it, comes back
+  // whole; `applyLayout`'s own dedupe (a real deletion) is a separate,
+  // opt-in step.
+  const rankedPairs = new Set<string>();
+
   for (const edge of edges) {
     // Self-loops have no route `getSmoothStepPath` can draw and dagre ranks
     // them poorly; dangling references would otherwise make dagre invent a
@@ -195,6 +212,18 @@ function layoutGraphWithRanks(
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
       continue;
     }
+
+    // JSON-encoded rather than delimited: node ids are arbitrary
+    // human-authored strings on a hand-drawn canvas, not the delimiter-free
+    // agent-graph id pattern, so a delimited join could let one node's id
+    // colliding with another's produce a false duplicate.
+    const pairKey = JSON.stringify([edge.source, edge.target]);
+
+    if (rankedPairs.has(pairKey)) {
+      continue;
+    }
+
+    rankedPairs.add(pairKey);
 
     // No label size is declared on the edge: `RANK_GAP` already reserves the
     // pill's width in every rank gap, and telling dagre about it as well makes

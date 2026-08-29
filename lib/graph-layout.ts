@@ -66,7 +66,11 @@ const RANK_ROW_GAP = MIN_NODE_GAP * 3;
  * give-up-evenly behaviour the old face fan had for a crowded node face:
  * squeezed still reads, overshot reads as labels anchored to thin air.
  */
-function computedRankSep(maxLane: number, placed: readonly CanvasNode[]): number {
+function computedRankSep(
+  maxLane: number,
+  placed: readonly CanvasNode[],
+  rankX: ReadonlyMap<string, number>
+): number {
   const needed = Math.max(
     RANK_GAP,
     TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width / 2 + LABEL_GAP
@@ -74,11 +78,23 @@ function computedRankSep(maxLane: number, placed: readonly CanvasNode[]): number
 
   // Nodes in one rank share an x centre, so counting distinct centres counts
   // ranks, and the widest node in each is what that rank costs in width.
+  //
+  // `rankX` is dagre's own pre-snap centre for each node, not a value
+  // reconstructed from `box.x + box.width / 2`: that reconstruction only
+  // recovers the true centre when every node in the rank shares one width,
+  // since snapping `center.x - width/2` and adding `width/2` back rounds
+  // differently for a different width. A rank mixing shapes would otherwise
+  // count as several narrower columns, summing their widths instead of
+  // taking the widest, and under-provisioning the gap.
   const columns = new Map<number, number>();
 
   for (const node of placed) {
     const box = toBox(node);
-    const center = box.x + box.width / 2;
+    const center = rankX.get(node.id);
+
+    if (center === undefined) {
+      continue;
+    }
 
     columns.set(center, Math.max(columns.get(center) ?? 0, box.width));
   }
@@ -103,9 +119,27 @@ export const HANDLE_ID = {
   left: "left",
 } as const;
 
+/** What `layoutGraphWithRanks` hands back: the placed nodes, and the rank
+ * identity `assignLanes` and `computedRankSep` need to group by. */
+interface LayoutGraphResult {
+  nodes: CanvasNode[];
+  /**
+   * Each node's rank centre, keyed by id, exactly as dagre computed it —
+   * before the position snap.
+   *
+   * `position.x` is `snap(center.x - origin.x - box.width / 2)`, so recovering
+   * the centre by adding `box.width / 2` back only cancels the subtraction
+   * exactly when nothing rounded in between. It does: `snap` rounds to the
+   * nearest `LAYOUT_GRID`, and *how* a given `center.x` rounds depends on
+   * `box.width`, so two nodes genuinely sharing one rank but not one width
+   * reconstruct to two slightly different values. Keeping the exact
+   * pre-snap number sidesteps the rounding rather than compensating for it.
+   */
+  rankX: Map<string, number>;
+}
+
 /**
- * Lays out a graph left-to-right with dagre and returns new node objects with
- * `position` set from the result. Never mutates `nodes`.
+ * Lays out a graph left-to-right with dagre. Never mutates `nodes`.
  *
  * Dagre reports each node's `x`/`y` as its CENTRE, but React Flow's
  * `node.position` is the TOP-LEFT corner — every position here is the centre
@@ -117,13 +151,13 @@ export const HANDLE_ID = {
  * order, so building the graph in a fixed order (never `Object.keys` or `Set`
  * iteration over something rebuilt per call) is all determinism requires.
  */
-export function layoutGraph(
+function layoutGraphWithRanks(
   nodes: readonly CanvasNode[],
   edges: readonly CanvasEdge[],
   ranksep: number = RANK_GAP
-): CanvasNode[] {
+): LayoutGraphResult {
   if (nodes.length === 0) {
-    return [];
+    return { nodes: [], rankX: new Map() };
   }
 
   const nodeIds = new Set(nodes.map((node) => node.id));
@@ -185,7 +219,7 @@ export function layoutGraph(
 
   const origin = boundingCenter(centers);
 
-  return nodes.map((node, index) => {
+  const laidOutNodes = nodes.map((node, index) => {
     const box = boxes.get(node.id)!;
     const center = centers[index];
 
@@ -196,6 +230,26 @@ export function layoutGraph(
 
     return { ...node, position };
   });
+
+  const rankX = new Map(nodes.map((node, index) => [node.id, centers[index].x - origin.x]));
+
+  return { nodes: laidOutNodes, rankX };
+}
+
+/**
+ * Lays out a graph left-to-right with dagre and returns new node objects with
+ * `position` set from the result. Never mutates `nodes`.
+ *
+ * The public entry point for callers that only need positions — everything
+ * `applyLayout` needs beyond that (dagre's exact, pre-snap rank centre for
+ * each node) comes from `layoutGraphWithRanks` instead.
+ */
+export function layoutGraph(
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+  ranksep: number = RANK_GAP
+): CanvasNode[] {
+  return layoutGraphWithRanks(nodes, edges, ranksep).nodes;
 }
 
 /**
@@ -350,8 +404,13 @@ export function handleAnchor(box: Box, handle: string): XYPosition {
   }
 }
 
-/** A route leaving one vertical face and entering the other — the only kind lanes apply to. */
-function isSideToSideRoute(sourceHandle: string, targetHandle: string): boolean {
+/**
+ * A route leaving one vertical face and entering the other — the only kind
+ * lanes apply to, and the same gate `canvas-edge.tsx`'s `isSideToSide` and
+ * `scripts/verify-graph-layout.ts`'s `routeEveryEdge` use to decide whether an
+ * edge is drawn through `buildEdgeRoute` at all.
+ */
+export function isSideToSideRoute(sourceHandle: string, targetHandle: string): boolean {
   const isSide = (handle: string) =>
     handle === HANDLE_ID.left || handle === HANDLE_ID.right;
 
@@ -391,7 +450,8 @@ function wireEdges(
  * line, not the edge of its rank.
  */
 function assignLanes(
-  wired: readonly { edge: CanvasEdge; source: Box; target: Box }[]
+  wired: readonly { edge: CanvasEdge; source: Box; target: Box }[],
+  rankX: ReadonlyMap<string, number>
 ): Map<string, number> {
   const bundles = new Map<string, LaneMember[]>();
 
@@ -403,12 +463,18 @@ function assignLanes(
     const from = handleAnchor(source, edge.sourceHandle!);
     const to = handleAnchor(target, edge.targetHandle!);
 
-    // Key by rank (source.x centre) and handle, not by source node id.
-    // This ensures all edges leaving the same rank on the same handle share a
-    // continuous lane space, preventing lane 0 of one source from occupying the
-    // same column as lane 0 of another source in the same rank.
-    const rankX = source.x + source.width / 2;
-    const key = `${rankX} ${edge.sourceHandle}`;
+    // Key by rank and handle, not by source node id. This ensures all edges
+    // leaving the same rank on the same handle share a continuous lane space,
+    // preventing lane 0 of one source from occupying the same column as lane 0
+    // of another source in the same rank.
+    //
+    // `rankX` is dagre's exact pre-snap centre (see `LayoutGraphResult`), not
+    // `source.x + source.width / 2` reconstructed from the snapped box: that
+    // reconstruction only recovers the true centre when every node in the
+    // rank shares one width, so a rank mixing shapes (a cylinder database
+    // beside a rectangle service) used to compute two different keys for one
+    // rank and restart both bundles at lane 0.
+    const key = `${rankX.get(edge.source)} ${edge.sourceHandle}`;
 
     bundles.set(key, [
       ...(bundles.get(key) ?? []),
@@ -523,26 +589,34 @@ export function applyLayout(
   // Pass 1 exists only to learn the shape: how many ranks, and how wide the
   // widest bundle is. Both need handles, handles need positions, and positions
   // need a rank gap — so the first gap is the floor and the second is derived.
-  const probe = layoutGraph(nodes, sourceEdges);
-  const probeLanes = assignLanes(wireEdges(probe, sourceEdges));
+  const probe = layoutGraphWithRanks(nodes, sourceEdges);
+  const probeLanes = assignLanes(wireEdges(probe.nodes, sourceEdges), probe.rankX);
   let maxLane = Math.max(0, ...probeLanes.values());
 
-  // Compute initial ranksep and lay out. Repeat if maxLane changed, since
-  // larger ranksep can cause more edges to become side-to-side, widening the
-  // bundle.
-  let laidOutNodes = layoutGraph(nodes, sourceEdges, computedRankSep(maxLane, probe));
-  let wired = wireEdges(laidOutNodes, sourceEdges);
-  let lanes = assignLanes(wired);
-  let newMaxLane = Math.max(0, ...lanes.values());
+  let laidOut: LayoutGraphResult;
+  let wired: ReturnType<typeof wireEdges>;
+  let lanes: Map<string, number>;
 
-  while (newMaxLane > maxLane) {
+  // Lays out with the ranksep `maxLane` calls for, then repeats if that
+  // widened the bundle further: a larger ranksep can turn more edges
+  // side-to-side, raising `maxLane` again. This always terminates because
+  // `maxLane` only ever rises here, and it's bounded above by the bundle's
+  // own edge count.
+  do {
+    laidOut = layoutGraphWithRanks(nodes, sourceEdges, computedRankSep(maxLane, probe.nodes, probe.rankX));
+    wired = wireEdges(laidOut.nodes, sourceEdges);
+    lanes = assignLanes(wired, laidOut.rankX);
+
+    const newMaxLane = Math.max(0, ...lanes.values());
+
+    if (newMaxLane <= maxLane) {
+      break;
+    }
+
     maxLane = newMaxLane;
-    laidOutNodes = layoutGraph(nodes, sourceEdges, computedRankSep(maxLane, probe));
-    wired = wireEdges(laidOutNodes, sourceEdges);
-    lanes = assignLanes(wired);
-    newMaxLane = Math.max(0, ...lanes.values());
-  }
+  } while (true);
 
+  const laidOutNodes = laidOut.nodes;
   const wiredById = new Map(wired.map((entry) => [entry.edge.id, entry.edge]));
 
   const laidOutEdges = sourceEdges.map((edge) => {

@@ -70,6 +70,20 @@ function isGraphId(value) {
   );
 }
 
+/**
+ * A node position: absent, or an integer inside the documented range.
+ *
+ * Optional because the app runs its own deterministic layout over every graph
+ * and overwrites whatever coordinates arrive. Agents are told to omit them, but
+ * one that still sends them is not an error — it is just ignored downstream.
+ */
+function isOptionalPosition(value) {
+  return (
+    value === undefined ||
+    (Number.isInteger(value) && value >= MIN_POSITION && value <= MAX_POSITION)
+  );
+}
+
 function isTrimmedString(value, maximumLength, allowEmpty = false) {
   return (
     typeof value === "string" &&
@@ -121,12 +135,8 @@ export function validateGraph(rawGraph) {
       !isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH) ||
       !SHAPES.has(node.shape) ||
       !COLORS.has(node.color) ||
-      !Number.isInteger(node.x) ||
-      !Number.isInteger(node.y) ||
-      node.x < MIN_POSITION ||
-      node.x > MAX_POSITION ||
-      node.y < MIN_POSITION ||
-      node.y > MAX_POSITION ||
+      !isOptionalPosition(node.x) ||
+      !isOptionalPosition(node.y) ||
       nodeIds.has(node.id)
     ) {
       throw new Error("The graph contains an invalid node.");
@@ -137,8 +147,11 @@ export function validateGraph(rawGraph) {
       label: node.label,
       shape: node.shape,
       color: node.color,
-      x: node.x,
-      y: node.y,
+      // Forwarded only when the caller sent them. The app lays every graph out
+      // itself and ignores whatever arrives here, so an absent position is the
+      // expected case and re-adding a placeholder would only pad the payload.
+      ...(node.x === undefined ? {} : { x: node.x }),
+      ...(node.y === undefined ? {} : { y: node.y }),
     };
   });
 

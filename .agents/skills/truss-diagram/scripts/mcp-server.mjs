@@ -21,8 +21,10 @@ const nodeShape = z.object({
   label: z.string(),
   shape: z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]),
   color: z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]),
-  x: z.number().int(),
-  y: z.number().int(),
+  // Optional: the app lays every graph out itself and overwrites whatever
+  // coordinates arrive, so omitting them is the expected case.
+  x: z.number().int().optional(),
+  y: z.number().int().optional(),
 });
 
 const edgeShape = z.object({

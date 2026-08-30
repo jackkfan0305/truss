@@ -8,6 +8,24 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- PR review fixes applied: storyboard owners can read every diagram on their
+  storyboard, the editor only exposes Share to storyboard owners, member-list
+  fetches cancel stale effect runs without nested state updates, and independent
+  seed writes run concurrently while dependency-ordered cleanup stays serial.
+
+- Product decision recorded for the next storyboard flow: signed-out users can
+  build a temporary storyboard with every storyboard feature except inviting
+  collaborators. The temporary storyboard lives only in the current tab and
+  disappears on refresh or tab close. A top-right `Sign in to save` action
+  opens an in-page sign-in modal, preserves it through authentication, and
+  saves the complete work as a new storyboard owned by the user's account. A
+  cancelled or failed sign-in returns to the same temporary storyboard. The
+  invite control stays hidden until sign-in succeeds. Terminal-agent work is
+  included, save failures leave the temporary storyboard available for retry,
+  and each browser tab has its own independent temporary storyboard. After a
+  successful save, the sign-in action disappears and collaboration becomes
+  available.
+
 - `rename-project-to-storyboard` complete (issue #27). `Project` is gone. The
   rows it held are now `Diagram` — the Liveblocks room, the canvas blob, the
   `/editor/[roomId]` page, and every MCP tool — and `Storyboard` is a new

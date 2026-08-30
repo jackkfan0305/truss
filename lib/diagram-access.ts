@@ -42,6 +42,7 @@ export async function getAccessibleDiagram(
       ...NOT_TOMBSTONED,
       OR: [
         { ownerId: identity.userId },
+        { storyboard: { ownerId: identity.userId } },
         ...(identity.email ? [collaboratesOn(identity.email)] : []),
       ],
     },
@@ -132,6 +133,17 @@ export async function authorizeDiagram(
 
   if (requireOwner) {
     return { ok: false, response: jsonError("Forbidden", 403) };
+  }
+
+  if (diagram.storyboardId) {
+    const storyboard = await prisma.storyboard.findUnique({
+      where: { id: diagram.storyboardId },
+      select: { ownerId: true },
+    });
+
+    if (storyboard?.ownerId === userId) {
+      return { ok: true, role: "collaborator", userId, ownerId: diagram.ownerId };
+    }
   }
 
   // A standalone diagram has no collaborator list to consult, so there is

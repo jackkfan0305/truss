@@ -41,54 +41,76 @@ export function useStoryboardMembers(storyboardId: string, isOpen: boolean) {
     // Guards against a slow response landing after the dialog closed or the
     // workspace changed.
     const controller = new AbortController()
+    let ignore = false
 
-    void (async () => {
-      try {
-        const response = await fetch(endpoint, { signal: controller.signal })
-
+    void fetch(endpoint, { signal: controller.signal })
+      .then(async (response) => {
         if (!response.ok) {
           throw new Error(await readErrorMessage(response))
         }
 
-        const body = (await response.json()) as { members?: StoryboardMember[] }
+        return (await response.json()) as { members?: StoryboardMember[] }
+      })
+      .then(
+        (body) => {
+          // A response that resolved before the abort landed still belongs to
+          // a dead effect run; writing it would let an older list win the race.
+          if (ignore || controller.signal.aborted) return
 
-        // A response that resolved before the abort landed still belongs to a
-        // dead effect run; writing it would let an older list win the race.
-        if (controller.signal.aborted) return
-
-        setList({ storyboardId, members: body.members ?? [], error: null })
-      } catch (caught) {
-        if (controller.signal.aborted) return
+          setList({ storyboardId, members: body.members ?? [], error: null })
+        },
+      )
+      .catch((caught) => {
+        if (ignore || controller.signal.aborted) return
 
         setList({ storyboardId, members: [], error: getErrorMessage(caught) })
-      }
-    })()
+      })
 
-    return () => controller.abort()
+    return () => {
+      ignore = true
+      controller.abort()
+    }
   }, [endpoint, isOpen, storyboardId])
 
   /**
    * Runs a mutation and folds its outcome into the list. Returning members
    * replaces them; returning `null` leaves them untouched.
    */
+  type MutationResult =
+    | StoryboardMember[]
+    | { removeMemberId: string }
+    | null
+
   const run = useCallback(
-    async (request: () => Promise<StoryboardMember[] | null>) => {
-      if (isPending) return
+    async (request: () => Promise<MutationResult>) => {
+      if (isPending) return false
 
       setIsPending(true)
 
       try {
         const members = await request()
 
-        setList((current) =>
-          current
-            ? { ...current, ...(members ? { members } : {}), error: null }
-            : current,
-        )
+        setList((current) => {
+          if (!current) return current
+
+          if (members && "removeMemberId" in members) {
+            return {
+              ...current,
+              members: current.members.filter(
+                (member) => member.id !== members.removeMemberId,
+              ),
+              error: null,
+            }
+          }
+
+          return { ...current, ...(members ? { members } : {}), error: null }
+        })
+        return true
       } catch (caught) {
         setList((current) =>
           current ? { ...current, error: getErrorMessage(caught) } : current,
         )
+        return false
       } finally {
         setIsPending(false)
       }
@@ -103,7 +125,7 @@ export function useStoryboardMembers(storyboardId: string, isOpen: boolean) {
 
     // The route answers with the refreshed list, so there is no second fetch
     // and no local list surgery that could drift from the server.
-    await run(async () => {
+    const didInvite = await run(async () => {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -114,12 +136,12 @@ export function useStoryboardMembers(storyboardId: string, isOpen: boolean) {
         throw new Error(await readErrorMessage(response))
       }
 
-      // Cleared only on success, so a rejected address stays in the field to fix.
-      setEmail("")
-
       const body = (await response.json()) as { members?: StoryboardMember[] }
       return body.members ?? []
     })
+
+    // Cleared only on success, so a rejected address stays in the field to fix.
+    if (didInvite) setEmail("")
   }, [email, endpoint, run])
 
   const remove = useCallback(
@@ -134,18 +156,7 @@ export function useStoryboardMembers(storyboardId: string, isOpen: boolean) {
         }
 
         // 204, no body — drop the row rather than refetching the whole list.
-        setList((current) =>
-          current
-            ? {
-                ...current,
-                members: current.members.filter(
-                  (member) => member.id !== memberId,
-                ),
-              }
-            : current,
-        )
-
-        return null
+        return { removeMemberId: memberId }
       })
     },
     [endpoint, run],

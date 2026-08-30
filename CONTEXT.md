@@ -14,6 +14,16 @@ A board of panels expressing one plan, owned by one user and shared with
 collaborators. It is the top-level object in the app.
 _Avoid_: Project, board, doc, plan
 
+**Temporary storyboard**:
+An unsigned-in storyboard that supports the full storyboard-building
+experience in the current tab but has no owner, collaborators, or persisted
+record. It disappears when the page is refreshed or the tab is closed. Signing
+in through the in-page sign-in modal preserves it and turns it into a new
+storyboard owned by that user. It includes the complete current storyboard,
+including its panels, diagrams, and terminal-agent work. Each browser tab has
+its own temporary storyboard.
+_Avoid_: Anonymous project, guest board, draft plan
+
 **Panel**:
 One node on a storyboard carrying one idea. Four types: prose, decision, code,
 diagram.

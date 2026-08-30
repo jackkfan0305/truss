@@ -4,6 +4,12 @@
 
 Dark only. No light mode. The visual language is a dark technical workspace — near-black backgrounds, layered surfaces, and vivid accent colors for interactive elements.
 
+Signed-out storyboard builders show a `Sign in to save` action in the top-right
+of the page. The user can keep building without signing in. If sign-in is
+cancelled or fails, the page returns to the same temporary storyboard. The
+invite control is hidden until the storyboard has an owner. After a successful
+save, `Sign in to save` disappears and the invite control appears.
+
 ## Typography
 
 | Role      | Font       | CSS Variable        |

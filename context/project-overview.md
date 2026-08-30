@@ -16,13 +16,17 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 
 ## Core User Flow
 
-1. User signs in.
-2. User creates or selects a diagram.
-3. User enters the diagram workspace.
-4. User optionally imports a starter system design template into the canvas.
-5. User asks their terminal agent to draw or extend the system design.
-6. The agent writes nodes and edges into the shared canvas.
-7. Collaborators edit and refine the design.
+1. User opens the storyboard builder, signed in or signed out.
+2. A signed-out user works in a temporary storyboard and cannot invite
+   collaborators.
+3. User signs in when they want to save the temporary storyboard. The current
+   storyboard is preserved through sign-in and saved to their account.
+4. User creates or selects a diagram.
+5. User enters the diagram workspace.
+6. User optionally imports a starter system design template into the canvas.
+7. User asks their terminal agent to draw or extend the system design.
+8. The agent writes nodes and edges into the shared canvas.
+9. Collaborators edit and refine the design.
 
 ## Features
 
@@ -31,6 +35,12 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 - User sign-in and route protection.
 - Diagram creation, ownership, and collaborator access.
 - Diagram list and workspace navigation.
+- A signed-out user can build a temporary storyboard with the full feature set
+  except collaboration invitations. Signing in preserves the temporary
+  storyboard and saves it as a new storyboard owned by the user. Sign-in opens
+  in a page modal so the temporary storyboard remains available in memory. If
+  saving fails, the temporary storyboard remains available for retry. Each
+  browser tab has its own temporary storyboard.
 
 ### Collaborative Canvas
 

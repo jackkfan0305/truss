@@ -56,7 +56,16 @@
 ## Auth and Collaboration Model
 
 - A **storyboard** is the top-level artifact and the only thing collaborators are invited to (see `CONTEXT.md`). A **diagram** is its own model with a nullable `storyboardId`, so a diagram that belongs to no plan is still a valid diagram — the shape every agent-created one starts in.
-- Storyboards and diagrams each have a single owner (Clerk user ID) and their own Liveblocks room.
+- A signed-out user may work in a temporary storyboard in the current tab. It
+  has no owner, is not persisted, and cannot invite collaborators. All other
+  storyboard features remain available, including panel and diagram work and
+  terminal-agent operations. Signing in through the in-page modal preserves the
+  temporary storyboard and creates a new authenticated user's storyboard from
+  the complete current work. Each tab owns an independent in-memory temporary
+  storyboard. A failed save leaves the temporary storyboard available for
+  retry; after a successful save, the page enters the normal owned state and
+  exposes collaboration.
+- Storyboards and diagrams each have a single owner (Clerk user ID) and their own Liveblocks room. A storyboard owner can read every diagram on that storyboard, even when a diagram has a different owner; diagram mutations remain restricted to the diagram owner.
 - Storyboards can include additional collaborators, stored by email. There is no local user table; names and avatars are read from the Clerk Backend API at render time.
 - Only authenticated users can access protected routes.
 - Owner or collaborator may **open** a storyboard and read its member list. That list covers everyone with access — the owner plus collaborators — each carrying a derived `owner` / `collaborator` role. Roles are not stored: owner is `Storyboard.ownerId`, collaborator is the existence of a `StoryboardCollaborator` row.

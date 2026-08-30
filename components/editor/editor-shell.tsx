@@ -55,7 +55,9 @@ export function EditorShell({
    * agent-created one, until it is placed on a board — has nobody to invite
    * and no Share button. See CONTEXT.md on Collaborator.
    */
-  const shareStoryboardId = activeDiagram?.storyboardId ?? null
+  const shareStoryboardId = activeDiagram?.ownsStoryboard
+    ? activeDiagram.storyboardId
+    : null
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useDiagramActions()
   const isSidebarOpen = openSidebar === "diagrams"

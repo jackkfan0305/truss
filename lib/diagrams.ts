@@ -36,19 +36,27 @@ export async function getOwnedDiagrams(
 export async function getSharedDiagrams(
   identity: Identity,
 ): Promise<DiagramSummary[]> {
-  if (!identity.email) {
-    return [];
-  }
-
   return prisma.diagram.findMany({
     where: {
       ownerId: { not: identity.userId },
       ...NOT_TOMBSTONED,
       storyboard: {
-        collaborators: {
-          // Emails are typed by hand in the share dialog, so match case-insensitively.
-          some: { email: { equals: identity.email, mode: "insensitive" } },
-        },
+        OR: [
+          { ownerId: identity.userId },
+          ...(identity.email
+            ? [{
+                collaborators: {
+                  // Emails are typed by hand in the share dialog, so match case-insensitively.
+                  some: {
+                    email: {
+                      equals: identity.email,
+                      mode: "insensitive" as const,
+                    },
+                  },
+                },
+              }]
+            : []),
+        ],
       },
     },
     orderBy: { createdAt: "desc" },

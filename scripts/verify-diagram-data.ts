@@ -407,6 +407,25 @@ async function checkDiagramAccess() {
     },
     "a diagram you own on a board you do not own must not report storyboard ownership",
   );
+  assert.deepEqual(
+    await getAccessibleDiagram("verify-standalone", {
+      userId: OTHER_OWNER_ID,
+      email: null,
+    }),
+    {
+      id: "verify-standalone",
+      name: "Standalone",
+      isOwner: false,
+      storyboardId: SHARED_BOARD_ID,
+      ownsStoryboard: true,
+    },
+    "the storyboard owner should reach a diagram owned by another user",
+  );
+  assert.deepEqual(
+    await getSharedDiagrams({ userId: OTHER_OWNER_ID, email: null }),
+    [{ id: "verify-standalone", name: "Standalone" }],
+    "the storyboard owner should see every diagram on their board",
+  );
   await prisma.diagram.update({
     where: { id: "verify-standalone" },
     data: { storyboardId: null },

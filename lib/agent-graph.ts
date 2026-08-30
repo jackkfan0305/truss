@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
+import { applyLayout } from "@/lib/graph-layout";
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
@@ -11,6 +12,8 @@ import {
   NODE_COLORS,
   NODE_DEFAULT_SIZES,
   NODE_SHAPES,
+  type CanvasEdge,
+  type CanvasNode,
   type NodeColor,
 } from "@/types/canvas";
 
@@ -44,8 +47,12 @@ const agentGraphNodeSchema = z.strictObject({
     label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
     shape: z.enum(NODE_SHAPES),
     color: z.enum(nodeColorValues),
-    x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
-    y: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
+    // The app lays out every graph itself (`materializeAgentGraph`), so these
+    // are optional going forward. Kept validated when present — with the same
+    // int/range rule as before — so an older agent that still sends them
+    // cannot start failing; the values are simply ignored once parsed.
+    x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION).optional(),
+    y: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION).optional(),
 });
 
 const agentGraphEdgeSchema = z.strictObject({
@@ -82,7 +89,22 @@ function buildAgentGraphSchema(minimumNodes: 0 | 1) {
       }
 
       const edgeIds = new Set<string>();
-      const endpointPairs = new Set<string>();
+      // Keyed on source+target+label, not just source+target: two edges
+      // between the same pair are two distinct relationships as long as their
+      // labels differ, and rejecting that outright is what made
+      // `dedupeEdges` (lib/graph-layout.ts) unreachable and left an agent no
+      // way to express a request edge and a response edge between one pair.
+      // An exact repeat of all three fields is still rejected here rather
+      // than left for `dedupeEdges` to quietly drop: `parseAgentGraph` is
+      // documented as strict, all-or-nothing, "no malformed field or entry is
+      // repaired" — silently discarding one of two edges an agent explicitly
+      // asked for would break that promise, and a validation error the agent
+      // can see and correct is better than a diagram missing an edge it
+      // thinks it drew. `dedupeEdges` still runs on every materialize call —
+      // it stays live for content that reaches it by some path other than
+      // this schema (a future direct caller, e.g.), it just never fires for
+      // agent-authored graphs, which all pass through here first.
+      const endpointTriples = new Set<string>();
 
       for (const [index, edge] of graph.edges.entries()) {
         if (edgeIds.has(edge.id)) {
@@ -118,15 +140,19 @@ function buildAgentGraphSchema(minimumNodes: 0 | 1) {
           });
         }
 
-        const pair = `${edge.source}\u0000${edge.target}`;
-        if (endpointPairs.has(pair)) {
+        // JSON-encoded rather than delimited: source/target stay space-free
+        // under `agentGraphIdSchema`, but the label is arbitrary text, and a
+        // delimited join would let a label containing the delimiter collide
+        // with a different source/target/label combination.
+        const triple = JSON.stringify([edge.source, edge.target, edge.label]);
+        if (endpointTriples.has(triple)) {
           context.addIssue({
             code: "custom",
-            message: "Source/target edge pairs must be unique.",
+            message: "Edges cannot repeat an earlier edge's source, target and label.",
             path: ["edges", index],
           });
         }
-        endpointPairs.add(pair);
+        endpointTriples.add(triple);
       }
     });
 }
@@ -158,26 +184,34 @@ export function parseAgentGraph(value: unknown): AgentGraph | null {
  * Takes `AgentGraphView["graph"]` rather than the stricter `AgentGraph` — the
  * body only reads fields both share, and the edit path legitimately produces a
  * zero-node graph that `AgentGraph` alone would not type.
+ *
+ * The app owns placement, not the agent: every node is run through
+ * `applyLayout` before this returns, so `node.x`/`node.y` are used only as an
+ * arbitrary pre-layout placeholder (defaulting to the origin when absent, as
+ * they now normally are) and are otherwise discarded, and every edge comes
+ * back with `sourceHandle`/`targetHandle` stamped from the laid-out geometry.
  */
 export function materializeAgentGraph(graph: AgentGraphView["graph"]): CanvasSnapshot {
-  return {
-    nodes: graph.nodes.map((node) => ({
-      id: node.id,
-      type: CANVAS_NODE_TYPE,
-      position: { x: node.x, y: node.y },
-      ...NODE_DEFAULT_SIZES[node.shape],
-      data: { label: node.label, shape: node.shape, color: node.color },
-    })),
-    edges: graph.edges.map((edge) => ({
-      id: edge.id,
-      type: CANVAS_EDGE_TYPE,
-      source: edge.source,
-      target: edge.target,
-      data: { label: edge.label },
-      style: { ...CANVAS_EDGE_STYLE },
-      markerEnd: { ...CANVAS_EDGE_MARKER },
-    })),
-  };
+  const nodes: CanvasNode[] = graph.nodes.map((node) => ({
+    id: node.id,
+    type: CANVAS_NODE_TYPE,
+    position: { x: node.x ?? 0, y: node.y ?? 0 },
+    ...NODE_DEFAULT_SIZES[node.shape],
+    data: { label: node.label, shape: node.shape, color: node.color },
+  }));
+  const edges: CanvasEdge[] = graph.edges.map((edge) => ({
+    id: edge.id,
+    type: CANVAS_EDGE_TYPE,
+    source: edge.source,
+    target: edge.target,
+    data: { label: edge.label },
+    style: { ...CANVAS_EDGE_STYLE },
+    markerEnd: { ...CANVAS_EDGE_MARKER },
+  }));
+
+  // Generated content: a model that emits the same relationship twice should
+  // not cost the diagram two overlapping lines and two stacked labels.
+  return applyLayout(nodes, edges, { dedupe: true });
 }
 
 /**
@@ -295,18 +329,23 @@ export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphV
   const edges: AgentGraphEdge[] = [];
   const opaqueEdgeIds: string[] = [];
   const seenEdgeIds = new Set<string>();
-  const seenPairs = new Set<string>();
+  // Keyed on source+target+label, matching `buildAgentGraphSchema`'s own
+  // triple: two edges sharing a pair but differing in label are two distinct
+  // relationships, not a collision, so only an exact triple repeat makes a
+  // later edge opaque. JSON-encoded rather than delimited for the same reason
+  // as the schema's key — the label is arbitrary text, not constrained to be
+  // delimiter-free the way an ID is.
+  const seenTriples = new Set<string>();
 
   for (const edge of snapshot.edges) {
+    const label = edge.data?.label ?? "";
     const parsed = agentGraphEdgeSchema.safeParse({
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      label: edge.data?.label ?? "",
+      label,
     });
-    // NUL-joined, matching the schema's own pair key above: unambiguous by
-    // construction rather than by relying on the ID pattern excluding spaces.
-    const pair = `${edge.source}\u0000${edge.target}`;
+    const triple = JSON.stringify([edge.source, edge.target, label]);
 
     if (
       !parsed.success ||
@@ -314,14 +353,14 @@ export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphV
       !representableNodeIds.has(edge.target) ||
       edge.source === edge.target ||
       seenEdgeIds.has(edge.id) ||
-      seenPairs.has(pair)
+      seenTriples.has(triple)
     ) {
       opaqueEdgeIds.push(edge.id);
       continue;
     }
 
     seenEdgeIds.add(parsed.data.id);
-    seenPairs.add(pair);
+    seenTriples.add(triple);
     edges.push(parsed.data);
   }
 

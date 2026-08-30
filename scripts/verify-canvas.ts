@@ -28,6 +28,7 @@ import {
 import {
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
+  CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
   CONNECTION_SNAP_RADIUS,
   DEFAULT_NODE_COLOR,
@@ -563,6 +564,58 @@ function checkCanvasBrandingIsHidden() {
   );
 }
 
+function checkEdgeLaneIsWhitelistedNotTrusted(): void {
+  const base = {
+    nodes: [
+      {
+        id: "a",
+        type: CANVAS_NODE_TYPE,
+        position: { x: 0, y: 0 },
+        data: { label: "A", shape: "rectangle", color: DEFAULT_NODE_COLOR },
+      },
+      {
+        id: "b",
+        type: CANVAS_NODE_TYPE,
+        position: { x: 400, y: 0 },
+        data: { label: "B", shape: "rectangle", color: DEFAULT_NODE_COLOR },
+      },
+    ],
+  };
+
+  const parseWithLane = (lane: unknown) =>
+    parseCanvasSnapshot({
+      ...base,
+      edges: [
+        {
+          id: "e",
+          type: CANVAS_EDGE_TYPE,
+          source: "a",
+          target: "b",
+          data: { label: "hop", lane },
+        },
+      ],
+    });
+
+  assert.equal(
+    parseWithLane(2)?.edges[0].data?.lane,
+    2,
+    "a whole non-negative lane survives the round trip",
+  );
+
+  for (const bad of [-1, 1.5, Number.NaN, "2", null]) {
+    assert.equal(
+      parseWithLane(bad)?.edges[0].data?.lane,
+      undefined,
+      `a lane of ${String(bad)} is dropped rather than trusted`,
+    );
+    assert.equal(
+      parseWithLane(bad)?.edges[0].data?.label,
+      "hop",
+      `dropping a bad lane does not take the label with it (${String(bad)})`,
+    );
+  }
+}
+
 function main() {
   checkPayloadRoundTrips();
   checkDefaultSizeRules();
@@ -580,6 +633,7 @@ function main() {
   checkAvatarsAreOnePerPerson();
   checkSnapshotsRejectJunkAndSurviveRoundTrips();
   checkCanvasBrandingIsHidden();
+  checkEdgeLaneIsWhitelistedNotTrusted();
   console.log(
     "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials/dedupe and snapshot validation verified",
   );

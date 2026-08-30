@@ -269,7 +269,18 @@ const documentedGraph = JSON.parse(
 assert.deepEqual(
   validateGraph(documentedGraph),
   documentedGraph,
-  "the graph documented for skill consumers passes the real validator",
+  "the graph documented for skill consumers passes the real validator, positions omitted and all",
+);
+
+// The documented example carries no `x`/`y` at all, which is the case the docs
+// now tell agents to send. Assert the omission survives the validator rather
+// than being backfilled: a placeholder position would travel all the way to the
+// app only to be discarded by its layout pass.
+assert.ok(
+  documentedGraph.nodes.every(
+    (node) => node.x === undefined && node.y === undefined,
+  ),
+  "the documented example graph omits positions",
 );
 
 const maxNodes = Array.from({ length: 40 }, (_, index) => ({

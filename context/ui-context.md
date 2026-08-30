@@ -59,7 +59,7 @@ Default node color: `#1F1F1F` with `#EDEDED` text.
 
 ### Edge Style
 
-Smooth-step path with an arrow marker. Default edge color: `#f8fafc`. Stroke width is thin — edges are visually secondary to nodes.
+Side-to-side edges (from left or right handle to the opposite side) use an orthogonal route: a shared trunk from the handle, then staggered split columns for each edge. Edges through a top or bottom handle keep React Flow's smooth-step path. Both round corners identically. Arrow marker and thin stroke unchanged. See `docs/superpowers/specs/2026-08-23-diagram-edge-branching-design.md` for routing rationale. Default color: `#f8fafc`. Stroke width is thin — edges are visually secondary to nodes.
 
 ### Node Shapes
 

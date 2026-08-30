@@ -43,18 +43,26 @@ next-env.d.ts
 # prisma generated client
 /generated
 
-# Agent tooling is local to a checkout, not part of the project. .claude/ is
-# per-agent config (its truss-diagram entry is only a symlink into .agents/),
-# and .superpowers/ is planning prose no build step reads.
-/.claude/
+# .superpowers/ is planning prose no build step reads.
 /.superpowers/
 
-# Skills installed from upstream repos — skills-lock.json pins the source and
-# content hash, so re-fetch rather than vendor the reference files. The
-# lockfile itself stays tracked; without it the pins are lost.
-/.agents/skills/*
-# truss-diagram is authored here, not fetched, and `npx skills add
-# jackkfan0305/truss --skill truss-diagram` serves it straight out of this
-# repo — so it must stay tracked. A new file under an ignored path would
-# otherwise be silently left out of every commit.
-!/.agents/skills/truss-diagram/
+# .claude/ is per-agent config. settings.local.json is one developer's machine
+# and stays out; skills/ is the symlink farm Claude Code reads and is tracked
+# (see below), so this ignores the directory's contents rather than the
+# directory itself.
+/.claude/*
+!/.claude/skills/
+
+# Agent skills are vendored, not re-fetched. skills-lock.json still pins the
+# source and content hash of everything under .agents/skills/ that came from
+# upstream, but the files themselves are tracked so a fresh worktree has
+# working skills with no setup step — re-fetching left the three checkouts
+# holding different sets. .claude/skills/ is one relative symlink per skill
+# into .agents/skills/, which resolves the same in every worktree, so there is
+# exactly one copy of each skill on disk.
+#
+# Refresh with `npx skills`, then commit the diff like any other change.
+#
+# /agent/ is a stray third copy some skills tooling has written in the past.
+# Nothing reads it and it duplicates .agents/skills/, so it never gets tracked.
+/agent/

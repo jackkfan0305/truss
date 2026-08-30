@@ -46,23 +46,17 @@ next-env.d.ts
 # .superpowers/ is planning prose no build step reads.
 /.superpowers/
 
-# .claude/ is per-agent config. settings.local.json is one developer's machine
-# and stays out; skills/ is the symlink farm Claude Code reads and is tracked
-# (see below), so this ignores the directory's contents rather than the
-# directory itself.
-/.claude/*
-!/.claude/skills/
-
-# Agent skills are vendored, not re-fetched. skills-lock.json still pins the
-# source and content hash of everything under .agents/skills/ that came from
-# upstream, but the files themselves are tracked so a fresh worktree has
-# working skills with no setup step — re-fetching left the three checkouts
-# holding different sets. .claude/skills/ is one relative symlink per skill
-# into .agents/skills/, which resolves the same in every worktree, so there is
-# exactly one copy of each skill on disk.
-#
-# Refresh with `npx skills`, then commit the diff like any other change.
-#
-# /agent/ is a stray third copy some skills tooling has written in the past.
-# Nothing reads it and it duplicates .agents/skills/, so it never gets tracked.
+# Per-agent-tool directories. Each one is a symlink farm pointing into
+# .agents/skills/ plus that tool's own local config, so it is a rendering of
+# the skills rather than the skills themselves — and settings.local.json under
+# .claude/ is one developer's machine. Regenerate any of them with
+# `npm run skills:link`.
+/.claude/
+/.codex/
 /agent/
+
+# The skills themselves are vendored, one copy, under .agents/skills/.
+# skills-lock.json stays as the provenance record for everything that came
+# from upstream, but the files are tracked so a fresh worktree has them
+# without a fetch — re-fetching left the three checkouts holding different
+# sets. Refresh with `npx skills`, then commit the diff like any other change.

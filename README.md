@@ -193,6 +193,24 @@ npx vercel --prod                      # deploy the app
 | `npm run verify:integration` | The checks that do hit the database and APIs |
 | `npm run generate` | Regenerate the Prisma client |
 | `npm run doctor` | React Doctor scan |
+| `npm run skills:link` | Point `.claude/skills/` at the vendored skills |
+
+## Agent skills
+
+The skills live in `.agents/skills/`, one copy, tracked. `skills-lock.json`
+records where the fetched ones came from; `npx skills` refreshes them and the
+diff gets committed like any other dependency.
+
+Per-tool directories are not tracked, because each is a rendering of those
+skills plus that tool's own local config. In a fresh worktree, build the one
+Claude Code reads:
+
+```bash
+npm run skills:link
+```
+
+It writes a relative symlink per skill into `.claude/skills/`, so nothing is
+copied and both paths stay in step. Re-run it after adding a skill.
 
 `scripts/verify-*.ts` are standalone contract checks — no test framework, no
 database, no network. Run one with `npx tsx scripts/verify-agent-graph.ts`;
@@ -201,6 +219,7 @@ each exits non-zero on failure.
 ## Layout
 
 ```
+.agents/skills The agent skills themselves, one copy
 app/api        Authenticated route handlers: validate → authorize → write → persist
 app/editor     The workspace (diagram sidebar, canvas)
 lib/           Prisma client, access control, Liveblocks server helpers

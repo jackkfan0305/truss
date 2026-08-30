@@ -14,7 +14,7 @@ export interface PacedCanvasAction<Flow> {
 export interface CanvasDrawingDependencies {
   setAiPresence: (
     roomId: string,
-    presence: { cursor: XYPosition | null; isThinking: boolean },
+    presence: { cursor: XYPosition | null },
   ) => Promise<void>;
   clearAiPresence: (roomId: string) => Promise<void>;
   sleep: (milliseconds: number) => Promise<void>;
@@ -55,7 +55,7 @@ export async function drawPacedCanvasActions<Flow>(
         // Presence is cosmetic: it must not delay a canvas write beyond the
         // actual cursor travel time below.
         void dependencies
-          .setAiPresence(roomId, { cursor: target, isThinking: true })
+          .setAiPresence(roomId, { cursor: target })
           .catch(() => undefined);
         await dependencies.sleep(AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS);
       }

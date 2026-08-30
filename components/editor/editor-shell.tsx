@@ -7,7 +7,6 @@ import { Plus } from "lucide-react"
 import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
-import { AiSidebar } from "@/components/editor/ai-sidebar"
 import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { ProjectDialogs } from "@/components/editor/project-dialogs"
@@ -54,7 +53,6 @@ export function EditorShell({
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useProjectActions()
   const isSidebarOpen = openSidebar === "projects"
-  const isAiSidebarOpen = openSidebar === "ai"
 
   return (
     // No-op without an active project, so the editor home never joins a room.
@@ -76,15 +74,6 @@ export function EditorShell({
             onShare={activeProject ? () => setIsShareOpen(true) : undefined}
             onOpenTemplates={
               activeProject ? () => setIsTemplatesOpen(true) : undefined
-            }
-            isAiSidebarOpen={isAiSidebarOpen}
-            onToggleAiSidebar={
-              activeProject
-                ? () =>
-                    setOpenSidebar((current) =>
-                      current === "ai" ? null : "ai"
-                    )
-                : undefined
             }
             // Room-scoped, so it is only mounted where a room exists — the editor
             // home renders the navbar without it, exactly as before.
@@ -116,23 +105,19 @@ export function EditorShell({
           ) : null}
 
           {activeProject ? (
-            <>
-              {/* React Flow needs a sized parent, so the canvas fills `main`. */}
-              <main aria-label="Canvas" className="relative flex-1 bg-page">
-                <CanvasSurface
-                  projectId={activeProject.id}
-                  isTemplatesOpen={isTemplatesOpen}
-                  onTemplatesOpenChange={setIsTemplatesOpen}
-                >
-                  <AgentLaunchImportController
-                    launchId={launchId}
-                    roomId={activeProject.id}
-                  />
-                </CanvasSurface>
-              </main>
-
-              <AiSidebar isOpen={isAiSidebarOpen} />
-            </>
+            /* React Flow needs a sized parent, so the canvas fills `main`. */
+            <main aria-label="Canvas" className="relative flex-1 bg-page">
+              <CanvasSurface
+                projectId={activeProject.id}
+                isTemplatesOpen={isTemplatesOpen}
+                onTemplatesOpenChange={setIsTemplatesOpen}
+              >
+                <AgentLaunchImportController
+                  launchId={launchId}
+                  roomId={activeProject.id}
+                />
+              </CanvasSurface>
+            </main>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">
               <div className="flex max-w-md flex-col items-center gap-3 text-center">

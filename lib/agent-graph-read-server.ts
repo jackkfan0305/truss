@@ -1,8 +1,8 @@
 import { canvasFingerprint, projectCanvasToAgentGraph } from "@/lib/agent-graph";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
-import type { DesignContext } from "@/lib/design-plan";
 import type { Authorization } from "@/lib/project-access";
 import { jsonError } from "@/lib/project-requests";
+import type { DesignContext } from "@/types/canvas";
 
 export interface AgentGraphReadDependencies {
   authorizeProject: (

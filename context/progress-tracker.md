@@ -8,6 +8,35 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `remove-server-side-ai` complete (issue #26). Truss now runs no model of its
+  own — see `docs/adr/0001-no-server-side-ai.md`. Deleted: the AI sidebar with
+  its transcript and composer, `/api/ai/chat`, `/api/ai/orchestrate` and its
+  token route, the orchestrator loop, run tokens, the activity stream, the
+  design run observer, spec generation and download, and all three Trigger.dev
+  tasks with `trigger.config.ts`. `TaskRun`, `ProjectSpec`, and
+  `AiRequestRateLimit` are dropped by migration
+  `20260830120000_drop_server_side_ai`. `ai`, `@ai-sdk/google`, and the three
+  `@trigger.dev/*` packages are out of `package.json`.
+  - What survives is everything the terminal agent uses. `lib/ai-activity.ts`
+    keeps `setAiPresence`/`clearAiPresence` for the paced draw and lost
+    `publishAiStatus`; `lib/canvas-read.ts` keeps only `readCanvas` and no
+    longer imports a Trigger logger; `types/tasks.ts` is down to the agent
+    identity and the pacing constants.
+  - `isThinking` is gone from the global `Liveblocks` presence interface, so the
+    cursor badge no longer renders a spinner.
+  - `lib/design-plan.ts` went too: 805 lines of plan parsing, action application
+    and cursor targeting that only the removed tier called. Its one live
+    export, `DesignContext`, moved to `types/canvas.ts` beside the node and edge
+    shapes it is made of.
+  - `TRIGGER_SECRET_KEY` and its `_PROD` twin are out of the env-key verifier,
+    which now pins the rule with `BLOB_READ_WRITE_TOKEN`. `push-vercel-env.ts`
+    is the only caller of `resolveEnvKeys` left.
+  - Ten verify scripts covering the removed surfaces are deleted;
+    `verify-editor-controls.tsx` lost its AI-sidebar and right-toggle
+    assertions and gained one that no right toggle renders at all.
+  - Gates: `typecheck`, `lint`, `verify:unit`, and `build` all exit 0. The build
+    lists no `/api/ai` route.
+
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
   ID the create dialog builds, retries once per 409 collision, then POSTs

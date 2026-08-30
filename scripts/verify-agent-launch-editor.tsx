@@ -461,7 +461,7 @@ async function checkStorageMethodsAreGuardedAndNoLaunchDoesNotTouchStorage(): Pr
 
 async function checkNeutralFailureUiAndUnchangedManualSidebar(): Promise<void> {
   assert.equal(initialEditorSidebar(), null, "normal editor visits start closed");
-  assert.equal(initialEditorSidebar(), null, "launch imports do not open AI");
+  assert.equal(initialEditorSidebar(), null, "launch imports do not open a sidebar");
 
   const failure = renderToStaticMarkup(
     <AgentLaunchImportFailure

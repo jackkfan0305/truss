@@ -1,7 +1,6 @@
 "use client";
 
 import { useViewport } from "@xyflow/react";
-import { Loader2 } from "lucide-react";
 
 import { useCollaborators } from "@/hooks/use-collaborators";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
@@ -96,14 +95,6 @@ export function LiveCursors() {
                   style={{ backgroundColor: info.color }}
                 >
                   {info.name}
-                  {/*
-                    24-ai-presence-state: a participant with a generation in flight
-                    spins in their own badge, so the work is attributed to whoever
-                    (or whatever) started it. Absent presence is not thinking.
-                  */}
-                  {presence.isThinking ? (
-                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                  ) : null}
                 </span>
               </div>
             </div>

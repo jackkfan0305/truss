@@ -4,12 +4,9 @@
  * production one.
  *
  * Nothing at runtime reads this — application code just reads
- * `LIVEBLOCKS_SECRET_KEY`, `TRIGGER_SECRET_KEY`, and friends, and gets whatever
- * the environment it is running in was given. The resolution happens once per
- * deploy, in the two places that populate those environments:
- * `scripts/push-vercel-env.ts` and the `syncEnvVars` extension in
- * `trigger.config.ts`. They share this function so a newly added key cannot
- * follow the rule in one and not the other.
+ * `LIVEBLOCKS_SECRET_KEY` and friends, and gets whatever the environment it is
+ * running in was given. The resolution happens once per deploy, in
+ * `scripts/push-vercel-env.ts`.
  */
 export function resolveEnvKeys(
   values: Readonly<Record<string, string>>,

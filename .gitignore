@@ -55,8 +55,6 @@ next-env.d.ts
 /.codex/
 /agent/
 
-# The skills themselves are vendored, one copy, under .agents/skills/.
-# skills-lock.json stays as the provenance record for everything that came
-# from upstream, but the files are tracked so a fresh worktree has them
-# without a fetch — re-fetching left the three checkouts holding different
-# sets. Refresh with `npx skills`, then commit the diff like any other change.
+# The skills are local to each developer's checkout. Keep the lock file tracked
+# as the provenance record, but never commit the installed skill files.
+/.agents/skills/

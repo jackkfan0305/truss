@@ -6,6 +6,18 @@
         "mcp"
       ],
       "command": "npx"
+    },
+    "agent-browser": {
+      "command": "agent-browser",
+      "args": ["mcp"],
+      "env": {
+        "AGENT_BROWSER_SESSION": "truss",
+        "AGENT_BROWSER_RESTORE": "1"
+      }
+    },
+    "truss-diagram": {
+      "command": "node",
+      "args": ["/Users/jackfan/truss/.agents/skills/truss-diagram/scripts/mcp-server.mjs"]
     }
   }
 }

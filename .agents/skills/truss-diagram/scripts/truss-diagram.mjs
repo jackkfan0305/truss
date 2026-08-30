@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 
 import {
   clearCredential,
@@ -839,8 +841,17 @@ async function main() {
   await runHeadlessCreateOp(options, argv);
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === new URL(`file://${process.argv[1]}`).href
-)
+// Resolve symlinks and encode the path properly: ESM sets import.meta.url from the
+// module's realpath, so an invocation through a symlinked skill directory (a
+// .claude/skills/* link into .agents/skills/*) would otherwise fail this check and
+// exit 0 having done nothing.
+if (process.argv[1] && import.meta.url === entrypointUrl(process.argv[1]))
   await main();
+
+function entrypointUrl(argvPath) {
+  try {
+    return pathToFileURL(realpathSync(argvPath)).href;
+  } catch {
+    return pathToFileURL(argvPath).href;
+  }
+}

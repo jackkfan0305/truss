@@ -5,7 +5,14 @@ import { dirname, join } from "node:path";
 // Shared agent-auth contract: ~/.truss/credentials.json, dir 0700, file 0600,
 // keyed by normalized origin. Plaintext tokens live only here and on the
 // server's SHA-256 index — never logged, never echoed back.
-const CREDENTIALS_PATH = join(homedir(), ".truss", "credentials.json");
+//
+// Resolved fresh on every call rather than hoisted to a module-level const:
+// this runs inside a long-lived MCP server process now, not a fresh process
+// per invocation, and a fresh lookup is what lets tests isolate HOME per case
+// within that one process without an import-order footgun.
+function credentialsPath() {
+  return join(homedir(), ".truss", "credentials.json");
+}
 const CREDENTIALS_VERSION = 1;
 
 function emptyStore() {
@@ -29,7 +36,7 @@ function isValidStore(value) {
 async function readStore() {
   let raw;
   try {
-    raw = await readFile(CREDENTIALS_PATH, "utf8");
+    raw = await readFile(credentialsPath(), "utf8");
   } catch {
     return emptyStore();
   }
@@ -49,13 +56,14 @@ async function readStore() {
 // atomic, so a crash mid-write leaves the previous credential intact rather
 // than a truncated file the next run has to discard.
 async function writeStore(store) {
-  await mkdir(dirname(CREDENTIALS_PATH), { recursive: true, mode: 0o700 });
+  const credPath = credentialsPath();
+  await mkdir(dirname(credPath), { recursive: true, mode: 0o700 });
 
-  const tempPath = `${CREDENTIALS_PATH}.${process.pid}.tmp`;
+  const tempPath = `${credPath}.${process.pid}.tmp`;
 
   try {
     await writeFile(tempPath, JSON.stringify(store, null, 2), { mode: 0o600 });
-    await rename(tempPath, CREDENTIALS_PATH);
+    await rename(tempPath, credPath);
   } catch (error) {
     await rm(tempPath, { force: true });
     throw error;

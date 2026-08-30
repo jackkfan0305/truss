@@ -6,6 +6,10 @@
         "mcp"
       ],
       "command": "npx"
+    },
+    "truss-diagram": {
+      "command": "node",
+      "args": [".agents/skills/truss-diagram/scripts/mcp-server.mjs"]
     }
   }
 }

@@ -8,7 +8,7 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 
 ## Goals
 
-1. Let authenticated users create and manage architecture projects.
+1. Let authenticated users create and manage architecture diagrams.
 2. Provide a collaborative real-time canvas for system design.
 3. Let users import prebuilt starter system designs into the canvas.
 4. Let a calling agent create, read, edit, and delete diagrams over MCP.
@@ -17,8 +17,8 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 ## Core User Flow
 
 1. User signs in.
-2. User creates or selects a project.
-3. User enters the project workspace.
+2. User creates or selects a diagram.
+3. User enters the diagram workspace.
 4. User optionally imports a starter system design template into the canvas.
 5. User asks their terminal agent to draw or extend the system design.
 6. The agent writes nodes and edges into the shared canvas.
@@ -26,11 +26,11 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 
 ## Features
 
-### Authentication and Projects
+### Authentication and Diagrams
 
 - User sign-in and route protection.
-- Project creation, ownership, and collaborator access.
-- Project list and workspace navigation.
+- Diagram creation, ownership, and collaborator access.
+- Diagram list and workspace navigation.
 
 ### Collaborative Canvas
 
@@ -56,12 +56,12 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 ### In Scope
 
 - Authentication and route protection
-- Project creation and ownership
-- Collaborator access by project
+- Diagram creation and ownership
+- Collaborator access by diagram
 - Starter system design template library and import
 - Real-time shared canvas with nodes, edges, and presence
 - Agent-driven diagram create, read, edit, and delete over MCP
-- Persistent storage for project metadata and canvas snapshots
+- Persistent storage for diagram metadata and canvas snapshots
 
 ### Out Of Scope
 
@@ -73,8 +73,8 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 
 ## Success Criteria
 
-1. A signed-in user can create and open a project.
+1. A signed-in user can create and open a diagram.
 2. Multiple users can collaborate in the same canvas simultaneously.
 3. A user can import a prebuilt starter design into the canvas.
 4. A calling agent can create, read, edit, and delete a diagram in the shared room.
-5. Project metadata and canvas snapshots are stored in the correct layers.
+5. Diagram metadata and canvas snapshots are stored in the correct layers.

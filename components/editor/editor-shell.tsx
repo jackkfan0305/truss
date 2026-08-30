@@ -9,54 +9,60 @@ import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
-import { ProjectDialogs } from "@/components/editor/project-dialogs"
-import { ProjectSidebar } from "@/components/editor/project-sidebar"
+import { DiagramDialogs } from "@/components/editor/diagram-dialogs"
+import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
 import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
-import { useProjectActions } from "@/hooks/use-project-actions"
+import { useDiagramActions } from "@/hooks/use-diagram-actions"
 import {
   initialEditorSidebar,
   type EditorSidebar,
 } from "@/lib/editor-sidebar-state"
-import type { ProjectAccess, ProjectSummary } from "@/types/project"
+import type { DiagramAccess, DiagramSummary } from "@/types/diagram"
 
 interface EditorShellProps {
-  ownedProjects: ProjectSummary[]
-  sharedProjects: ProjectSummary[]
+  ownedDiagrams: DiagramSummary[]
+  sharedDiagrams: DiagramSummary[]
   /**
    * Set on `/editor/[roomId]`, absent on the editor home. Its presence is what
    * switches the shell from the create prompt to the workspace layout.
    */
-  activeProject?: ProjectAccess
-  /** An opaque launch UUID, only accepted for an already-authorized project. */
+  activeDiagram?: DiagramAccess
+  /** An opaque launch UUID, only accepted for an already-authorized diagram. */
   launchId?: string
 }
 
 type OpenSidebar = EditorSidebar
 
 /**
- * Owns the sidebar open/close state for the editor workspace and the project
+ * Owns the sidebar open/close state for the editor workspace and the diagram
  * dialog state. The chrome components stay presentational — see the
  * architecture notes in context/progress-tracker.md.
  */
 export function EditorShell({
-  ownedProjects,
-  sharedProjects,
-  activeProject,
+  ownedDiagrams,
+  sharedDiagrams,
+  activeDiagram,
   launchId,
 }: EditorShellProps) {
   const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
     () => initialEditorSidebar()
   )
   const [isShareOpen, setIsShareOpen] = useState(false)
+  /*
+   * Sharing hangs off the storyboard, so a standalone diagram — every
+   * agent-created one, until it is placed on a board — has nobody to invite
+   * and no Share button. See CONTEXT.md on Collaborator.
+   */
+  const shareStoryboardId = activeDiagram?.storyboardId ?? null
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
-  const actions = useProjectActions()
-  const isSidebarOpen = openSidebar === "projects"
+  const actions = useDiagramActions()
+  const isSidebarOpen = openSidebar === "diagrams"
 
   return (
-    // No-op without an active project, so the editor home never joins a room.
-    <CanvasRoom roomId={activeProject?.id}>
+    // No-op without an active diagram, so the editor home never joins a room.
+    <CanvasRoom roomId={activeDiagram?.id}>
       {/*
         Wraps the navbar as well as the canvas: the save indicator sits in the
         navbar but is driven from inside the canvas (21-canvas-autosave).
@@ -67,29 +73,29 @@ export function EditorShell({
             isSidebarOpen={isSidebarOpen}
             onToggleSidebar={() =>
               setOpenSidebar((current) =>
-                current === "projects" ? null : "projects"
+                current === "diagrams" ? null : "diagrams"
               )
             }
-            projectName={activeProject?.name}
-            onShare={activeProject ? () => setIsShareOpen(true) : undefined}
+            diagramName={activeDiagram?.name}
+            onShare={shareStoryboardId ? () => setIsShareOpen(true) : undefined}
             onOpenTemplates={
-              activeProject ? () => setIsTemplatesOpen(true) : undefined
+              activeDiagram ? () => setIsTemplatesOpen(true) : undefined
             }
             // Room-scoped, so it is only mounted where a room exists — the editor
             // home renders the navbar without it, exactly as before.
-            presence={activeProject ? <PresenceAvatars /> : undefined}
-            saveStatus={activeProject ? <SaveStatusButton /> : undefined}
+            presence={activeDiagram ? <PresenceAvatars /> : undefined}
+            saveStatus={activeDiagram ? <SaveStatusButton /> : undefined}
             profile={<UserButton />}
           />
 
-          <ProjectSidebar
+          <DiagramSidebar
             isOpen={isSidebarOpen}
-            ownedProjects={ownedProjects}
-            sharedProjects={sharedProjects}
-            onCreateProject={actions.openCreate}
-            onRenameProject={actions.openRename}
-            onDeleteProject={actions.openDelete}
-            activeProjectId={activeProject?.id}
+            ownedDiagrams={ownedDiagrams}
+            sharedDiagrams={sharedDiagrams}
+            onCreateDiagram={actions.openCreate}
+            onRenameDiagram={actions.openRename}
+            onDeleteDiagram={actions.openDelete}
+            activeDiagramId={activeDiagram?.id}
           />
 
           {/*
@@ -104,17 +110,17 @@ export function EditorShell({
             />
           ) : null}
 
-          {activeProject ? (
+          {activeDiagram ? (
             /* React Flow needs a sized parent, so the canvas fills `main`. */
             <main aria-label="Canvas" className="relative flex-1 bg-page">
               <CanvasSurface
-                projectId={activeProject.id}
+                diagramId={activeDiagram.id}
                 isTemplatesOpen={isTemplatesOpen}
                 onTemplatesOpenChange={setIsTemplatesOpen}
               >
                 <AgentLaunchImportController
                   launchId={launchId}
-                  roomId={activeProject.id}
+                  roomId={activeDiagram.id}
                 />
               </CanvasSurface>
             </main>
@@ -122,24 +128,25 @@ export function EditorShell({
             <main className="flex flex-1 items-center justify-center bg-page px-6">
               <div className="flex max-w-md flex-col items-center gap-3 text-center">
                 <h1 className="text-2xl font-medium tracking-tight text-copy-primary">
-                  Create a project or open an existing one
+                  Create a diagram or open an existing one
                 </h1>
                 <p className="text-sm text-copy-muted">
-                  Start a new architecture workspace, or choose a project from
+                  Start a new architecture workspace, or choose a diagram from
                   the sidebar.
                 </p>
                 <Button className="mt-3" size="lg" onClick={actions.openCreate}>
                   <Plus className="h-4 w-4" />
-                  New Project
+                  New Diagram
                 </Button>
               </div>
             </main>
           )}
-          <ProjectDialogs actions={actions} />
+          <DiagramDialogs actions={actions} />
 
-          {activeProject ? (
+          {activeDiagram && shareStoryboardId ? (
             <ShareDialog
-              project={activeProject}
+              diagram={activeDiagram}
+              storyboardId={shareStoryboardId}
               open={isShareOpen}
               onOpenChange={setIsShareOpen}
             />

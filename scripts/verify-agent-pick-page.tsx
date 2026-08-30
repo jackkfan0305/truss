@@ -6,7 +6,7 @@ import { AgentPickStatus } from "../components/agent/agent-pick-page";
 import {
   agentPickResumePath,
   captureAgentPick,
-  deleteAgentPickProject,
+  deleteAgentPickDiagram,
   getStoredAgentPick,
   redirectToSignInOnce,
   runAgentPickOperation,
@@ -32,10 +32,10 @@ const editPayload = {
 };
 const deletePayload = { ...editPayload, op: "delete" as const };
 
-// Realistic extra fields a real /api/projects row carries beyond {id, name}.
+// Realistic extra fields a real /api/diagrams row carries beyond {id, name}.
 // A minimal fixture can't catch a regression in the id/name-only filter
 // because there is nothing extra to leak; deepEqual passes either way.
-const enrichedProjectFields = {
+const enrichedDiagramFields = {
   ownerId: "user_9f2a",
   description: "Payments checkout flow",
   createdAt: "2024-01-01T00:00:00.000Z",
@@ -180,20 +180,20 @@ function fakeFetch(
 async function checkEditFlowAppliesOnFirstFingerprintMatch(): Promise<void> {
   const calls: Call[] = [];
   const fetchImpl = fakeFetch(calls, (input) => {
-    if (input === "/api/projects") {
+    if (input === "/api/diagrams") {
       return Response.json({
-        projects: [{ id: "p1", name: "Checkout", ...enrichedProjectFields }],
+        diagrams: [{ id: "p1", name: "Checkout", ...enrichedDiagramFields }],
       });
     }
     if (input.startsWith("http://127.0.0.1:")) {
-      const body: { projectId?: string } = JSON.parse(
+      const body: { diagramId?: string } = JSON.parse(
         (calls.at(-1) as Call).body ?? "{}",
       );
-      return body.projectId
+      return body.diagramId
         ? Response.json({ desiredGraph: { version: 1, nodes: [], edges: [] } })
-        : Response.json({ projectId: "p1" });
+        : Response.json({ diagramId: "p1" });
     }
-    if (input === "/api/projects/p1/agent-graph") {
+    if (input === "/api/diagrams/p1/agent-graph") {
       return Response.json({
         graph: { version: 1, nodes: [], edges: [] },
         opaqueNodeIds: [],
@@ -201,36 +201,36 @@ async function checkEditFlowAppliesOnFirstFingerprintMatch(): Promise<void> {
         fingerprint: "f".repeat(64),
       });
     }
-    if (input === "/api/projects/p1/agent-graph-edit") {
+    if (input === "/api/diagrams/p1/agent-graph-edit") {
       return Response.json({ applied: true }, { status: 200 });
     }
     throw new Error(`Unexpected request: ${input}`);
   });
 
   const result = await runAgentPickOperation(editPayload, { fetch: fetchImpl });
-  assert.deepEqual(result, { kind: "redirect", projectId: "p1" });
+  assert.deepEqual(result, { kind: "redirect", diagramId: "p1" });
 
   assert.deepEqual(
     calls.map((call) => call.input),
     [
-      "/api/projects",
+      "/api/diagrams",
       "http://127.0.0.1:51234/",
-      "/api/projects/p1/agent-graph",
+      "/api/diagrams/p1/agent-graph",
       "http://127.0.0.1:51234/",
-      "/api/projects/p1/agent-graph-edit",
+      "/api/diagrams/p1/agent-graph-edit",
     ],
   );
 
   const firstCallbackBody = JSON.parse(calls[1].body ?? "{}");
-  assert.deepEqual(Object.keys(firstCallbackBody).sort(), ["nonce", "op", "projects"]);
+  assert.deepEqual(Object.keys(firstCallbackBody).sort(), ["diagrams", "nonce", "op"]);
   assert.deepEqual(
-    firstCallbackBody.projects,
+    firstCallbackBody.diagrams,
     [{ id: "p1", name: "Checkout" }],
-    "the fixture carries owner/description/timestamps but only id and name may reach the loopback",
+    "the fixture carries owner and timestamps but only id and name may reach the loopback",
   );
-  for (const project of firstCallbackBody.projects as Record<string, unknown>[]) {
+  for (const diagram of firstCallbackBody.diagrams as Record<string, unknown>[]) {
     assert.deepEqual(
-      Object.keys(project).sort(),
+      Object.keys(diagram).sort(),
       ["id", "name"],
       "no field beyond id and name may reach the loopback",
     );
@@ -241,18 +241,18 @@ async function checkEditFlowRetriesOnceOnStaleFingerprintThenFails(): Promise<vo
   const calls: Call[] = [];
   let editAttempts = 0;
   const fetchImpl = fakeFetch(calls, (input) => {
-    if (input === "/api/projects") {
-      return Response.json({ projects: [{ id: "p1", name: "Checkout" }] });
+    if (input === "/api/diagrams") {
+      return Response.json({ diagrams: [{ id: "p1", name: "Checkout" }] });
     }
     if (input.startsWith("http://127.0.0.1:")) {
-      const lastBody: { projectId?: string } = JSON.parse(
+      const lastBody: { diagramId?: string } = JSON.parse(
         (calls.at(-1) as Call).body ?? "{}",
       );
-      return lastBody.projectId
+      return lastBody.diagramId
         ? Response.json({ desiredGraph: { version: 1, nodes: [], edges: [] } })
-        : Response.json({ projectId: "p1" });
+        : Response.json({ diagramId: "p1" });
     }
-    if (input === "/api/projects/p1/agent-graph") {
+    if (input === "/api/diagrams/p1/agent-graph") {
       return Response.json({
         graph: { version: 1, nodes: [], edges: [] },
         opaqueNodeIds: [],
@@ -260,7 +260,7 @@ async function checkEditFlowRetriesOnceOnStaleFingerprintThenFails(): Promise<vo
         fingerprint: "f".repeat(64),
       });
     }
-    if (input === "/api/projects/p1/agent-graph-edit") {
+    if (input === "/api/diagrams/p1/agent-graph-edit") {
       editAttempts += 1;
       return new Response(null, { status: 409 });
     }
@@ -273,42 +273,42 @@ async function checkEditFlowRetriesOnceOnStaleFingerprintThenFails(): Promise<vo
   assert.match((result as { message: string }).message, /actively edited/);
 }
 
-// FIX 3: the agent must not be able to make up a projectId. A response that
-// names an id outside the listed projects must fail closed rather than flow
+// FIX 3: the agent must not be able to make up a diagramId. A response that
+// names an id outside the listed diagrams must fail closed rather than flow
 // into the edit read/apply loop or (worse) a delete confirmation dialog with
 // a blank name next to a live Delete button.
-async function checkUnrecognizedProjectIdIsRejected(): Promise<void> {
+async function checkUnrecognizedDiagramIdIsRejected(): Promise<void> {
   const editCalls: Call[] = [];
   const editFetch = fakeFetch(editCalls, (input) => {
-    if (input === "/api/projects") {
-      return Response.json({ projects: [{ id: "p1", name: "Checkout" }] });
+    if (input === "/api/diagrams") {
+      return Response.json({ diagrams: [{ id: "p1", name: "Checkout" }] });
     }
     if (input.startsWith("http://127.0.0.1:")) {
-      return Response.json({ projectId: "not-in-the-list" });
+      return Response.json({ diagramId: "not-in-the-list" });
     }
     throw new Error(`Unexpected request: ${input}`);
   });
 
   const editResult = await runAgentPickOperation(editPayload, { fetch: editFetch });
-  assert.equal(editResult.kind, "failed", "an unrecognized projectId fails the edit op");
+  assert.equal(editResult.kind, "failed", "an unrecognized diagramId fails the edit op");
   assert.equal(
     editCalls.some((call) => call.input.includes("/agent-graph")),
     false,
-    "an unrecognized projectId must never reach the graph read/apply endpoints",
+    "an unrecognized diagramId must never reach the graph read/apply endpoints",
   );
 
   const deleteCalls: Call[] = [];
   const deleteFetch = fakeFetch(deleteCalls, (input) => {
-    if (input === "/api/projects") {
+    if (input === "/api/diagrams") {
       return Response.json({
-        projects: [
+        diagrams: [
           { id: "p1", name: "Checkout" },
           { id: "p2", name: "Billing" },
         ],
       });
     }
     if (input.startsWith("http://127.0.0.1:")) {
-      return Response.json({ projectId: "not-in-the-list" });
+      return Response.json({ diagramId: "not-in-the-list" });
     }
     throw new Error(`Unexpected request: ${input}`);
   });
@@ -317,13 +317,13 @@ async function checkUnrecognizedProjectIdIsRejected(): Promise<void> {
   assert.equal(
     deleteResult.kind,
     "failed",
-    "an unrecognized projectId must never reach confirm-delete with a blank name",
+    "an unrecognized diagramId must never reach confirm-delete with a blank name",
   );
 
-  const missingProjectIdCalls: Call[] = [];
-  const missingProjectIdFetch = fakeFetch(missingProjectIdCalls, (input) => {
-    if (input === "/api/projects") {
-      return Response.json({ projects: [{ id: "p1", name: "Checkout" }] });
+  const missingDiagramIdCalls: Call[] = [];
+  const missingDiagramIdFetch = fakeFetch(missingDiagramIdCalls, (input) => {
+    if (input === "/api/diagrams") {
+      return Response.json({ diagrams: [{ id: "p1", name: "Checkout" }] });
     }
     if (input.startsWith("http://127.0.0.1:")) {
       return Response.json({});
@@ -331,30 +331,30 @@ async function checkUnrecognizedProjectIdIsRejected(): Promise<void> {
     throw new Error(`Unexpected request: ${input}`);
   });
   const missingResult = await runAgentPickOperation(editPayload, {
-    fetch: missingProjectIdFetch,
+    fetch: missingDiagramIdFetch,
   });
-  assert.equal(missingResult.kind, "failed", "a response with no projectId fails closed");
+  assert.equal(missingResult.kind, "failed", "a response with no diagramId fails closed");
 }
 
 async function checkDeleteFlowConfirmsWithoutCallingDelete(): Promise<void> {
   const calls: Call[] = [];
   const fetchImpl = fakeFetch(calls, (input) => {
-    if (input === "/api/projects") {
+    if (input === "/api/diagrams") {
       return Response.json({
-        projects: [
+        diagrams: [
           { id: "p1", name: "Checkout" },
           { id: "p2", name: "Billing" },
         ],
       });
     }
     if (input.startsWith("http://127.0.0.1:")) {
-      return Response.json({ projectId: "p2" });
+      return Response.json({ diagramId: "p2" });
     }
     throw new Error(`Unexpected request: ${input}`);
   });
 
   const result = await runAgentPickOperation(deletePayload, { fetch: fetchImpl });
-  assert.deepEqual(result, { kind: "confirm-delete", projectId: "p2", projectName: "Billing" });
+  assert.deepEqual(result, { kind: "confirm-delete", diagramId: "p2", diagramName: "Billing" });
   assert.equal(
     calls.some((call) => call.method === "DELETE"),
     false,
@@ -365,7 +365,7 @@ async function checkDeleteFlowConfirmsWithoutCallingDelete(): Promise<void> {
     <AgentPickStatus
       state={{
         kind: "confirm-delete",
-        projectName: "Billing",
+        diagramName: "Billing",
         onCancel: () => undefined,
         onDelete: () => undefined,
       }}
@@ -376,16 +376,16 @@ async function checkDeleteFlowConfirmsWithoutCallingDelete(): Promise<void> {
   assert.match(markup, /<button[^>]*type="button"[^>]*>Delete<\/button>/);
 }
 
-async function checkDeleteAgentPickProjectCallsDeleteOnlyWhenInvoked(): Promise<void> {
+async function checkDeleteAgentPickDiagramCallsDeleteOnlyWhenInvoked(): Promise<void> {
   const calls: Call[] = [];
   const fetchImpl = fakeFetch(calls, () => new Response(null, { status: 204 }));
 
-  const outcome = await deleteAgentPickProject("p2", { fetch: fetchImpl });
+  const outcome = await deleteAgentPickDiagram("p2", { fetch: fetchImpl });
   assert.equal(outcome, "done");
-  assert.deepEqual(calls, [{ input: "/api/projects/p2", method: "DELETE", body: undefined }]);
+  assert.deepEqual(calls, [{ input: "/api/diagrams/p2", method: "DELETE", body: undefined }]);
 
   const failingFetch = fakeFetch([], () => new Response(null, { status: 500 }));
-  const failed = await deleteAgentPickProject("p2", { fetch: failingFetch });
+  const failed = await deleteAgentPickDiagram("p2", { fetch: failingFetch });
   assert.equal(failed, "failed");
 }
 
@@ -393,7 +393,7 @@ async function checkStrictModeDeduplication(): Promise<void> {
   let starts = 0;
   const operation = async (): Promise<AgentPickResult> => {
     starts += 1;
-    return { kind: "redirect", projectId: "p1" };
+    return { kind: "redirect", diagramId: "p1" };
   };
 
   const first = startAgentPickOperationOnce(pickId, operation);
@@ -429,14 +429,14 @@ async function checkDeleteDeduplication(): Promise<void> {
   await retry;
   assert.equal(starts, 2);
 
-  // A different project id must not share the other's in-flight promise.
+  // A different diagram id must not share the other's in-flight promise.
   let otherStarts = 0;
   const otherOperation = async (): Promise<"done" | "failed"> => {
     otherStarts += 1;
     return "done";
   };
   const concurrentOther = startAgentPickDeleteOnce("p3", otherOperation);
-  assert.notEqual(concurrentOther, retry, "distinct project ids get distinct in-flight deletes");
+  assert.notEqual(concurrentOther, retry, "distinct diagram ids get distinct in-flight deletes");
   await concurrentOther;
   assert.equal(otherStarts, 1);
 }
@@ -479,9 +479,9 @@ async function main(): Promise<void> {
   checkRedirectToSignInFiresExactlyOnce();
   await checkEditFlowAppliesOnFirstFingerprintMatch();
   await checkEditFlowRetriesOnceOnStaleFingerprintThenFails();
-  await checkUnrecognizedProjectIdIsRejected();
+  await checkUnrecognizedDiagramIdIsRejected();
   await checkDeleteFlowConfirmsWithoutCallingDelete();
-  await checkDeleteAgentPickProjectCallsDeleteOnlyWhenInvoked();
+  await checkDeleteAgentPickDiagramCallsDeleteOnlyWhenInvoked();
   await checkStrictModeDeduplication();
   await checkDeleteDeduplication();
   checkStatusMarkup();

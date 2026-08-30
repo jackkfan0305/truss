@@ -10,7 +10,7 @@
     --font-mono: var(--font-geist-mono);
     --font-heading: var(--font-geist-sans);
 
-    /* Project surfaces */
+    /* Truss surfaces */
     /*
      * Named `page`, not `base`: a `--color-base` entry would register `base` as
      * a color and make Tailwind's built-in `text-base` paint text
@@ -23,23 +23,23 @@
     --color-elevated: var(--bg-elevated);
     --color-subtle: var(--bg-subtle);
 
-    /* Project borders */
+    /* Truss borders */
     --color-surface-border: var(--border-default);
     --color-surface-border-subtle: var(--border-subtle);
 
-    /* Project text */
+    /* Truss text */
     --color-copy-primary: var(--text-primary);
     --color-copy-secondary: var(--text-secondary);
     --color-copy-muted: var(--text-muted);
     --color-copy-faint: var(--text-faint);
 
-    /* Project accents */
+    /* Truss accents */
     --color-brand: var(--accent-primary);
     --color-accent-dim: var(--accent-primary-dim);
     --color-ai: var(--accent-ai);
     --color-ai-text: var(--accent-ai-text);
 
-    /* Project states */
+    /* Truss states */
     --color-state-error: var(--state-error);
     --color-state-success: var(--state-success);
     --color-state-warning: var(--state-warning);

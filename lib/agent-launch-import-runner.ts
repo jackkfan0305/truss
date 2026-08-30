@@ -11,7 +11,7 @@ export interface AgentLaunchImportDependencies {
   save: (record: AgentLaunchRecord) => void;
   remove: () => void;
   importGraph: (
-    projectId: string,
+    diagramId: string,
     record: Pick<AgentLaunchRecord, "launchId" | "graph">,
   ) => Promise<Response>;
   scrubQuery: () => void;
@@ -51,9 +51,9 @@ function fail(
 function canImport(record: AgentLaunchRecord, roomId: string, launchId: string): boolean {
   return (
     record.launchId === launchId &&
-    record.projectId === roomId &&
-    Boolean(record.projectId) &&
-    (record.stage === "project-created" ||
+    record.diagramId === roomId &&
+    Boolean(record.diagramId) &&
+    (record.stage === "diagram-created" ||
       record.stage === "importing-graph" ||
       record.stage === "failed")
   );

@@ -13,9 +13,9 @@ import {
 import { AgentLaunchHydrationGate } from "../components/app/clerk-provider-gate";
 import {
   captureAgentLaunch,
-  createAgentLaunchProject,
+  createAgentLaunchDiagram,
   getStoredAgentLaunch,
-  startAgentLaunchProjectOnce,
+  startAgentLaunchDiagramOnce,
   type AgentLaunchStorage,
 } from "../lib/agent-launch-browser";
 import {
@@ -549,16 +549,16 @@ async function checkStrictModeDeduplication(): Promise<void> {
   let postCount = 0;
   const operation = async () => {
     postCount += 1;
-    return { ...createAgentLaunchRecord(payload), stage: "project-created" as const };
+    return { ...createAgentLaunchRecord(payload), stage: "diagram-created" as const };
   };
 
-  const first = startAgentLaunchProjectOnce(launchId, operation);
-  const second = startAgentLaunchProjectOnce(launchId, operation);
+  const first = startAgentLaunchDiagramOnce(launchId, operation);
+  const second = startAgentLaunchDiagramOnce(launchId, operation);
   assert.equal(first, second, "Strict Mode remounts share one in-tab operation");
   await Promise.all([first, second]);
   assert.equal(postCount, 1);
 
-  const retry = startAgentLaunchProjectOnce(launchId, operation);
+  const retry = startAgentLaunchDiagramOnce(launchId, operation);
   assert.notEqual(retry, first, "the settled launch leaves room for Retry");
   await retry;
   assert.equal(postCount, 2);
@@ -567,7 +567,7 @@ async function checkStrictModeDeduplication(): Promise<void> {
 async function checkRecovery(): Promise<void> {
   const storage = createStorage();
   const requests: Array<{ input: string; method: string; body?: string }> = [];
-  const recovered = await createAgentLaunchProject(createAgentLaunchRecord(payload), {
+  const recovered = await createAgentLaunchDiagram(createAgentLaunchRecord(payload), {
     storage,
     createSuffix: () => "a1b2c3",
     fetch: async (input, init) => {
@@ -581,21 +581,21 @@ async function checkRecovery(): Promise<void> {
       }
 
       return Response.json({
-        project: { id: "global-checkout-a1b2c3", name: "Global Checkout" },
+        diagram: { id: "global-checkout-a1b2c3", name: "Global Checkout" },
       });
     },
   });
 
-  assert.equal(recovered.stage, "project-created");
-  assert.equal(recovered.projectId, "global-checkout-a1b2c3");
+  assert.equal(recovered.stage, "diagram-created");
+  assert.equal(recovered.diagramId, "global-checkout-a1b2c3");
   assert.deepEqual(requests, [
     {
-      input: "/api/projects",
+      input: "/api/diagrams",
       method: "POST",
       body: '{"id":"global-checkout-a1b2c3","name":"Global Checkout"}',
     },
     {
-      input: "/api/projects/global-checkout-a1b2c3",
+      input: "/api/diagrams/global-checkout-a1b2c3",
       method: "GET",
       body: undefined,
     },
@@ -606,7 +606,7 @@ async function checkPostResponseLossRecovery(): Promise<void> {
   for (const scenario of ["rejected", "unparseable"] as const) {
     const requests: Array<{ input: string; method: string }> = [];
     let suffixCalls = 0;
-    const recovered = await createAgentLaunchProject(createAgentLaunchRecord(payload), {
+    const recovered = await createAgentLaunchDiagram(createAgentLaunchRecord(payload), {
       storage: createStorage(),
       createSuffix: () => {
         suffixCalls += 1;
@@ -618,30 +618,30 @@ async function checkPostResponseLossRecovery(): Promise<void> {
 
         if (method === "POST") {
           if (scenario === "rejected") {
-            throw new Error("connection closed after project creation");
+            throw new Error("connection closed after diagram creation");
           }
 
           return new Response("not json", { status: 201 });
         }
 
         return Response.json({
-          project: { id: "global-checkout-a1b2c3", name: "Global Checkout" },
+          diagram: { id: "global-checkout-a1b2c3", name: "Global Checkout" },
         });
       },
     });
 
-    assert.equal(recovered.stage, "project-created", `${scenario} POST recovers`);
-    assert.equal(suffixCalls, 1, `${scenario} recovery does not create a second project`);
+    assert.equal(recovered.stage, "diagram-created", `${scenario} POST recovers`);
+    assert.equal(suffixCalls, 1, `${scenario} recovery does not create a second diagram`);
     assert.deepEqual(requests, [
-      { input: "/api/projects", method: "POST" },
-      { input: "/api/projects/global-checkout-a1b2c3", method: "GET" },
+      { input: "/api/diagrams", method: "POST" },
+      { input: "/api/diagrams/global-checkout-a1b2c3", method: "GET" },
     ]);
   }
 }
 
 async function checkFailuresAndSingleCollisionRetry(): Promise<void> {
   const storage = createStorage();
-  const unauthorized = await createAgentLaunchProject(createAgentLaunchRecord(payload), {
+  const unauthorized = await createAgentLaunchDiagram(createAgentLaunchRecord(payload), {
     storage,
     createSuffix: () => "a1b2c3",
     fetch: async () => Response.json({ error: "Unauthorized" }, { status: 401 }),
@@ -650,11 +650,11 @@ async function checkFailuresAndSingleCollisionRetry(): Promise<void> {
 
   let suffixCalls = 0;
   let postCalls = 0;
-  const collision = await createAgentLaunchProject(
+  const collision = await createAgentLaunchDiagram(
     {
       ...createAgentLaunchRecord(payload),
       stage: "failed",
-      projectId: "global-checkout-a1b2c3",
+      diagramId: "global-checkout-a1b2c3",
     },
     {
       storage: createStorage(),
@@ -688,7 +688,7 @@ function checkStatusMarkup(): void {
 
   const failedHtml = renderToStaticMarkup(
     <AgentLaunchStatus
-      record={{ ...captured, stage: "failed", error: "Could not create project." }}
+      record={{ ...captured, stage: "failed", error: "Could not create diagram." }}
       onRetry={() => undefined}
     />,
   );
@@ -702,7 +702,7 @@ async function checkPublicPathBoundary(): Promise<void> {
   assert.equal(isPublicPath("/agent/new"), true);
   assert.equal(isPublicPath("/agent/new/extra"), false);
   assert.equal(isPublicPath("/editor"), false);
-  assert.equal(isPublicPath("/api/projects"), false);
+  assert.equal(isPublicPath("/api/diagrams"), false);
   assert.equal(
     isClerkHandshakeBypassPath("/agent/new"),
     true,
@@ -711,7 +711,7 @@ async function checkPublicPathBoundary(): Promise<void> {
   assert.equal(isClerkHandshakeBypassPath("/agent/new/extra"), false);
   assert.equal(isClerkHandshakeBypassPath("/editor"), false);
   assert.equal(isClerkHandshakeBypassPath("/sign-in"), false);
-  assert.equal(isClerkHandshakeBypassPath("/api/projects"), false);
+  assert.equal(isClerkHandshakeBypassPath("/api/diagrams"), false);
 }
 
 async function main(): Promise<void> {

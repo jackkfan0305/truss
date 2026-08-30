@@ -44,8 +44,8 @@ function record(overrides: Partial<AgentLaunchRecord> = {}): AgentLaunchRecord {
         edges: [],
       },
     }),
-    projectId: roomId,
-    stage: "project-created",
+    diagramId: roomId,
+    stage: "diagram-created",
     ...overrides,
   };
 }
@@ -77,8 +77,8 @@ function createHarness(
       stored = null;
       events.push("remove");
     },
-    importGraph: async (projectId, launch) => {
-      events.push(`import:${projectId}:${launch.launchId}`);
+    importGraph: async (diagramId, launch) => {
+      events.push(`import:${diagramId}:${launch.launchId}`);
       if (response instanceof Error) {
         throw response;
       }
@@ -177,7 +177,7 @@ async function checkImportOnlyClearsAfterHttp200(): Promise<void> {
 async function checkTerminalAndMismatchedLaunchesDoNothing(): Promise<void> {
   for (const initial of [
     record({ stage: "graph-imported" }),
-    record({ projectId: "other-project-a1b2c3" }),
+    record({ diagramId: "other-diagram-a1b2c3" }),
     record({ launchId: "00000000-0000-4a00-8000-000000000099" }),
   ]) {
     const harness = createHarness(initial);
@@ -262,7 +262,7 @@ async function checkHookUsesOnlyTheOwnerImportRoute(): Promise<void> {
     await hook.flush();
     assert.deepEqual(requests, [
       {
-        url: `/api/projects/${roomId}/agent-launch-import`,
+        url: `/api/diagrams/${roomId}/agent-launch-import`,
         method: "POST",
         body: JSON.stringify({ launchId, graph: record().graph }),
       },

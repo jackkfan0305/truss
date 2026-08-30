@@ -1,5 +1,5 @@
 import { hashAgentToken, mintAgentToken } from "@/lib/agent-token";
-import { jsonError, readJsonBody } from "@/lib/project-requests";
+import { jsonError, readJsonBody } from "@/lib/api-requests";
 
 const MAX_LABEL_LENGTH = 80;
 const DEFAULT_LABEL = "Truss agent";

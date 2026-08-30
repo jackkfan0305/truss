@@ -135,12 +135,12 @@ assert.equal(
 );
 
 const captured = createAgentLaunchRecord(payload);
-const creating = withAgentLaunchStage(captured, "creating-project", {
-  projectId: "global-checkout-a1b2c3",
+const creating = withAgentLaunchStage(captured, "creating-diagram", {
+  diagramId: "global-checkout-a1b2c3",
 });
 assert.equal(captured.stage, "captured", "the original record is immutable");
-assert.equal(creating.stage, "creating-project");
-assert.equal(creating.projectId, "global-checkout-a1b2c3");
+assert.equal(creating.stage, "creating-diagram");
+assert.equal(creating.diagramId, "global-checkout-a1b2c3");
 assert.deepEqual(parseAgentLaunchRecord(JSON.stringify(creating)), creating);
 assert.equal(parseAgentLaunchRecord("{}"), null);
 assert.equal(
@@ -150,25 +150,25 @@ assert.equal(
 );
 
 const allowedTransitions: Record<AgentLaunchStage, readonly AgentLaunchStage[]> = {
-  captured: ["creating-project", "failed"],
-  "creating-project": ["project-created", "failed"],
-  "project-created": ["importing-graph", "failed"],
+  captured: ["creating-diagram", "failed"],
+  "creating-diagram": ["diagram-created", "failed"],
+  "diagram-created": ["importing-graph", "failed"],
   "importing-graph": ["graph-imported", "failed"],
   "graph-imported": [],
-  failed: ["creating-project", "importing-graph", "failed"],
+  failed: ["creating-diagram", "importing-graph", "failed"],
 };
 
 const records: Record<AgentLaunchStage, ReturnType<typeof createAgentLaunchRecord>> = {
   captured,
-  "creating-project": creating,
-  "project-created": withAgentLaunchStage(creating, "project-created"),
+  "creating-diagram": creating,
+  "diagram-created": withAgentLaunchStage(creating, "diagram-created"),
   "importing-graph": withAgentLaunchStage(
-    withAgentLaunchStage(creating, "project-created"),
+    withAgentLaunchStage(creating, "diagram-created"),
     "importing-graph",
   ),
   "graph-imported": withAgentLaunchStage(
     withAgentLaunchStage(
-      withAgentLaunchStage(creating, "project-created"),
+      withAgentLaunchStage(creating, "diagram-created"),
       "importing-graph",
     ),
     "graph-imported",

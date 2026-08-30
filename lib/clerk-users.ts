@@ -100,10 +100,10 @@ export async function getUserProfiles(
 }
 
 /**
- * Profile for a project owner, looked up by Clerk user ID.
+ * Profile for a diagram owner, looked up by Clerk user ID.
  *
  * Returns all-null rather than throwing when Clerk is unreachable or the user
- * has been deleted: the owner still holds the project, so the share dialog
+ * has been deleted: the owner still holds the diagram, so the share dialog
  * shows the row without a name — the same degradation collaborators get.
  */
 export async function getOwnerProfile(userId: string): Promise<OwnerProfile> {

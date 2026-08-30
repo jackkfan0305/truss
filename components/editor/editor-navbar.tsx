@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils"
 interface EditorNavbarProps {
   isSidebarOpen: boolean
   onToggleSidebar: () => void
-  /** Workspace only — the editor home has no active project. */
-  projectName?: string
+  /** Workspace only — the editor home has no active diagram. */
+  diagramName?: string
   onShare?: () => void
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
@@ -45,7 +45,7 @@ const FLOATING_CONTROL =
 export function EditorNavbar({
   isSidebarOpen,
   onToggleSidebar,
-  projectName,
+  diagramName,
   onShare,
   onOpenTemplates,
   presence,
@@ -66,10 +66,10 @@ export function EditorNavbar({
         variant="ghost"
         size="icon-lg"
         onClick={onToggleSidebar}
-        aria-controls="projects-sidebar"
+        aria-controls="diagrams-sidebar"
         aria-expanded={isSidebarOpen}
         aria-label={
-          isSidebarOpen ? "Close projects sidebar" : "Open projects sidebar"
+          isSidebarOpen ? "Close diagrams sidebar" : "Open diagrams sidebar"
         }
         className={cn(
           FLOATING_CONTROL,
@@ -81,7 +81,7 @@ export function EditorNavbar({
         <LeftToggleIcon className="size-5 text-copy-secondary" />
       </Button>
 
-      {projectName && !isSidebarOpen ? (
+      {diagramName && !isSidebarOpen ? (
         <div
           className={cn(
             FLOATING_SURFACE,
@@ -89,7 +89,7 @@ export function EditorNavbar({
           )}
         >
           <p className="min-w-0 truncate pr-2 text-sm font-medium text-copy-primary">
-            {projectName}
+            {diagramName}
           </p>
         </div>
       ) : null}

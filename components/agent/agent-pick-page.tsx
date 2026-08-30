@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import {
   captureAgentPick,
-  deleteAgentPickProject,
+  deleteAgentPickDiagram,
   redirectToSignInOnce,
   runAgentPickOperation,
   startAgentPickDeleteOnce,
@@ -26,7 +26,7 @@ type PickOperationState =
   | { kind: "awaiting-agent" }
   | {
       kind: "confirm-delete";
-      projectName: string;
+      diagramName: string;
       onCancel: () => void;
       onDelete: () => void;
     }
@@ -71,7 +71,7 @@ export function AgentPickStatus({ state }: { state: AgentPickViewState }): React
       <section className={cardClassName} role="alert">
         <p className={labelClassName}>Delete diagram</p>
         <h1 className="mt-3 text-xl font-semibold tracking-tight text-copy-primary">
-          {state.projectName}
+          {state.diagramName}
         </h1>
         <p className="mt-3 text-sm text-copy-secondary">
           Your agent asked to delete this diagram. This can&apos;t be undone.
@@ -121,7 +121,7 @@ export function AgentPickPage({ resumePickId }: AgentPickPageProps): React.React
   // indirection breaks that ordering cycle without losing the latest
   // closure — updated every render, read only from event handlers that run
   // after render completes.
-  const handleDeleteRef = useRef<(projectId: string) => void>(() => undefined);
+  const handleDeleteRef = useRef<(diagramId: string) => void>(() => undefined);
   const runOperationRef = useRef<(current: AgentPickPayloadV1) => void>(() => undefined);
 
   useEffect(() => {
@@ -148,10 +148,10 @@ export function AgentPickPage({ resumePickId }: AgentPickPageProps): React.React
     }
   }, [resumePickId]);
 
-  const handleDelete = useCallback((projectId: string): void => {
+  const handleDelete = useCallback((diagramId: string): void => {
     setState({ kind: "working" });
-    void startAgentPickDeleteOnce(projectId, () =>
-      deleteAgentPickProject(projectId, { fetch: window.fetch.bind(window) }),
+    void startAgentPickDeleteOnce(diagramId, () =>
+      deleteAgentPickDiagram(diagramId, { fetch: window.fetch.bind(window) }),
     ).then((outcome) => {
       setState(
         outcome === "done"
@@ -159,7 +159,7 @@ export function AgentPickPage({ resumePickId }: AgentPickPageProps): React.React
           : {
               kind: "failed",
               message: "We couldn't delete that diagram. Please try again.",
-              onRetry: () => handleDeleteRef.current(projectId),
+              onRetry: () => handleDeleteRef.current(diagramId),
             },
       );
     });
@@ -168,17 +168,17 @@ export function AgentPickPage({ resumePickId }: AgentPickPageProps): React.React
   const applyResult = useCallback(
     (result: AgentPickResult, retry: () => void): void => {
       if (result.kind === "redirect") {
-        router.replace(`/editor/${result.projectId}`);
+        router.replace(`/editor/${result.diagramId}`);
         return;
       }
 
       if (result.kind === "confirm-delete") {
         setState({
           kind: "confirm-delete",
-          projectName: result.projectName,
+          diagramName: result.diagramName,
           onCancel: () =>
             setState({ kind: "done", message: "Cancelled. You can close this tab." }),
-          onDelete: () => handleDelete(result.projectId),
+          onDelete: () => handleDelete(result.diagramId),
         });
         return;
       }

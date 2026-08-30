@@ -1,15 +1,15 @@
 ---
 name: truss-diagram
-description: Create, edit, or delete a Truss system architecture diagram. Use when the user asks an agent to create, draw, visualize, render, change, update, rename, add to, remove from, or delete a system design in Truss. Creating requires a user-specified title and description; editing and deleting resolve the target from the user's own project list instead.
+description: Create, edit, or delete a Truss system architecture diagram. Use when the user asks an agent to create, draw, visualize, render, change, update, rename, add to, remove from, or delete a system design in Truss. Creating requires a user-specified title and description; editing and deleting resolve the target from the user's own diagram list instead.
 ---
 
 # Truss Diagram
 
 ## Dispatch
 
-Infer the operation from the user's wording: create/draw/render/visualize a *new* diagram → **create**; change/update/rename/add to/remove from an *existing* one → **edit**; delete/remove the whole project → **delete**. When a request could plausibly be either create or edit — for example "make me a diagram of the payments flow" while a *Payments Flow* project already exists — ask which one before running anything. Guessing wrong on create leaves a stray project; guessing wrong on edit rewrites a real one.
+Infer the operation from the user's wording: create/draw/render/visualize a *new* diagram → **create**; change/update/rename/add to/remove from an *existing* one → **edit**; delete/remove the whole diagram → **delete**. When a request could plausibly be either create or edit — for example "make me a diagram of the payments flow" while a *Payments Flow* diagram already exists — ask which one before running anything. Guessing wrong on create leaves a stray diagram; guessing wrong on edit rewrites a real one.
 
-Create and edit both run headless, through this skill's MCP server (`truss_*` tools). Only **delete** opens a browser, for its in-app confirm dialog. For edit or delete, follow [references/operations.md](references/operations.md) — the target has to be resolved from the user's project list first, with `truss_list_diagrams`.
+Create and edit both run headless, through this skill's MCP server (`truss_*` tools). Only **delete** opens a browser, for its in-app confirm dialog. For edit or delete, follow [references/operations.md](references/operations.md) — the target has to be resolved from the user's diagram list first, with `truss_list_diagrams`.
 
 ## Tools
 
@@ -19,8 +19,8 @@ This skill's MCP server registers:
 - `truss_list_diagrams` — the signed-in user's diagrams as `{ id, name }` pairs. Use it to resolve which diagram a request means.
 - `truss_get_diagram` — one diagram's current compact graph, plus a `fingerprint` for the edit that follows.
 - `truss_apply_diagram_edit` — replace a diagram's graph with a fully-specified `desiredGraph`.
-- `truss_create_diagram` — make a new project and draw a graph into it in one call.
-- `truss_delete_diagram_prompt` — open Truss to its own delete-confirm dialog for one project.
+- `truss_create_diagram` — make a new diagram and draw a graph into it in one call.
+- `truss_delete_diagram_prompt` — open Truss to its own delete-confirm dialog for one diagram.
 
 Report an error by passing along the tool result's message without inventing detail beyond it. A successful create, edit, or delete-prompt call returns an `editorUrl` (create/edit) or a relay confirmation (delete) — give the user the `editorUrl` when one comes back.
 
@@ -39,7 +39,7 @@ Every tool authenticates with an agent token cached at `~/.truss/credentials.jso
 3. Read [the compact graph contract](references/graph-schema.md). Infer the architecture from the description and produce one positioned compact graph that conforms exactly to it. Do not include secrets in labels.
 4. Keep the primary request path left to right. Keep node origins at least 240 flow units apart horizontally and 150 vertically. Put supporting systems on secondary rows. Use stable lowercase kebab-case IDs, concise labels, consistent colors, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors, and simple shapes for services.
 5. Call `truss_create_diagram` with `{ title, graph }`.
-6. The tool creates the project and draws the graph into it, returning `editorUrl`. Tell the user the diagram is ready and give them that link. Nobody has to be watching for it to land — but if they already have Truss open, they will see the agent draw it live.
+6. The tool creates the diagram and draws the graph into it, returning `editorUrl`. Tell the user the diagram is ready and give them that link. Nobody has to be watching for it to land — but if they already have Truss open, they will see the agent draw it live.
 
 ## Origin
 

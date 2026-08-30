@@ -71,43 +71,43 @@ async function writeStore(store) {
 }
 
 /**
- * The project list captured at link time and refreshed on every fetch, so a
+ * The diagram list captured at link time and refreshed on every fetch, so a
  * later run can resolve "which diagram did they mean" without a round trip.
  *
  * Cached beside the token deliberately: both are scoped to one origin and one
  * signed-in user, so clearing the credential must clear this too — otherwise a
  * re-link as a different user would resolve names against the previous user's
- * projects.
+ * diagrams.
  */
-export async function readProjects(origin) {
+export async function readDiagrams(origin) {
   const store = await readStore();
   const entry = store.origins[origin];
 
-  if (!Array.isArray(entry?.projects) || typeof entry.projectsFetchedAt !== "number") {
+  if (!Array.isArray(entry?.diagrams) || typeof entry.diagramsFetchedAt !== "number") {
     return null;
   }
 
-  const projects = entry.projects.filter(
-    (project) =>
-      project !== null &&
-      typeof project === "object" &&
-      typeof project.id === "string" &&
-      typeof project.name === "string",
+  const diagrams = entry.diagrams.filter(
+    (diagram) =>
+      diagram !== null &&
+      typeof diagram === "object" &&
+      typeof diagram.id === "string" &&
+      typeof diagram.name === "string",
   );
 
-  return { projects, fetchedAt: entry.projectsFetchedAt };
+  return { diagrams, fetchedAt: entry.diagramsFetchedAt };
 }
 
-export async function writeProjects(origin, projects) {
+export async function writeDiagrams(origin, diagrams) {
   const store = await readStore();
   const entry = store.origins[origin];
 
   // No token for this origin means nothing to attach the cache to; a bare
-  // project list with no credential would outlive the sign-in it came from.
+  // diagram list with no credential would outlive the sign-in it came from.
   if (!entry) return;
 
-  entry.projects = projects.map((project) => ({ id: project.id, name: project.name }));
-  entry.projectsFetchedAt = Date.now();
+  entry.diagrams = diagrams.map((diagram) => ({ id: diagram.id, name: diagram.name }));
+  entry.diagramsFetchedAt = Date.now();
   await writeStore(store);
 }
 

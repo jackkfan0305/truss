@@ -1,38 +1,38 @@
-import { canvasFingerprint, projectCanvasToAgentGraph } from "@/lib/agent-graph";
+import { canvasFingerprint, canvasToAgentGraph } from "@/lib/agent-graph";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
-import type { Authorization } from "@/lib/project-access";
-import { jsonError } from "@/lib/project-requests";
+import type { Authorization } from "@/lib/access";
+import { jsonError } from "@/lib/api-requests";
 import type { DesignContext } from "@/types/canvas";
 
 export interface AgentGraphReadDependencies {
-  authorizeProject: (
-    projectId: string,
+  authorizeDiagram: (
+    diagramId: string,
     options: { requireOwner: true },
   ) => Promise<Authorization>;
   readCanvas: (roomId: string) => Promise<DesignContext>;
 }
 
 /**
- * Injectable owner-only live-room read, matching `handleAgentGraphImportPost`
- * and `handleOrchestratePost`.
+ * Injectable owner-only live-room read, matching `handleAgentGraphImportPost`.
  *
- * It lives in `lib/` rather than beside the route for the same reason those do:
+ * It lives in `lib/` rather than beside the route for the same reason that one does:
  * `Authorization` arrives as a *type-only* import, which is erased at compile
- * time, so this module never pulls in `lib/project-access.ts` → `lib/prisma.ts`,
- * whose client is constructed at module load and throws without `DATABASE_URL`.
- * That keeps the handler importable by a unit verification script with no
- * database, while the route binds the real `authorizeProject` statically.
+ * time, so this module never pulls in `lib/diagram-access.ts` →
+ * `lib/prisma.ts`, whose client is constructed at module load and throws
+ * without `DATABASE_URL`. That keeps the handler importable by a unit
+ * verification script with no database, while the route binds the real
+ * `authorizeDiagram` statically.
  *
  * The compact view an agent edits against comes from the live Liveblocks room,
- * never `GET /api/projects/:id/canvas`. That route serves the autosaved Vercel
+ * never `GET /api/diagrams/:id/canvas`. That route serves the autosaved Vercel
  * Blob snapshot, which lags the room — an edit diffed against it would compute
  * its delta from a canvas that no longer exists.
  */
 export async function handleAgentGraphGet(
-  projectId: string,
+  diagramId: string,
   dependencies: AgentGraphReadDependencies,
 ): Promise<Response> {
-  const access = await dependencies.authorizeProject(projectId, {
+  const access = await dependencies.authorizeDiagram(diagramId, {
     requireOwner: true,
   });
 
@@ -43,9 +43,9 @@ export async function handleAgentGraphGet(
   let context: DesignContext;
 
   try {
-    context = await dependencies.readCanvas(projectId);
+    context = await dependencies.readCanvas(diagramId);
   } catch (error: unknown) {
-    console.error(`Live canvas read failed for ${projectId}`, error);
+    console.error(`Live canvas read failed for ${diagramId}`, error);
     return jsonError("Could not read the canvas", 502);
   }
 
@@ -57,7 +57,7 @@ export async function handleAgentGraphGet(
     nodes: [...context.nodes],
     edges: [...context.edges],
   };
-  const view = projectCanvasToAgentGraph(snapshot);
+  const view = canvasToAgentGraph(snapshot);
 
   return Response.json({ ...view, fingerprint: canvasFingerprint(snapshot) });
 }

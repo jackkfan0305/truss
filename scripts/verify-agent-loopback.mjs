@@ -34,13 +34,13 @@ function post(port, body, headers = {}) {
 // A valid callback resolves, and the held response carries the agent's answer.
 {
   const server = await startLoopback({ nonce: NONCE, allowedOrigin: ORIGIN, timeoutMs: 5000 });
-  const pending = post(server.port, { nonce: NONCE, op: "edit", projects: [] });
+  const pending = post(server.port, { nonce: NONCE, op: "edit", diagrams: [] });
   const exchange = await server.receive();
 
   assert.equal(exchange.body.op, "edit");
-  exchange.respond({ projectId: "p1" });
+  exchange.respond({ diagramId: "p1" });
 
-  assert.deepEqual(await (await pending).json(), { projectId: "p1" });
+  assert.deepEqual(await (await pending).json(), { diagramId: "p1" });
   await server.close();
 }
 
@@ -51,11 +51,11 @@ function post(port, body, headers = {}) {
 
   assert.equal(bad.status, 403);
 
-  const pending = post(server.port, { nonce: NONCE, op: "edit", projects: [] });
+  const pending = post(server.port, { nonce: NONCE, op: "edit", diagrams: [] });
   const exchange = await server.receive();
 
   assert.equal(exchange.body.op, "edit");
-  exchange.respond({ projectId: "p1" });
+  exchange.respond({ diagramId: "p1" });
   await pending;
   await server.close();
 }
@@ -172,10 +172,10 @@ function post(port, body, headers = {}) {
   assert.equal((await post(server.port, { op: "edit" })).status, 403);
 
   // Still armed: none of those consumed the one-shot.
-  const pending = post(server.port, { nonce: NONCE, op: "edit", projects: [] });
+  const pending = post(server.port, { nonce: NONCE, op: "edit", diagrams: [] });
   const exchange = await server.receive();
 
-  exchange.respond({ projectId: "p1" });
+  exchange.respond({ diagramId: "p1" });
   await pending;
   await server.close();
 }
@@ -184,7 +184,7 @@ function post(port, body, headers = {}) {
 // the browser hanging on a socket nobody will ever write to.
 {
   const server = await startLoopback({ nonce: NONCE, allowedOrigin: ORIGIN, timeoutMs: 5000 });
-  const pending = post(server.port, { nonce: NONCE, op: "delete", projects: [] });
+  const pending = post(server.port, { nonce: NONCE, op: "delete", diagrams: [] });
 
   await server.receive();
   await server.close();

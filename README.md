@@ -11,7 +11,7 @@ Truss runs no model of its own — see
 
 ## What it does
 
-- **Projects** — sign in, create a project, invite collaborators by email. The
+- **Diagrams** — sign in, create a diagram, invite collaborators by email. The
   owner can rename, delete, and manage members; collaborators can open and edit.
 - **Collaborative canvas** — React Flow over Liveblocks Storage. Live cursors,
   presence avatars, shaped/colored nodes, right-angle labelled edges, and
@@ -80,7 +80,7 @@ LIVEBLOCKS_PUBLIC_KEY=pk_...
 
 # ------------------------------------------------------------ Vercel Blob
 # Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
-# client bundle would let anyone overwrite any project's canvas.
+# client bundle would let anyone overwrite any diagram's canvas.
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 ```
 
@@ -112,7 +112,7 @@ branches on environment.
 ```bash
 npx prisma migrate dev     # apply migrations
 npm run generate           # regenerate the client into generated/prisma
-npx prisma db seed         # optional: three sample projects
+npx prisma db seed         # optional: three sample diagrams
 ```
 
 ## Running it
@@ -138,11 +138,11 @@ npx skills add jackkfan0305/truss \
 **Create** turns the supplied description into a compact positioned graph, then
 sends only the title and graph to its launcher over stdin.
 
-**Edit** and **delete** need to read your projects, which the agent cannot do on
+**Edit** and **delete** need to read your diagrams, which the agent cannot do on
 its own — it never authenticates to Truss. The launcher opens `/agent/pick`,
 which uses your existing browser session to fetch the list and, for an edit, the
 live canvas, and hands them back over a one-shot listener bound to `127.0.0.1`.
-The agent asks which project you mean in the terminal. Deletes are confirmed
+The agent asks which diagram you mean in the terminal. Deletes are confirmed
 twice: once by name in the terminal, once in the browser.
 
 An edit is reconciled against the live canvas rather than replacing it, so
@@ -198,7 +198,7 @@ each exits non-zero on failure.
 
 ```
 app/api        Authenticated route handlers: validate → authorize → write → persist
-app/editor     The workspace (project sidebar, canvas)
+app/editor     The workspace (diagram sidebar, canvas)
 lib/           Prisma client, access control, Liveblocks server helpers
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed

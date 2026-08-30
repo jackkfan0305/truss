@@ -61,7 +61,7 @@ async function checkNativeDrawingCadenceIsShared(): Promise<void> {
     },
   ];
 
-  const applied = await drawPacedCanvasActions("project-1", flow, actions, {
+  const applied = await drawPacedCanvasActions("diagram-1", flow, actions, {
     setAiPresence: async (_roomId, presence) => {
       events.push(`cursor:${presence.cursor?.x},${presence.cursor?.y}`);
     },

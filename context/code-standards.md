@@ -30,13 +30,13 @@
 ## API Routes
 
 - Validate and parse request input before any logic runs.
-- Enforce auth and project ownership checks before any mutation.
+- Enforce auth and diagram ownership checks before any mutation.
 - Return consistent, predictable response shapes.
 - Keep route handlers thin — push complexity into shared modules.
 
 ## Data and Storage
 
-- Project metadata and relationships belong in PostgreSQL via Prisma.
+- Diagram metadata and relationships belong in PostgreSQL via Prisma.
 - Canvas snapshots belong in Vercel Blob; Prisma stores only the blob URL reference.
 - Do not store large generated content directly in the database.
 

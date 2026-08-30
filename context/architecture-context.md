@@ -7,7 +7,7 @@
 | Framework        | Next.js 16 + TypeScript | Full-stack app with server/client boundaries                   |
 | UI               | Tailwind + shadcn/ui    | Component composition and styling                              |
 | Auth             | Clerk                   | User identity and route protection                             |
-| Database         | Prisma + PostgreSQL     | Relational metadata: projects, collaborators, agent tokens     |
+| Database         | Prisma + PostgreSQL     | Relational metadata: storyboards, diagrams, collaborators, agent tokens |
 | Canvas           | Liveblocks + React Flow | Real-time collaborative canvas, presence, and cursors          |
 | Artifact storage | Vercel Blob             | Canvas snapshots                                               |
 
@@ -22,8 +22,8 @@
 ## Storage Model
 
 - **Database**: metadata, ownership, relationships, and agent tokens.
-- **Vercel Blob**: canvas snapshots at `canvas/{projectId}.json`.
-- Project records and collaborator records belong in PostgreSQL.
+- **Vercel Blob**: canvas snapshots at `canvas/{diagramId}.json`.
+- Storyboard, diagram, and collaborator records belong in PostgreSQL.
 - Canvas content is stored in and retrieved from Vercel Blob.
 - The blob URL is stored in the database (`canvasJsonPath`) as the reference to the artifact.
 - The Blob store is configured for **private** access. Every `@vercel/blob` call
@@ -34,28 +34,35 @@
   same pathname, so the CDN copy is exactly the stale artifact a read must not
   return. Artifact URLs are therefore pointers, never something to hand to a
   browser directly.
-- Project IDs are never reused. Deletion first changes the project to a durable
-  `DELETING` tombstone, then deletes its Liveblocks room, then finalizes the row
-  as `DELETED`. Both states are inaccessible and excluded from project lists.
+- Diagram IDs are never reused. Deletion first stamps `deletingAt`, a durable
+  tombstone, then deletes its Liveblocks room, then finalizes the row by
+  stamping `deletedAt`. Either stamp makes the diagram inaccessible and excludes
+  it from diagram lists. Timestamps rather than a lifecycle enum: they record
+  *when* as well as whether, which is what a stalled cleanup needs.
 - A cleanup failure leaves the tombstone available to the owner-only delete
   endpoint for retry. Keeping the row permanently reserved prevents old room
   tokens, delayed cleanup, or stale authorization from crossing generations.
 - Liveblocks auth rechecks access after token preparation. If deletion won the
   race, it withholds the token and removes any room the request recreated.
-- Entering `DELETING` immediately scrubs the project name, description, and
-  collaborator emails. The owner ID stays for authorized cleanup retries.
+- Stamping `deletingAt` immediately scrubs the diagram name and detaches it
+  from any parent storyboard, so a board stops rendering a panel for something
+  being deleted. The owner ID stays for authorized cleanup retries. Collaborator
+  emails belong to the storyboard and are untouched: deleting one diagram must
+  not strip its board of the people invited to the plan.
 - `canvasJsonPath` is retained as a cleanup pointer until Vercel Blob deletion
   is implemented; never clear an artifact reference without deleting the
   referenced blob first.
 
 ## Auth and Collaboration Model
 
-- Every project has a single owner (Clerk user ID).
-- Projects can include additional collaborators, stored by email. There is no local user table; names and avatars are read from the Clerk Backend API at render time.
+- A **storyboard** is the top-level artifact and the only thing collaborators are invited to (see `CONTEXT.md`). A **diagram** is its own model with a nullable `storyboardId`, so a diagram that belongs to no plan is still a valid diagram — the shape every agent-created one starts in.
+- Storyboards and diagrams each have a single owner (Clerk user ID) and their own Liveblocks room.
+- Storyboards can include additional collaborators, stored by email. There is no local user table; names and avatars are read from the Clerk Backend API at render time.
 - Only authenticated users can access protected routes.
-- Owner or collaborator may **open** a project and read its contents, including the member list. That list covers everyone with access — the owner plus collaborators — each carrying a derived `owner` / `collaborator` role. Roles are not stored: owner is `Project.ownerId`, collaborator is the existence of a `ProjectCollaborator` row.
-- Only the **owner** may rename or delete a project, or invite and remove collaborators. Enforced server-side in every handler via `authorizeProject(projectId, { requireOwner })`.
-- Liveblocks room tokens are issued only after verifying project membership.
+- Owner or collaborator may **open** a storyboard and read its member list. That list covers everyone with access — the owner plus collaborators — each carrying a derived `owner` / `collaborator` role. Roles are not stored: owner is `Storyboard.ownerId`, collaborator is the existence of a `StoryboardCollaborator` row.
+- A diagram is reachable by its owner, or by a collaborator on its **parent storyboard**. A standalone diagram has no collaborator list to consult and so is owner-only; the editor hides its Share control rather than offering an invite that has nowhere to land.
+- Only the **owner** may rename or delete a diagram, or invite and remove collaborators. Enforced server-side in every handler via `authorizeDiagram(request, diagramId, { requireOwner })` and `authorizeStoryboard(request, storyboardId, { requireOwner })`. Both live behind the shared `Identity`/`Authorization` primitives in `lib/access.ts`.
+- Liveblocks room tokens are issued only after verifying diagram membership.
   Humans receive room/storage write access but feeds read-only. User chat goes
   through an authenticated server route that derives Clerk identity, while AI
   summaries and status are worker-authored; room clients cannot forge roles or
@@ -66,8 +73,8 @@
 The `truss:diagram` skill dispatches to three operations from one skill
 directory. Create is a write-only fragment launch (unchanged from the
 original single-purpose skill). Edit and delete both need to read the user's
-project list and, for edit, the live canvas — a write-only channel cannot
-answer "which project?" or "what is on it now?" — so both open `/agent/pick`,
+diagram list and, for edit, the live canvas — a write-only channel cannot
+answer "which diagram?" or "what is on it now?" — so both open `/agent/pick`,
 a second public entry path that talks back to the skill script over a
 one-shot local HTTP listener.
 
@@ -86,7 +93,7 @@ one-shot local HTTP listener.
   default dimensions.
 - Graph launches use the `truss.agent-launch.graph.v1:` session-storage prefix,
   so an unpublished description-driven record cannot resume as a graph launch.
-- `POST /api/projects/:projectId/agent-launch-import` is owner-only and checks
+- `POST /api/diagrams/:diagramId/agent-launch-import` is owner-only and checks
   authorization before consuming its JSON body. It accepts only a canonical
   launch UUID plus a strict compact graph, then writes through one server-side
   Liveblocks `mutateFlow` callback. Empty rooms draw canonical nodes before
@@ -100,13 +107,13 @@ one-shot local HTTP listener.
   pointer-second. A persistence failure is retryable through exact replay.
   The import route declares `maxDuration = 120`, leaving execution headroom for
   that maximum native draw plus authorization and persistence.
-- Project IDs are persisted before the launch page posts. A `409` first reads
-  the same ID through the owner-only project route and resumes only when both
+- Diagram IDs are persisted before the launch page posts. A `409` first reads
+  the same ID through the owner-only diagram route and resumes only when both
   its ID and title match; an inaccessible or mismatched collision gets one new
   suffix and one replacement POST.
 - The editor accepts only `?launch=<canonical UUID>` for the already-authorized
-  project. Its record advances through `captured`, `creating-project`,
-  `project-created`, `importing-graph`, and `graph-imported`; only the first
+  diagram. Its record advances through `captured`, `creating-diagram`,
+  `diagram-created`, `importing-graph`, and `graph-imported`; only the first
   four stages may fail. Failed records retain their graph and safe retry error.
   `graph-imported` is terminal. The client hook deduplicates same-tab requests,
   calls only the owner import route after the authorized editor mounts, clears
@@ -176,12 +183,12 @@ until it has an answer, rather than the page polling a status endpoint. This
 is safe because Node's `headersTimeout` and `requestTimeout` bound how long
 the server waits to **receive** a request, not how long it takes to
 **answer** one already fully received — so an agent that takes a minute to
-resolve a project name or think through a diff does not trip either timeout.
+resolve a diagram name or think through a diff does not trip either timeout.
 No backoff loop, no page-side state machine beyond "waiting."
 
 ### Reading the live canvas
 
-- `GET /api/projects/:id/agent-graph` is owner-only — matching the apply
+- `GET /api/diagrams/:id/agent-graph` is owner-only — matching the apply
   route, a read a collaborator could take but not act on would only be an
   information leak — and reads the **live Liveblocks room** through
   `readCanvas`, never the autosaved Vercel Blob snapshot. The blob lags the
@@ -197,7 +204,7 @@ No backoff loop, no page-side state machine beyond "waiting."
 
 ### Applying the edit
 
-- `POST /api/projects/:id/agent-graph-edit` recomputes the fingerprint
+- `POST /api/diagrams/:id/agent-graph-edit` recomputes the fingerprint
   **inside** the `mutateFlow` callback, not before it. Checking outside the
   callback would reopen the exact read-then-write race the fingerprint
   exists to close — a collaborator could edit the room in the gap between an
@@ -230,7 +237,7 @@ last operation executed by **the current client**. It does not impact
 operations made by other clients." The room has no concept of "changes this
 human made through the UI" versus "changes an agent made through the API" —
 it only knows per-connection history, and `mutateFlow` runs through
-`@liveblocks/node`'s REST client (`app/api/projects/[projectId]/agent-graph-edit/route.ts`),
+`@liveblocks/node`'s REST client (`app/api/diagrams/[diagramId]/agent-graph-edit/route.ts`),
 a connection entirely separate from the browser tab's room session. From the
 browser's history stack, an agent-applied batch is indistinguishable from a
 collaborator's edit: invisible to Cmd+Z. This matches `CanvasControls`' own
@@ -255,8 +262,8 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`. The
 terminal agent is the only model in the system, and every canvas write arrives
 through the graph import and edit routes it calls.
 
-- A room ID *is* its project ID, so a request naming both must have them agree.
-  Authorization is checked against the project; a mismatch is rejected rather
+- A room ID *is* its diagram ID, so a request naming both must have them agree.
+  Authorization is checked against the diagram; a mismatch is rejected rather
   than reconciled.
 - The write goes through `@liveblocks/react-flow`'s server-side `mutateFlow`,
   the same Storage shape the client edits — there is no separate agent write

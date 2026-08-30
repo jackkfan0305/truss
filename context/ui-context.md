@@ -16,17 +16,17 @@ Both fonts are loaded via `next/font/google` and applied as CSS variables on the
 ### Agent Launch Capture
 
 `/agent/new` shows one compact, centred status surface while it captures an
-agent-supplied diagram request, signs the user in, or creates the project. The
+agent-supplied diagram request, signs the user in, or creates the diagram. The
 surface names only the requested title; the launch description never renders on
 this page. Status uses the neutral page, surface, border, and copy tokens. A
 recoverable failure uses an accessible alert and a real Retry button, rather
 than exposing transport details.
 
 An authorized editor URL carrying a canonical opaque launch UUID imports the
-stored graph through the owner-only project route. Importing shows a neutral
+stored graph through the owner-only diagram route. Importing shows a neutral
 canvas status overlay; a retryable failure appears over the canvas as a compact
 monochrome alert with a small Retry action. Graph labels and launch payload contents never render in
-this status UI. Ordinary editor visits retain the closed projects sidebar.
+this status UI. Ordinary editor visits retain the closed diagrams sidebar.
 
 ## Border Radius
 
@@ -87,7 +87,7 @@ shadcn/ui on top of Tailwind. No custom design system. Components live in `compo
 ## Layout Patterns
 
 - Editor workspace: full-viewport canvas or editor-home background with floating control islands and floating sidebar overlays.
-- Floating controls: left projects toggle plus project title and a minimal utility group. Use existing shadcn primitives and semantic surface tokens.
+- Floating controls: left diagrams toggle plus diagram title and a minimal utility group. Use existing shadcn primitives and semantic surface tokens.
 - Sidebars: floating overlays below the control row, with dark semi-transparent backgrounds and subtle borders.
 - On narrow screens, the utility group moves to a second right-aligned floating row so the title and the sidebar toggle remain unobstructed.
 

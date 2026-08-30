@@ -55,6 +55,5 @@ next-env.d.ts
 /.codex/
 /agent/
 
-# The skills are local to each developer's checkout. Keep the lock file tracked
-# as the provenance record, but never commit the installed skill files.
-/.agents/skills/
+# Vendored agent skills are part of the repository because the verification
+# suite and the published skill package import them directly.

@@ -1565,3 +1565,12 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
+
+## CI quality fix — 2026-08-30
+
+- Restored the vendored `.agents/skills` sources required by the unit verifiers
+  and removed their `.gitignore` exclusion. A clean CI checkout now includes
+  the `truss-diagram` loopback, core, and MCP implementations instead of
+  relying on ignored files left in a developer worktree.
+- Configured `turbopack.root` to the current application directory so nested
+  worktrees do not make Next.js select a parent checkout's lockfile.

@@ -8,6 +8,9 @@ import {
   RANK_GAP,
   laneOrder,
   toBox,
+  HANDLE_ID,
+  handleAnchor,
+  isSideToSideRoute,
   type Box,
   type LaneMember,
 } from "@/lib/canvas-geometry";
@@ -71,9 +74,18 @@ function computedRankSep(
   placed: readonly CanvasNode[],
   rankX: ReadonlyMap<string, number>
 ): number {
+  // A full pill width past the outermost split column, not half of one.
+  // `buildEdgeRoute` only centres a label on its split column when the edge
+  // has real vertical travel to hang it on. An edge running nearly straight
+  // across (`|target.y - source.y|` within a pill height, which every edge to
+  // the target sharing the source's row is) instead rides the final horizontal
+  // run at `splitX + width / 2`, so its pill spans `splitX` to
+  // `splitX + width`. Reserving only half a width assumed the centred case and
+  // left the straight-across case overhanging by the other half, which put the
+  // outermost lane's label a full `LABEL_GAP` inside the target node.
   const needed = Math.max(
     RANK_GAP,
-    TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width / 2 + LABEL_GAP
+    TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width + LABEL_GAP
   );
 
   // Nodes in one rank share an x centre, so counting distinct centres counts
@@ -109,15 +121,6 @@ function computedRankSep(
 
   return Math.max(MIN_NODE_GAP, Math.min(needed, affordable));
 }
-
-/** The four handle ids `canvas-node.tsx` renders, named once instead of
- * scattered as string literals through the geometry below. */
-export const HANDLE_ID = {
-  top: "top",
-  right: "right",
-  bottom: "bottom",
-  left: "left",
-} as const;
 
 /** What `layoutGraphWithRanks` hands back: the placed nodes, and the rank
  * identity `assignLanes` and `computedRankSep` need to group by. */
@@ -413,39 +416,6 @@ export function chooseHandles(
   };
 }
 
-/**
- * The point on a box where a handle sits.
- *
- * React Flow gives the renderer these as `sourceX`/`sourceY`, but the layout
- * has to compute them itself: lanes are assigned before anything is measured
- * on screen, from the rectangles dagre produced.
- */
-export function handleAnchor(box: Box, handle: string): XYPosition {
-  switch (handle) {
-    case HANDLE_ID.left:
-      return { x: box.x, y: box.y + box.height / 2 };
-    case HANDLE_ID.right:
-      return { x: box.x + box.width, y: box.y + box.height / 2 };
-    case HANDLE_ID.top:
-      return { x: box.x + box.width / 2, y: box.y };
-    default:
-      return { x: box.x + box.width / 2, y: box.y + box.height };
-  }
-}
-
-/**
- * A route leaving one vertical face and entering the other — the only kind
- * lanes apply to, and the same gate `canvas-edge.tsx`'s `isSideToSide` and
- * `scripts/verify-graph-layout.ts`'s `routeEveryEdge` use to decide whether an
- * edge is drawn through `buildEdgeRoute` at all.
- */
-export function isSideToSideRoute(sourceHandle: string, targetHandle: string): boolean {
-  const isSide = (handle: string) =>
-    handle === HANDLE_ID.left || handle === HANDLE_ID.right;
-
-  return isSide(sourceHandle) && isSide(targetHandle);
-}
-
 /** Every edge that has both endpoints, with its handles chosen from the given geometry. */
 function wireEdges(
   placed: readonly CanvasNode[],
@@ -668,3 +638,4 @@ export function applyLayout(
 function snap(value: number): number {
   return Math.round(value / LAYOUT_GRID) * LAYOUT_GRID;
 }
+

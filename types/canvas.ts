@@ -77,9 +77,19 @@ export const NODE_MIN_SIZE: NodeSize = { width: 72, height: 48 };
  * `CanvasEdgeRenderer` centres the label pill on the path midpoint, so it sits
  * *between* the two nodes rather than beside them — two nodes placed only a node
  * gap apart get their label drawn across one of them. Measured from the pill's
- * own styling (`text-xs`, `px-2 py-0.5`, 1px border) at a few words of label;
- * the width is a budget, not a ceiling, which is why the prompt also asks the
- * model to keep edge labels short.
+ * own styling (`text-xs`, `px-2 py-0.5`, 1px border) at one line of label.
+ *
+ * These are a ceiling, not a budget. `components/canvas/canvas-edge.tsx` clamps
+ * the pill to `max-w-[160px]` and truncates it to a single line, so a label the
+ * model made too long is ellipsised inside its reserved space rather than drawn
+ * across a neighbour. Staying one line is deliberate: a two-line pill needs
+ * `PARALLEL_STEP` to grow with it, and the wider row spread measurably raises
+ * edge crossings. Measured against the single-line baseline that
+ * `scripts/verify-graph-layout.ts` pins, a parallel group of 6 goes from 13
+ * crossings to 16; only that baseline is pinned, since the two-line variant was
+ * rejected and never shipped. `lib/diagram-legend.ts` already
+ * tells both diagram agents to keep a label to a few words, so one line is the
+ * contract, and the truncation is what makes breaking it visible.
  */
 export const EDGE_LABEL_CLEARANCE: NodeSize = { width: 160, height: 24 };
 

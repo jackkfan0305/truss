@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import {
   applyLayout,
   chooseHandles,
-  handleAnchor,
-  isSideToSideRoute,
   layoutGraph,
 } from "../lib/graph-layout";
+import { routeEveryEdge, findLabelCollisions } from "../lib/edge-routes";
 import {
   LAYOUT_GRID,
   MIN_NODE_GAP,
@@ -15,11 +14,10 @@ import {
   edgeSplitX,
   toBox,
   buildEdgeRoute,
-  parallelLaneY,
+  handleAnchor,
   orthogonalPath,
   type Box,
   type RoutePoint,
-  type EdgeRoute,
 } from "../lib/canvas-geometry";
 import {
   CANVAS_EDGE_TYPE,
@@ -813,9 +811,20 @@ function checkWideBundleGetsRoomForItsLabelsAndStaysInBudget(): void {
   const gap = Math.abs(target.x - (hub.x + hub.width));
   const maxLane = Math.max(...laidOutEdges.map((edge) => edge.data?.lane ?? 0));
 
+  // A full pill width past the outermost split column, plus the gap it keeps.
+  // Half a width was the old budget and it was wrong: an edge running straight
+  // across anchors its label at `splitX + width / 2`, so the pill runs to
+  // `splitX + width`, and the outermost lane's label landed inside the target
+  // node. See `computedRankSep` in `lib/graph-layout.ts`.
   assert.ok(
-    gap >= TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width / 2,
-    `the rank gap (${gap}) holds every split column and the outermost label`,
+    gap >= TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width + LABEL_GAP,
+    `the rank gap (${gap}) holds every split column, the outermost label, and its gap`,
+  );
+
+  assert.deepEqual(
+    findLabelCollisions(laidOut, laidOutEdges),
+    [],
+    "and no label in the widest bundle lands on a node or on another label",
   );
 
   const xs = laidOut.flatMap((node) => [
@@ -904,83 +913,6 @@ function segmentsIntersect(
     (p.x === s1.x && p.y === s1.y) || (p.x === s2.x && p.y === s2.y);
 
   return !(isEndpointOf(at, a1, a2) && isEndpointOf(at, b1, b2));
-}
-
-/**
- * Every route in the graph, keyed by edge id, built the way the renderer
- * builds them.
- *
- * Two things mirror `components/canvas/canvas-edge.tsx` on purpose:
- *
- * - Edges on a top or bottom handle are skipped entirely, the same gate the
- *   renderer's `isSideToSide` applies — those keep React Flow's own
- *   `getSmoothStepPath` and label point, so building a lane route for one
- *   here would validate geometry nobody actually draws.
- * - A parallel group is ordered by *lane* ascending, not by id, matching
- *   `readLaneSlots`: `buildEdgeRoute` pairs the member whose lane splits
- *   closest to the source with the row farthest from it (Critical 3 in the
- *   branch review), and an id sort has no relationship to which member that
- *   is.
- */
-function routeEveryEdge(
-  nodes: readonly CanvasNode[],
-  edges: readonly CanvasEdge[],
-): Map<string, EdgeRoute> {
-  const boxes = new Map(nodes.map((node) => [node.id, toBox(node)]));
-  const parallelKey = (edge: CanvasEdge) =>
-    `${edge.source} ${edge.target} ${edge.sourceHandle} ${edge.targetHandle}`;
-
-  const routable = edges.filter(
-    (edge): edge is CanvasEdge & { sourceHandle: string; targetHandle: string } =>
-      !!edge.sourceHandle &&
-      !!edge.targetHandle &&
-      isSideToSideRoute(edge.sourceHandle, edge.targetHandle),
-  );
-
-  const groups = new Map<string, CanvasEdge[]>();
-
-  for (const edge of routable) {
-    const key = parallelKey(edge);
-
-    groups.set(key, [...(groups.get(key) ?? []), edge]);
-  }
-
-  const ordered = new Map(
-    [...groups.entries()].map(([key, members]) => [
-      key,
-      [...members].sort(
-        (a, b) =>
-          (a.data?.lane ?? 0) - (b.data?.lane ?? 0) ||
-          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-      ),
-    ]),
-  );
-
-  const routes = new Map<string, EdgeRoute>();
-
-  for (const edge of routable) {
-    const source = boxes.get(edge.source);
-    const target = boxes.get(edge.target);
-
-    if (!source || !target) {
-      continue;
-    }
-
-    const group = ordered.get(parallelKey(edge))!;
-
-    routes.set(
-      edge.id,
-      buildEdgeRoute({
-        source: handleAnchor(source, edge.sourceHandle),
-        target: handleAnchor(target, edge.targetHandle),
-        lane: edge.data?.lane ?? 0,
-        parallelIndex: group.findIndex((member) => member.id === edge.id),
-        parallelCount: group.length,
-      }),
-    );
-  }
-
-  return routes;
 }
 
 /**
@@ -1272,6 +1204,195 @@ function checkSameRankMixedShapeSourcesShareOneLaneSequence(): void {
   );
 }
 
+function checkLabelCollisionsAreFoundWhenTheyExist(): void {
+  // Deliberately position two labelled edges so their label pills overlap.
+  // Hand-place nodes, then set handles manually so routeEveryEdge can route
+  // them. Place targets very close vertically so their split columns and
+  // labelPoints collide.
+  const nodes = [
+    makeNode("source", { x: 0, y: 0 }),
+    makeNode("t0", { x: 400, y: 0 }),
+    makeNode("t1", { x: 400, y: 10 }),
+  ];
+  const edges = [
+    { ...makeEdge("e0", "source", "t0", "label 0"), sourceHandle: "right", targetHandle: "left" },
+    { ...makeEdge("e1", "source", "t1", "label 1"), sourceHandle: "right", targetHandle: "left" },
+  ];
+
+  const collisions = findLabelCollisions(nodes, edges);
+
+  const hasLabelCollision = collisions.some((c) => c.with.kind === "label");
+  assert.ok(
+    hasLabelCollision,
+    "detector finds a label collision when labelPoints are close enough to overlap",
+  );
+}
+
+function checkLabelCollisionsCatchALabelOverANode(): void {
+  // Construct a case where a label pill directly overlaps a node by placing
+  // a node in the path of the label pill. For a flat edge from source to target,
+  // the label sits at splitX + (pill width / 2). A node placed there will collide.
+  const nodes = [
+    makeNode("source", { x: -400, y: 0 }),
+    makeNode("blocker", { x: -200, y: 0 }),
+    makeNode("target", { x: 400, y: 0 }),
+  ];
+
+  const edges = [{ ...makeEdge("e0", "source", "target", "label"), sourceHandle: "right", targetHandle: "left" }];
+
+  const collisions = findLabelCollisions(nodes, edges);
+
+  const nodeCollisions = collisions.filter((c) => c.with.kind === "node");
+  assert.ok(nodeCollisions.length > 0, "detector finds a node-label collision in this fixture");
+}
+
+/**
+ * Pins the label collisions two graph shapes still draw today, the same way
+ * `checkParallelGroupCrossingsMatchTheKnownLimit` pins crossing counts:
+ * measured from real geometry, recorded so a change is loud instead of silent.
+ *
+ * These counts are NOT an acceptable target. The goal is zero, which is what
+ * `checkLaidOutGraphsHaveNoLabelCollisions` already holds every other shape to.
+ * Both need a design decision this pin deliberately does not make:
+ *
+ * - A cycle puts a forward edge and a back edge in the same rank gap.
+ *   `assignLanes` keys a bundle on source plus source handle, so the two
+ *   directions are separate bundles that each start at lane 0 and each claim
+ *   the corridor from their own side. Their labels meet in the middle. For a
+ *   two-node cycle the routes themselves are collinear, so the pair draws two
+ *   arrows along one line, which is the larger defect the labels are only a
+ *   symptom of. Fixing it means treating a bidirectional pair as one lane
+ *   group, which moves every crossing count pinned above.
+ *
+ * - A long chain trips the `affordable` clamp in `computedRankSep`. One
+ *   ranksep is shared by every gap in the graph, sized for the widest bundle,
+ *   then clamped to what `LAYOUT_WIDTH_BUDGET` affords. That budget is the
+ *   compact contract's own coordinate range, so it cannot simply be raised.
+ *   Past roughly 33 ranks a single ordinary bundle of 2 squeezes below what
+ *   `buildEdgeRoute` needs and the outer label lands on the next node. Keeping
+ *   it off would mean letting the anchor leave the drawn line, which
+ *   `buildEdgeRoute` explicitly refuses to do today.
+ */
+function checkKnownLabelCollisionsMatchTheirPin(): void {
+  const cycleNodes = [makeNode("a"), makeNode("b")];
+  const cycleEdges = [
+    makeEdge("fwd", "a", "b", "go forward"),
+    makeEdge("back", "b", "a", "retry"),
+  ];
+  const cycleLaid = applyLayout(cycleNodes, cycleEdges);
+  const cycleCollisions = findLabelCollisions(cycleLaid.nodes, cycleLaid.edges);
+
+  assert.equal(
+    cycleCollisions.length,
+    1,
+    `a two-node cycle draws ${cycleCollisions.length} label collisions, expected the pinned 1 ` +
+      `(drive this to 0, do not raise it) — ${cycleCollisions.map((c) => c.describe).join("; ")}`,
+  );
+
+  // 34 ranks is the first length at which one ordinary two-way branch squeezes
+  // the shared ranksep below what its bundle needs. 32 is still clean, which is
+  // what makes this a threshold worth pinning rather than a constant failure.
+  const longNodes = Array.from({ length: 34 }, (_, i) => makeNode(`n${i}`));
+  const longEdges = [
+    ...Array.from({ length: 33 }, (_, i) => makeEdge(`e${i}`, `n${i}`, `n${i + 1}`, "step")),
+    makeEdge("branch", "n20", "n21", "on failure"),
+  ];
+  const longLaid = applyLayout(longNodes, longEdges);
+  const longCollisions = findLabelCollisions(longLaid.nodes, longLaid.edges);
+
+  assert.equal(
+    longCollisions.length,
+    1,
+    `a 34-rank chain with one branch draws ${longCollisions.length} label collisions, expected the pinned 1 ` +
+      `(drive this to 0, do not raise it) — ${longCollisions.map((c) => c.describe).join("; ")}`,
+  );
+
+  const shortNodes = Array.from({ length: 32 }, (_, i) => makeNode(`n${i}`));
+  const shortEdges = [
+    ...Array.from({ length: 31 }, (_, i) => makeEdge(`e${i}`, `n${i}`, `n${i + 1}`, "step")),
+    makeEdge("branch", "n20", "n21", "on failure"),
+  ];
+  const shortLaid = applyLayout(shortNodes, shortEdges);
+
+  assert.deepEqual(
+    findLabelCollisions(shortLaid.nodes, shortLaid.edges),
+    [],
+    "and the same shape two ranks shorter still clears, so the pin tracks a threshold",
+  );
+}
+
+function checkLaidOutGraphsHaveNoLabelCollisions(): void {
+  // Three fixture topologies, all realistic and fully laid out.
+  // Hub with 5 targets: covers a wide bundle.
+  const hub5Nodes = [
+    makeNode("hub"),
+    ...Array.from({ length: 5 }, (_, i) => makeNode(`t${i}`)),
+  ];
+  const hub5Edges = Array.from({ length: 5 }, (_, i) =>
+    makeEdge(`e${i}`, "hub", `t${i}`, `label ${i}`),
+  );
+
+  const hub5Laid = applyLayout(hub5Nodes, hub5Edges);
+  const hub5Collisions = findLabelCollisions(hub5Laid.nodes, hub5Laid.edges);
+
+  // Chain of 3 nodes: covers a simple linear flow.
+  const chainNodes = [makeNode("a"), makeNode("b"), makeNode("c")];
+  const chainEdges = [
+    makeEdge("a-b", "a", "b", "links to"),
+    makeEdge("b-c", "b", "c", "then to"),
+  ];
+
+  const chainLaid = applyLayout(chainNodes, chainEdges);
+  const chainCollisions = findLabelCollisions(chainLaid.nodes, chainLaid.edges);
+
+  // Parallel group of 3: covers same-source edges.
+  const parallelNodes = [makeNode("source"), makeNode("target")];
+  const parallelEdges = [
+    makeEdge("p0", "source", "target", "first"),
+    makeEdge("p1", "source", "target", "second"),
+    makeEdge("p2", "source", "target", "third"),
+  ];
+
+  const parallelLaid = applyLayout(parallelNodes, parallelEdges);
+  const parallelCollisions = findLabelCollisions(parallelLaid.nodes, parallelLaid.edges);
+
+  // Verify all three are collision-free.
+  assert.deepEqual(
+    hub5Collisions,
+    [],
+    `hub with 5 targets: ${hub5Collisions.map((c) => c.describe).join("; ")}`,
+  );
+  assert.deepEqual(
+    chainCollisions,
+    [],
+    `chain of 3: ${chainCollisions.map((c) => c.describe).join("; ")}`,
+  );
+  assert.deepEqual(
+    parallelCollisions,
+    [],
+    `parallel group of 3: ${parallelCollisions.map((c) => c.describe).join("; ")}`,
+  );
+}
+
+function checkUnlabelledEdgesNeverCollide(): void {
+  // Same degenerate geometry as `checkLabelCollisionsAreFoundWhenTheyExist`,
+  // but with empty labels: the detector should return nothing because unlabelled
+  // edges render no pills.
+  const nodes = [
+    makeNode("source", { x: 0, y: 0 }),
+    makeNode("t0", { x: 400, y: 0 }),
+    makeNode("t1", { x: 400, y: 10 }),
+  ];
+  const edges = [
+    { ...makeEdge("e0", "source", "t0", ""), sourceHandle: "right", targetHandle: "left" },
+    { ...makeEdge("e1", "source", "t1", ""), sourceHandle: "right", targetHandle: "left" },
+  ];
+
+  const collisions = findLabelCollisions(nodes, edges);
+
+  assert.deepEqual(collisions, [], "unlabelled edges produce no collision reports");
+}
+
 function main() {
   checkLabelsDoNotWidenTheLayout();
   checkLayoutClearsOverlapsAndSnapsToGrid();
@@ -1306,8 +1427,13 @@ function main() {
   checkNoTwoLabelsCollide();
   checkSameRankMixedShapeSourcesShareOneLaneSequence();
   checkParallelGroupCrossingsMatchTheKnownLimit();
+  checkLabelCollisionsAreFoundWhenTheyExist();
+  checkLabelCollisionsCatchALabelOverANode();
+  checkLaidOutGraphsHaveNoLabelCollisions();
+  checkKnownLabelCollisionsMatchTheirPin();
+  checkUnlabelledEdgesNeverCollide();
   console.log(
-    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps, and parallel-group crossing counts pinned to their known limit verified",
+    "✅ Graph layout: no overlaps, grid-aligned, deterministic, acyclic rank order, handle geometry, edge dedupe, lane ordering, non-crossing bundles, label separation, computed rank gaps, parallel-group crossing counts pinned to their known limit, and label collision detection verified",
   );
 }
 

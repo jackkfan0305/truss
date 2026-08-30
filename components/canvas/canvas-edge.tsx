@@ -47,7 +47,7 @@ const LABEL_HINT = "+ label";
 const MIN_LABEL_CHARS = 5;
 
 const LABEL_BASE_CLASS =
-  "nodrag nopan nokey rounded-xl border px-2 py-0.5 text-xs leading-tight";
+  "nodrag nopan nokey rounded-xl border px-2 py-0.5 text-xs leading-tight max-w-[160px]";
 
 /** Whether a handle sits on a vertical face, which is what makes a route side-to-side. */
 function isSideFace(position: Position): boolean {
@@ -280,7 +280,7 @@ export function CanvasEdgeRenderer({
               />
             ) : (
               <span
-                className={`${LABEL_BASE_CLASS} ${
+                className={`${LABEL_BASE_CLASS} inline-block truncate ${
                   label
                     ? "border-surface-border bg-elevated text-copy-secondary"
                     : "border-surface-border/60 bg-surface text-copy-faint"

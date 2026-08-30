@@ -8,6 +8,42 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `edge-label-collisions` complete. Generated diagrams drew edge-label pills on
+  top of each other and on top of node boxes. Two independent defects caused it,
+  both now fixed.
+  - The declared pill size was fiction. `EDGE_LABEL_CLEARANCE` claimed 160x24 and
+    every spacing budget derived from it (`RANK_GAP`, `LANE_STEP`,
+    `PARALLEL_STEP`), but the rendered pill had no width bound and grew with its
+    text. `canvas-edge.tsx` now clamps it with `max-w-[160px]` plus
+    `inline-block truncate`, making the constant a ceiling. Deliberately one
+    line: a two-line pill forces `PARALLEL_STEP` from 64 to 80, and the wider row
+    spread was measured to raise pinned crossing counts (group of 6: 13 to 16).
+  - The rank-gap budget was half a pill short. `buildEdgeRoute` only centres a
+    label on its split column when the edge has vertical travel; one running
+    nearly straight across anchors at `splitX + width / 2`, so its pill spans
+    `splitX` to `splitX + width`. `computedRankSep` reserved only `width / 2`, so
+    the outermost lane's label landed inside the target node on any hub wide
+    enough to reach that lane. It now reserves a full width.
+  - `routeEveryEdge` moved out of `scripts/verify-graph-layout.ts` into the new
+    `lib/edge-routes.ts` so runtime and verifier share one definition of where an
+    edge is drawn. `HANDLE_ID`, `handleAnchor` and `isSideToSideRoute` moved to
+    `lib/canvas-geometry.ts` to avoid the resulting import cycle, the same
+    cycle-breaking move that module's header already documents.
+  - `findLabelCollisions` in `lib/edge-routes.ts` reports label-over-label and
+    label-over-node from real laid-out geometry. Deterministic, no model in the
+    loop. It found the second defect on its first run against a realistic graph.
+  - **Known limitation:** labels on top/bottom-handle edges are not checked,
+    because `routeEveryEdge` does not compute React Flow's smoothstep label point.
+  - **Two defects pinned, not fixed**, in `checkKnownLabelCollisionsMatchTheirPin`:
+    a cycle puts a forward and a back edge in one rank gap (and for two nodes the
+    routes are collinear, so the pair draws two arrows on one line), and past
+    roughly 33 ranks the `affordable` clamp in `computedRankSep` squeezes the one
+    shared ranksep below what an ordinary bundle of 2 needs. Both counts are
+    recorded as defects to drive to zero, not as acceptable targets.
+  - Gates: `typecheck`, `lint`, `verify:unit` and `build` all exit 0. The
+    corrected budget was confirmed by reintroducing the old formula and watching
+    the new assertion fail.
+
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
   ID the create dialog builds, retries once per 409 collision, then POSTs

@@ -21,7 +21,11 @@ import {
  * `MIN_NODE_GAP` and threw at module scope. Owning them here breaks it at the
  * root, so both sides can use plain static imports.
  *
- * Pure and DOM-free, like both of its consumers.
+ * Later, handle and edge routing symbols needed to flow into `lib/edge-routes.ts`,
+ * which would otherwise import from `lib/graph-layout.ts` and create a second cycle.
+ * `HANDLE_ID`, `handleAnchor`, and `isSideToSideRoute` live here for the same reason.
+ *
+ * Pure and DOM-free, like all of its consumers.
  */
 
 /** Positions snap to this, matching the canvas `Background` dot grid. */
@@ -104,6 +108,15 @@ export function edgeSplitX(
 }
 
 export interface Box extends NodeSize, XYPosition {}
+
+/** The four handle ids `canvas-node.tsx` renders, named once instead of
+ * scattered as string literals through the geometry below. */
+export const HANDLE_ID = {
+  top: "top",
+  right: "right",
+  bottom: "bottom",
+  left: "left",
+} as const;
 
 /**
  * A node's occupied rectangle.
@@ -426,4 +439,37 @@ function along(from: RoutePoint, toward: RoutePoint, length: number): RoutePoint
 /** Keeps the emitted `d` free of float noise, so two identical routes compare equal. */
 function round(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * The point on a box where a handle sits.
+ *
+ * React Flow gives the renderer these as `sourceX`/`sourceY`, but the layout
+ * has to compute them itself: lanes are assigned before anything is measured
+ * on screen, from the rectangles dagre produced.
+ */
+export function handleAnchor(box: Box, handle: string): XYPosition {
+  switch (handle) {
+    case HANDLE_ID.left:
+      return { x: box.x, y: box.y + box.height / 2 };
+    case HANDLE_ID.right:
+      return { x: box.x + box.width, y: box.y + box.height / 2 };
+    case HANDLE_ID.top:
+      return { x: box.x + box.width / 2, y: box.y };
+    default:
+      return { x: box.x + box.width / 2, y: box.y + box.height };
+  }
+}
+
+/**
+ * A route leaving one vertical face and entering the other — the only kind
+ * lanes apply to, and the same gate `canvas-edge.tsx`'s `isSideToSide` and
+ * `lib/edge-routes.ts`'s `routeEveryEdge` use to decide whether an
+ * edge is drawn through `buildEdgeRoute` at all.
+ */
+export function isSideToSideRoute(sourceHandle: string, targetHandle: string): boolean {
+  const isSide = (handle: string) =>
+    handle === HANDLE_ID.left || handle === HANDLE_ID.right;
+
+  return isSide(sourceHandle) && isSide(targetHandle);
 }

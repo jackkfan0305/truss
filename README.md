@@ -1,9 +1,11 @@
 # Truss
 
-A real-time collaborative system design workspace. Describe a system in plain
-English, an AI agent draws it onto a shared canvas, your collaborators refine it
-live, and the same agent turns the resulting graph into a Markdown technical
-spec.
+A real-time collaborative system design workspace. Your terminal agent draws a
+system onto a shared canvas through the `truss-diagram` skill, and your
+collaborators refine it live.
+
+Truss runs no model of its own — see
+[ADR 0001](docs/adr/0001-no-server-side-ai.md).
 
 **Live:** <https://truss-jet.vercel.app>
 
@@ -16,14 +18,9 @@ spec.
   snapshots persisted to Vercel Blob.
 - **Starter templates** — prebuilt system designs (monolith, microservices,
   event-driven, serverless…) that import straight into the live room.
-- **AI chat that routes itself** — one composer in the editor sidebar. An
-  `orchestrator` background task reads the canvas and the room's chat history,
-  then decides per message whether to answer in words, edit the canvas, or write
-  a spec. Its work log streams into the transcript and is durable, so every
-  member sees the same one after a reload.
-- **Spec generation** — the current graph becomes a Markdown spec, stored in
-  Vercel Blob with a pointer row in Postgres, attached to the chat turn that
-  asked for it, and downloadable as a `.md` file.
+- **Agent-drawn diagrams** — the `truss-diagram` skill creates, reads, edits and
+  deletes diagrams over MCP. Writes land through a paced draw, so a mounted
+  editor watches the agent's cursor place each node.
 
 ## Stack
 
@@ -34,8 +31,6 @@ spec.
 | Auth             | Clerk                   |
 | Database         | Prisma 7 + PostgreSQL   |
 | Canvas           | Liveblocks + React Flow (`@xyflow/react`) |
-| Background tasks | Trigger.dev v4          |
-| Model            | Google Gemini via the AI SDK |
 | Artifact storage | Vercel Blob (private access) |
 
 ## Prerequisites
@@ -43,11 +38,10 @@ spec.
 - Node.js 20+ (developed on 26)
 - A PostgreSQL database
 - Accounts for: [Clerk](https://clerk.com),
-  [Liveblocks](https://liveblocks.io), [Trigger.dev](https://trigger.dev),
-  [Vercel Blob](https://vercel.com/docs/storage/vercel-blob), and
-  [Google AI Studio](https://aistudio.google.com) for a Gemini key.
+  [Liveblocks](https://liveblocks.io), and
+  [Vercel Blob](https://vercel.com/docs/storage/vercel-blob).
 
-All five have free tiers that are enough to run this locally.
+All three have free tiers that are enough to run this locally.
 
 ## Setup
 
@@ -88,14 +82,6 @@ LIVEBLOCKS_PUBLIC_KEY=pk_...
 # Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
 # client bundle would let anyone overwrite any project's canvas.
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
-
-# ------------------------------------------------------------- Trigger.dev
-# API Keys page. Used by tasks.trigger() in route handlers; the CLI dev worker
-# does not read it (it authenticates via `trigger.dev login`).
-TRIGGER_SECRET_KEY=tr_dev_...
-
-# ------------------------------------------------------------ Google Gemini
-GEMINI_API_KEY=...   # GOOGLE_AI_API_KEY is also accepted
 ```
 
 `proxy.ts` throws at boot if the two Clerk URL vars are missing — with no public
@@ -115,11 +101,9 @@ is invisible to migrations and the seed.
 A plain name holds the development value; an optional `<NAME>_PROD` twin holds
 the production one. Nothing local reads the `_PROD` entries — `npm run dev`
 always gets development keys. The suffix is consumed only at deploy time, by
-`scripts/push-vercel-env.ts` and by the `syncEnvVars` extension in
-`trigger.config.ts`, which both resolve it through the same
-`resolveEnvKeys()` in `lib/env-keys.ts` so a new key cannot follow the rule in
-one and not the other. Either way the value lands under the plain name, so
-application code never branches on environment.
+`scripts/push-vercel-env.ts`, through `resolveEnvKeys()` in `lib/env-keys.ts`.
+Either way the value lands under the plain name, so application code never
+branches on environment.
 
 `scripts/verify-env-keys.ts` (part of `npm test`) pins that behaviour.
 
@@ -131,28 +115,14 @@ npm run generate           # regenerate the client into generated/prisma
 npx prisma db seed         # optional: three sample projects
 ```
 
-### Trigger.dev
-
-The AI runs in Trigger.dev tasks. Log the CLI in once — it authenticates
-separately from `TRIGGER_SECRET_KEY`:
-
-```bash
-npx trigger.dev@latest login
-```
-
-Then point `trigger.config.ts`'s `project` at your own project ref from the
-dashboard.
-
 ## Running it
 
 ```bash
 npm run dev
 ```
 
-That starts `next dev` **and** the Trigger.dev dev worker together. Open
-<http://localhost:3000>; `/` redirects to `/editor` once you are signed in.
-Without the Trigger worker running, the canvas and chat still load but every AI
-turn hangs — the tasks have nowhere to execute.
+Open <http://localhost:3000>; `/` redirects to `/editor` once you are signed
+in.
 
 ## Create, edit and delete diagrams from an agent
 
@@ -185,14 +155,10 @@ an HTTP(S) origin without a path.
 
 ## Deploying
 
-The app runs on Vercel; the AI tasks run in Trigger.dev's cloud. They are two
-separate deploys and each needs its own copy of the environment.
-
 ```bash
 npx vercel link                        # once, to bind this checkout to a project
 npx tsx scripts/push-vercel-env.ts     # .env → Vercel, applying the _PROD rule
 npx vercel --prod                      # deploy the app
-npx trigger.dev@latest deploy          # deploy the tasks
 ```
 
 - **Migrations run on the host build.** `vercel-build` is
@@ -203,10 +169,6 @@ npx trigger.dev@latest deploy          # deploy the tasks
   is the one that must never be dropped: Vercel refuses to store an uploaded
   `.env`, but the entry survives as a dangling symlink and the Next build then
   dies with `ENOENT: stat '/vercel/path0/.env'`.
-- **Trigger.dev gets its keys from the deploy**, not from the dashboard: the
-  `syncEnvVars` extension reads the local `.env` at build time and pushes the
-  resolved set. A deploy from CI, with no `.env` to read, leaves the existing
-  vars alone rather than wiping them.
 - **Clerk has no `_PROD` twin yet**, so the deployment authenticates against the
   Clerk *development* instance. It works — sign-in, sessions and the middleware
   all behave — but you get the development banner and development limits. Add
@@ -217,7 +179,7 @@ npx trigger.dev@latest deploy          # deploy the tasks
 
 | Command | What it does |
 | ------- | ------------ |
-| `npm run dev` | Next.js dev server + Trigger.dev dev worker |
+| `npm run dev` | Next.js dev server |
 | `npm run build` | Production build (runs `prisma generate` first) |
 | `npm run vercel-build` | What Vercel runs: generate, `migrate deploy`, build |
 | `npm run start` | Serve the production build |
@@ -229,24 +191,23 @@ npx trigger.dev@latest deploy          # deploy the tasks
 | `npm run doctor` | React Doctor scan |
 
 `scripts/verify-*.ts` are standalone contract checks — no test framework, no
-database, no network. Run one with `npx tsx scripts/verify-orchestrator.ts`;
+database, no network. Run one with `npx tsx scripts/verify-agent-graph.ts`;
 each exits non-zero on failure.
 
 ## Layout
 
 ```
-app/api        Authenticated route handlers: validate → authorize → trigger → persist
-app/editor     The workspace (project sidebar, canvas, AI panel)
-trigger/       Background tasks: orchestrator, design-agent, generate-spec
-lib/           Prisma client, access control, Liveblocks server helpers, prompts
+app/api        Authenticated route handlers: validate → authorize → write → persist
+app/editor     The workspace (project sidebar, canvas)
+lib/           Prisma client, access control, Liveblocks server helpers
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed
 context/       Product, architecture, UI, and standards docs — read these first
 scripts/       verify-* contract checks
 ```
 
-`context/architecture-context.md` is the source of truth for storage,
-authorization, and the AI generation model. `context/progress-tracker.md` has
+`context/architecture-context.md` is the source of truth for storage and
+authorization. `context/progress-tracker.md` has
 the current state, unit by unit.
 
 ## Notes and gotchas
@@ -256,11 +217,7 @@ the current state, unit by unit.
   `Cannot read properties of undefined (reading 'findFirst')`.
 - **Blob is private.** Every `@vercel/blob` call passes `access: "private"`;
   stored URLs are pointers, never handed to a browser. Reads go through the
-  authorized download route.
-- **Deployed Trigger.dev environments need their own env vars.** The workers
-  write to Postgres and Blob and call Gemini, so `DATABASE_URL`,
-  `BLOB_READ_WRITE_TOKEN`, and `GEMINI_API_KEY` must be set in the Trigger.dev
-  dashboard, not only in your local `.env`.
-- **A mid-run failure leaves a partial diagram.** The canvas build is paced, not
+  authorized canvas route.
+- **A mid-draw failure leaves a partial diagram.** The canvas build is paced, not
   atomic — on a shared canvas a rollback would either clobber or miss concurrent
   human edits, so the error path reports how many changes landed instead.

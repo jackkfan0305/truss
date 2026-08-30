@@ -1,7 +1,15 @@
 @AGENTS.md
 
-<!-- TRIGGER.DEV SKILLS START -->
-## Trigger.dev agent skills
+## Agent skills
 
-This project has Trigger.dev agent skills installed in `.claude/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`.
-<!-- TRIGGER.DEV SKILLS END -->
+### Issue tracker
+
+Issues live as GitHub issues in `jackkfan0305/truss`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

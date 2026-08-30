@@ -39,7 +39,7 @@ export function CanvasRoom({ roomId, children }: CanvasRoomProps) {
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
         id={roomId}
-        initialPresence={{ cursor: null, isThinking: false }}
+        initialPresence={{ cursor: null }}
       >
         {children}
       </RoomProvider>

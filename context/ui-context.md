@@ -4,58 +4,6 @@
 
 Dark only. No light mode. The visual language is a dark technical workspace — near-black backgrounds, layered surfaces, and vivid accent colors for interactive elements.
 
-### AI Sidechat
-
-The AI sidechat is intentionally monochrome. It uses only the page/surface,
-border, and copy tokens from the palette — no brand, AI, success, warning, or
-error accent colours. State is communicated with iconography and text, never
-colour alone.
-
-- The header visibly names the active provider and exact model ID.
-- Messages use one reading edge and minimal neutral surfaces, following modern
-  AI chat conventions rather than coloured role bubbles.
-- Each generation renders as one shared, reloadable assistant work turn placed
-  directly after its prompt. A shadcn Accordion progressively discloses the
-  durable chronological phases, curated reasoning summaries, and canvas
-  operations. The initiating client retains a private Trigger subscription only
-  to settle its own composer; the transcript does not require that token. Raw
-  provider chain of thought is never displayed.
-- Canvas operations remain visually pending until the run's atomic canvas
-  write completes. Completion and failure use both an icon and text.
-- The durable `ai-chat` row is updated in place as work arrives and carries the
-  final summary, so a reload reconstructs the activity without a Trigger token.
-  A stale `running` row becomes an explicit incomplete state after the
-  hard-kill timeout while retaining its partial work log.
-- Another collaborator's human prompt uses a left identity rail: avatar (or
-  initials fallback), name, then the message on the neutral `bg-elevated`
-  surface. Own prompts do not show the other-collaborator identity treatment.
-
-All colors are defined as CSS custom properties in `globals.css` and mapped to Tailwind tokens via `@theme inline`. Components must use these tokens — no hardcoded hex values or raw Tailwind color classes like `zinc-*`.
-
-| Role             | CSS Variable           | Hex / Value               |
-| ---------------- | ---------------------- | ------------------------- |
-| Page background  | `--bg-base`            | `#080809`                 |
-| Surface          | `--bg-surface`         | `#111114`                 |
-| Elevated surface | `--bg-elevated`        | `#18181c`                 |
-| Subtle surface   | `--bg-subtle`          | `#1e1e23`                 |
-| Default border   | `--border-default`     | `#2a2a30`                 |
-| Subtle border    | `--border-subtle`      | `#3a3a42`                 |
-| Primary text     | `--text-primary`       | `#f0f0f4`                 |
-| Secondary text   | `--text-secondary`     | `#c0c0cc`                 |
-| Muted text       | `--text-muted`         | `#808090`                 |
-| Faint text       | `--text-faint`         | `#505060`                 |
-| Brand accent     | `--accent-primary`     | `#00c8d4` (cyan)          |
-| Brand dim        | `--accent-primary-dim` | `rgba(0, 200, 212, 0.12)` |
-| AI accent        | `--accent-ai`          | `#6457f9` (indigo-purple) |
-| AI text          | `--accent-ai-text`     | `#8b82ff`                 |
-| Error            | `--state-error`        | `#ff4d4f`                 |
-| Success          | `--state-success`      | `#34d399`                 |
-| Warning          | `--state-warning`      | `#fbbf24`                 |
-
-Tailwind utility names map to these variables. Use `bg-page`, `bg-surface`, `text-copy-primary`, `text-copy-muted`, `border-surface-border`, `text-brand`, `bg-accent-dim`, etc.
-
-The page background is exposed as `bg-page`, not `bg-base`. Registering a color named `base` would make Tailwind's built-in `text-base` set `color` as well as `font-size`, and four generated `components/ui` files use `text-base`. Do not name a color token after a font-size step (`xs`, `sm`, `base`, `lg`, `xl`, …).
-
 ## Typography
 
 | Role      | Font       | CSS Variable        |
@@ -75,11 +23,10 @@ recoverable failure uses an accessible alert and a real Retry button, rather
 than exposing transport details.
 
 An authorized editor URL carrying a canonical opaque launch UUID imports the
-stored graph through the owner-only project route. It does not open the AI
-sidebar or create a chat turn. Importing shows a neutral canvas status overlay;
-a retryable failure appears over the canvas as a compact monochrome alert with
-a small Retry action. Graph labels and launch payload contents never render in
-this status UI. Ordinary editor visits retain the closed AI sidebar.
+stored graph through the owner-only project route. Importing shows a neutral
+canvas status overlay; a retryable failure appears over the canvas as a compact
+monochrome alert with a small Retry action. Graph labels and launch payload contents never render in
+this status UI. Ordinary editor visits retain the closed projects sidebar.
 
 ## Border Radius
 
@@ -140,9 +87,9 @@ shadcn/ui on top of Tailwind. No custom design system. Components live in `compo
 ## Layout Patterns
 
 - Editor workspace: full-viewport canvas or editor-home background with floating control islands and floating sidebar overlays.
-- Floating controls: left projects toggle plus project title, a minimal utility group, and a mirrored right toggle for AI chat. Use existing shadcn primitives and semantic surface tokens.
+- Floating controls: left projects toggle plus project title and a minimal utility group. Use existing shadcn primitives and semantic surface tokens.
 - Sidebars: floating overlays below the control row, with dark semi-transparent backgrounds and subtle borders.
-- On narrow screens, the utility group moves to a second right-aligned floating row so the title and sidebar toggles remain unobstructed.
+- On narrow screens, the utility group moves to a second right-aligned floating row so the title and the sidebar toggle remain unobstructed.
 
 ## Icons
 

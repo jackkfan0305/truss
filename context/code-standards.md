@@ -32,19 +32,17 @@
 - Validate and parse request input before any logic runs.
 - Enforce auth and project ownership checks before any mutation.
 - Return consistent, predictable response shapes.
-- Keep route handlers thin — push complexity into shared modules or background tasks.
+- Keep route handlers thin — push complexity into shared modules.
 
 ## Data and Storage
 
 - Project metadata and relationships belong in PostgreSQL via Prisma.
-- Canvas snapshots and generated specs belong in Vercel Blob; Prisma stores only the blob URL reference.
+- Canvas snapshots belong in Vercel Blob; Prisma stores only the blob URL reference.
 - Do not store large generated content directly in the database.
-- Task run records are first-class relational data — treat ownership and run IDs as verified before any token issuance.
 
 ## File Organization
 
 - `lib/` — shared infrastructure: Prisma client, auth helpers, utilities.
-- `trigger/` — all durable background tasks and AI workflows.
 - `components/` — UI composition only; no business logic.
-- `app/api/` — route handlers for auth, triggering, and persistence.
+- `app/api/` — route handlers for auth, canvas writes, and persistence.
 - Name files after the responsibility they contain, not the technology.

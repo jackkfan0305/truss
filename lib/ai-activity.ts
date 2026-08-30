@@ -1,20 +1,15 @@
 import type { XYPosition } from "@xyflow/react";
 
 import { getLiveblocks } from "@/lib/liveblocks";
-import {
-  AI_STATUS_FEED_ID,
-  AI_USER_ID,
-  AI_USER_NAME,
-  type AiStatusMessage,
-} from "@/types/tasks";
+import { AI_USER_ID, AI_USER_NAME } from "@/types/tasks";
 
 /**
- * The AI's visible side of a background run (23-design-agent-logic): its
- * presence in the room and the status feed everyone reads.
+ * The agent's visible side of a canvas write: its presence in the room, so a
+ * mounted editor sees a cursor travel to each node before the node lands.
  *
- * Both go through the same Liveblocks room the humans are in — presence via the
- * node SDK's connection-less `setPresence`, status via the room-scoped
- * `ai-status-feed`. No parallel realtime system, per the scope limits.
+ * It goes through the same Liveblocks room the humans are in, via the node
+ * SDK's connection-less `setPresence`. No parallel realtime system, per the
+ * scope limits.
  *
  * Node-only: it holds the Liveblocks secret.
  */
@@ -23,13 +18,12 @@ import {
 const AI_COLOR = "#6457f9";
 
 /**
- * Presence expires on its own, which is what makes it safe: a task that is
- * killed mid-run leaves a ghost avatar for at most this long rather than
- * forever. Comfortably longer than a design run, which the task caps at three
- * minutes.
+ * Presence expires on its own, which is what makes it safe: a write that is
+ * killed mid-draw leaves a ghost avatar for at most this long rather than
+ * forever. Comfortably longer than a paced draw.
  *
- * ponytail: no heartbeat. If `maxDuration` ever passes this, refresh presence
- * between steps instead of raising the TTL to the 3599s maximum.
+ * ponytail: no heartbeat. If a draw ever runs longer than this, refresh
+ * presence between steps instead of raising the TTL to the 3599s maximum.
  */
 const PRESENCE_TTL_SECONDS = 300;
 
@@ -37,21 +31,21 @@ const PRESENCE_TTL_SECONDS = 300;
 const PRESENCE_CLEAR_TTL_SECONDS = 2;
 
 /**
- * Puts the AI in the room as a collaborator: an avatar in the stack, a cursor
- * on the canvas, and the thinking flag the cursor badge reads.
+ * Puts the agent in the room as a collaborator: an avatar in the stack and a
+ * cursor on the canvas.
  *
- * Failing to announce presence must not fail a generation that is otherwise
- * fine, so this logs and continues rather than throwing — the canvas write is
- * the work, this is the commentary.
+ * Failing to announce presence must not fail a write that is otherwise fine, so
+ * this logs and continues rather than throwing — the canvas write is the work,
+ * this is the commentary.
  */
 export async function setAiPresence(
   roomId: string,
-  presence: { cursor: XYPosition | null; isThinking: boolean }
+  presence: { cursor: XYPosition | null }
 ): Promise<void> {
-  await announce("presence", roomId, () =>
+  await announce(roomId, () =>
     getLiveblocks().setPresence(roomId, {
       userId: AI_USER_ID,
-      data: { cursor: presence.cursor, isThinking: presence.isThinking },
+      data: { cursor: presence.cursor },
       userInfo: { name: AI_USER_NAME, avatar: "", color: AI_COLOR },
       ttl: PRESENCE_TTL_SECONDS,
     })
@@ -59,15 +53,15 @@ export async function setAiPresence(
 }
 
 /**
- * Retires the AI from the room. There is no delete-presence call, so the
+ * Retires the agent from the room. There is no delete-presence call, so the
  * cleared state is written with the shortest TTL the API accepts and expires
  * itself moments later.
  */
 export async function clearAiPresence(roomId: string): Promise<void> {
-  await announce("presence", roomId, () =>
+  await announce(roomId, () =>
     getLiveblocks().setPresence(roomId, {
       userId: AI_USER_ID,
-      data: { cursor: null, isThinking: false },
+      data: { cursor: null },
       userInfo: { name: AI_USER_NAME, avatar: "", color: AI_COLOR },
       ttl: PRESENCE_CLEAR_TTL_SECONDS,
     })
@@ -75,48 +69,18 @@ export async function clearAiPresence(roomId: string): Promise<void> {
 }
 
 /**
- * Publishes one line to the room's shared status feed, so progress is visible
- * to every participant rather than only to whoever started the run.
- *
- * The feed is created on demand: `createFeedMessage` is the common path and
- * costs one request, and the create only happens on a room whose feed does not
- * exist yet — which is once per project, ever.
- */
-export async function publishAiStatus(
-  roomId: string,
-  message: AiStatusMessage
-): Promise<void> {
-  await announce("status", roomId, async () => {
-    const client = getLiveblocks();
-    const params = {
-      roomId,
-      feedId: AI_STATUS_FEED_ID,
-      data: message,
-    };
-
-    try {
-      await client.createFeedMessage(params);
-    } catch {
-      await client.createFeed({ roomId, feedId: AI_STATUS_FEED_ID });
-      await client.createFeedMessage(params);
-    }
-  });
-}
-
-/**
- * Announcements are cosmetic: a room that cannot be told about a run is not a
- * reason to abandon the run. Errors are logged with their room rather than
- * swallowed, so a feed that is failing for everyone is still visible in the
- * task logs.
+ * Presence is cosmetic: a room that cannot be told about a write is not a
+ * reason to abandon the write. Errors are logged with their room rather than
+ * swallowed, so a room that is failing for everyone is still visible in the
+ * server logs.
  */
 async function announce(
-  what: string,
   roomId: string,
   publish: () => Promise<void>
 ): Promise<void> {
   try {
     await publish();
   } catch (error: unknown) {
-    console.error(`AI ${what} update failed for room ${roomId}`, error);
+    console.error(`AI presence update failed for room ${roomId}`, error);
   }
 }

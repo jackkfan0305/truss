@@ -57,6 +57,39 @@ import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 const RANK_ROW_GAP = MIN_NODE_GAP * 3;
 
 /**
+ * Whether any pair of nodes is joined in both directions.
+ *
+ * A back edge (a retry, a rollback, a feedback path) is not a second edge in
+ * an existing bundle: `assignLanes` keys a bundle on source plus source handle,
+ * so `a -> b` and `b -> a` are two bundles that each start at lane 0 and each
+ * claim the corridor between the ranks from their own side. Their labels then
+ * meet in the middle of a gap sized for one direction's traffic.
+ */
+function hasReversePair(edges: readonly CanvasEdge[]): boolean {
+  const seen = new Set<string>();
+
+  // JSON-encoded for the same reason `layoutGraphWithRanks` encodes its pair
+  // keys: node ids are arbitrary human-authored strings on a hand-drawn canvas,
+  // so a delimited join could let one id colliding with another read as a
+  // reverse pair that was never drawn.
+  for (const edge of edges) {
+    if (edge.source === edge.target) {
+      continue;
+    }
+
+    seen.add(JSON.stringify([edge.source, edge.target]));
+  }
+
+  for (const edge of edges) {
+    if (seen.has(JSON.stringify([edge.target, edge.source]))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * The rank gap this graph's widest bundle needs, clamped to what the compact
  * agent graph contract can represent.
  *
@@ -72,7 +105,8 @@ const RANK_ROW_GAP = MIN_NODE_GAP * 3;
 function computedRankSep(
   maxLane: number,
   placed: readonly CanvasNode[],
-  rankX: ReadonlyMap<string, number>
+  rankX: ReadonlyMap<string, number>,
+  bidirectional: boolean
 ): number {
   // A full pill width past the outermost split column, not half of one.
   // `buildEdgeRoute` only centres a label on its split column when the edge
@@ -83,9 +117,23 @@ function computedRankSep(
   // `splitX + width`. Reserving only half a width assumed the centred case and
   // left the straight-across case overhanging by the other half, which put the
   // outermost lane's label a full `LABEL_GAP` inside the target node.
+  //
+  // A gap carrying traffic both ways needs that corridor twice, once measured
+  // in from each face, because the two directions never share a bundle and so
+  // never share a lane. One corridor's worth leaves the two labels overlapping
+  // in the middle: the forward label sits `TRUNK_MIN + width / 2` in from the
+  // source face and the reverse label the same distance in from the target
+  // face, so they clear each other only once the gap holds both pills whole.
+  //
+  // `maxLane` is used for both sides rather than each direction's own widest
+  // bundle. That over-reserves when the reverse edge is a lone back edge and a
+  // forward bundle is wide, which is the common shape, but ranksep is one value
+  // for the whole graph, so a per-direction figure could not be spent where it
+  // was earned anyway.
+  const corridor = TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width;
   const needed = Math.max(
     RANK_GAP,
-    TRUNK_MIN + maxLane * LANE_STEP + EDGE_LABEL_CLEARANCE.width + LABEL_GAP
+    bidirectional ? 2 * corridor + LABEL_GAP : corridor + LABEL_GAP
   );
 
   // Nodes in one rank share an x centre, so counting distinct centres counts
@@ -592,6 +640,11 @@ export function applyLayout(
   const probeLanes = assignLanes(wireEdges(probe.nodes, sourceEdges), probe.rankX);
   let maxLane = Math.max(0, ...probeLanes.values());
 
+  // Read off the edge list rather than off the layout: a reverse pair widens
+  // every rank gap, and `ranksep` is one value for the whole graph, so which
+  // gap the pair happens to land in does not change the answer.
+  const reversePair = hasReversePair(sourceEdges);
+
   let laidOut: LayoutGraphResult;
   let wired: ReturnType<typeof wireEdges>;
   let lanes: Map<string, number>;
@@ -602,7 +655,7 @@ export function applyLayout(
   // `maxLane` only ever rises here, and it's bounded above by the bundle's
   // own edge count.
   do {
-    laidOut = layoutGraphWithRanks(nodes, sourceEdges, computedRankSep(maxLane, probe.nodes, probe.rankX));
+    laidOut = layoutGraphWithRanks(nodes, sourceEdges, computedRankSep(maxLane, probe.nodes, probe.rankX, reversePair));
     wired = wireEdges(laidOut.nodes, sourceEdges);
     lanes = assignLanes(wired, laidOut.rankX);
 

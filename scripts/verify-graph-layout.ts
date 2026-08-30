@@ -1255,14 +1255,20 @@ function checkLabelCollisionsCatchALabelOverANode(): void {
  * `checkLaidOutGraphsHaveNoLabelCollisions` already holds every other shape to.
  * Both need a design decision this pin deliberately does not make:
  *
- * - A cycle puts a forward edge and a back edge in the same rank gap.
- *   `assignLanes` keys a bundle on source plus source handle, so the two
- *   directions are separate bundles that each start at lane 0 and each claim
- *   the corridor from their own side. Their labels meet in the middle. For a
- *   two-node cycle the routes themselves are collinear, so the pair draws two
- *   arrows along one line, which is the larger defect the labels are only a
- *   symptom of. Fixing it means treating a bidirectional pair as one lane
- *   group, which moves every crossing count pinned above.
+ * - A back edge spanning more than one rank is drawn as a single straight run
+ *   between its two node faces, so it passes through whatever ranks sit
+ *   between them, and its label rides that run onto an intervening node. The
+ *   three-node cycle below routes `c -> a` as one segment from (380, -20) to
+ *   (-360, -20), straight across node `b` at x -80..100. This is a routing
+ *   defect, not a spacing one: no rank gap is wide enough to help, because the
+ *   run does not stay in a gap. Fixing it means routing a multi-rank back edge
+ *   around the rank band, above or below the nodes, which is real new geometry
+ *   rather than a wider corridor.
+ *
+ *   A back edge between *adjacent* ranks is fixed and no longer pinned:
+ *   `computedRankSep` now reserves two corridors when `hasReversePair` sees
+ *   traffic both ways, and `checkLaidOutGraphsHaveNoLabelCollisions` holds the
+ *   two-node cycle to zero.
  *
  * - A long chain trips the `affordable` clamp in `computedRankSep`. One
  *   ranksep is shared by every gap in the graph, sized for the widest bundle,
@@ -1274,18 +1280,19 @@ function checkLabelCollisionsCatchALabelOverANode(): void {
  *   `buildEdgeRoute` explicitly refuses to do today.
  */
 function checkKnownLabelCollisionsMatchTheirPin(): void {
-  const cycleNodes = [makeNode("a"), makeNode("b")];
+  const cycleNodes = [makeNode("a"), makeNode("b"), makeNode("c")];
   const cycleEdges = [
-    makeEdge("fwd", "a", "b", "go forward"),
-    makeEdge("back", "b", "a", "retry"),
+    makeEdge("ab", "a", "b", "next"),
+    makeEdge("bc", "b", "c", "next"),
+    makeEdge("ca", "c", "a", "rollback"),
   ];
   const cycleLaid = applyLayout(cycleNodes, cycleEdges);
   const cycleCollisions = findLabelCollisions(cycleLaid.nodes, cycleLaid.edges);
 
   assert.equal(
     cycleCollisions.length,
-    1,
-    `a two-node cycle draws ${cycleCollisions.length} label collisions, expected the pinned 1 ` +
+    3,
+    `a three-node cycle draws ${cycleCollisions.length} label collisions, expected the pinned 3 ` +
       `(drive this to 0, do not raise it) — ${cycleCollisions.map((c) => c.describe).join("; ")}`,
   );
 
@@ -1355,6 +1362,26 @@ function checkLaidOutGraphsHaveNoLabelCollisions(): void {
 
   const parallelLaid = applyLayout(parallelNodes, parallelEdges);
   const parallelCollisions = findLabelCollisions(parallelLaid.nodes, parallelLaid.edges);
+
+  // A retry or rollback edge straight back to the previous step: two bundles in
+  // one rank gap, each claiming the corridor from its own face. `computedRankSep`
+  // reserves two corridors for this, so the two labels clear each other rather
+  // than meeting in the middle. The multi-rank version is still pinned in
+  // `checkKnownLabelCollisionsMatchTheirPin`, for a different reason.
+  const cycleNodes = [makeNode("a"), makeNode("b")];
+  const cycleEdges = [
+    makeEdge("fwd", "a", "b", "go forward"),
+    makeEdge("back", "b", "a", "retry"),
+  ];
+
+  const cycleLaid = applyLayout(cycleNodes, cycleEdges);
+  const cycleCollisions = findLabelCollisions(cycleLaid.nodes, cycleLaid.edges);
+
+  assert.deepEqual(
+    cycleCollisions,
+    [],
+    `two-node cycle: ${cycleCollisions.map((c) => c.describe).join("; ")}`,
+  );
 
   // Verify all three are collision-free.
   assert.deepEqual(

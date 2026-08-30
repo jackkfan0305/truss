@@ -34,12 +34,19 @@ Update this file whenever the current phase, active feature, or implementation s
     loop. It found the second defect on its first run against a realistic graph.
   - **Known limitation:** labels on top/bottom-handle edges are not checked,
     because `routeEveryEdge` does not compute React Flow's smoothstep label point.
+  - Adjacent-rank cycles fixed. A retry or rollback edge back to the previous
+    step is a second bundle in the same gap, not a second member of an existing
+    one, so both directions started at lane 0 and their labels met in the middle
+    of a gap sized for one direction. `computedRankSep` now reserves two
+    corridors when `hasReversePair` sees traffic both ways.
   - **Two defects pinned, not fixed**, in `checkKnownLabelCollisionsMatchTheirPin`:
-    a cycle puts a forward and a back edge in one rank gap (and for two nodes the
-    routes are collinear, so the pair draws two arrows on one line), and past
-    roughly 33 ranks the `affordable` clamp in `computedRankSep` squeezes the one
-    shared ranksep below what an ordinary bundle of 2 needs. Both counts are
-    recorded as defects to drive to zero, not as acceptable targets.
+    a back edge spanning more than one rank is drawn as a single straight run
+    between node faces, so it crosses any rank in between and its label rides
+    that run onto an intervening node (a routing defect no gap width can fix,
+    needing the run taken around the rank band), and past roughly 33 ranks the
+    `affordable` clamp in `computedRankSep` squeezes the one shared ranksep below
+    what an ordinary bundle of 2 needs. Both counts are recorded as defects to
+    drive to zero, not as acceptable targets.
   - Gates: `typecheck`, `lint`, `verify:unit` and `build` all exit 0. The
     corrected budget was confirmed by reintroducing the old formula and watching
     the new assertion fail.

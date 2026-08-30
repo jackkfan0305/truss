@@ -361,6 +361,7 @@ async function checkDiagramAccess() {
       name: "Owned One",
       isOwner: true,
       storyboardId: OWNER_BOARD_ID,
+      ownsStoryboard: true,
     },
     "the owner should reach their own diagram, with the board sharing hangs off",
   );
@@ -372,6 +373,7 @@ async function checkDiagramAccess() {
       name: "Standalone",
       isOwner: true,
       storyboardId: null,
+      ownsStoryboard: false,
     },
     "a diagram with no parent storyboard is still a valid, readable diagram",
   );
@@ -383,9 +385,32 @@ async function checkDiagramAccess() {
       name: "Shared With Me",
       isOwner: false,
       storyboardId: SHARED_BOARD_ID,
+      ownsStoryboard: false,
     },
     "a collaborator on the parent board reaches the diagram despite email casing",
   );
+
+  // Owning a diagram is not owning the board it sits on, and only the latter
+  // may invite. The share dialog gates on `ownsStoryboard` for exactly this.
+  await prisma.diagram.update({
+    where: { id: "verify-standalone" },
+    data: { storyboardId: SHARED_BOARD_ID },
+  });
+  assert.deepEqual(
+    await getAccessibleDiagram("verify-standalone", owner),
+    {
+      id: "verify-standalone",
+      name: "Standalone",
+      isOwner: true,
+      storyboardId: SHARED_BOARD_ID,
+      ownsStoryboard: false,
+    },
+    "a diagram you own on a board you do not own must not report storyboard ownership",
+  );
+  await prisma.diagram.update({
+    where: { id: "verify-standalone" },
+    data: { storyboardId: null },
+  });
 
   assert.equal(
     await getAccessibleDiagram("verify-standalone", collaborator),

@@ -11,8 +11,12 @@ Truss runs no model of its own — see
 
 ## What it does
 
-- **Diagrams** — sign in, create a diagram, invite collaborators by email. The
-  owner can rename, delete, and manage members; collaborators can open and edit.
+- **Diagrams** — sign in, create a diagram, open it in the editor. The owner can
+  rename and delete it.
+- **Storyboards** — the plan a diagram sits on, and the thing collaborators are
+  invited to by email. A diagram with no parent storyboard is owner-only and
+  shows no Share control. Nothing creates a storyboard yet; the agent-facing
+  create lands with the storyboard tools.
 - **Collaborative canvas** — React Flow over Liveblocks Storage. Live cursors,
   presence avatars, shaped/colored nodes, right-angle labelled edges, and
   snapshots persisted to Vercel Blob.
@@ -112,7 +116,7 @@ branches on environment.
 ```bash
 npx prisma migrate dev     # apply migrations
 npm run generate           # regenerate the client into generated/prisma
-npx prisma db seed         # optional: three sample diagrams
+npx prisma db seed         # optional: three sample storyboards + four diagrams
 ```
 
 ## Running it

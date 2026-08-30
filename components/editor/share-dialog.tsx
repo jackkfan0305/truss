@@ -54,8 +54,8 @@ export function ShareDialog({
       onOpenChange={onOpenChange}
       title="Share diagram"
       description={
-        diagram.isOwner
-          ? `Anyone on the storyboard "${diagram.name}" sits on can open it.`
+        diagram.ownsStoryboard
+          ? `Everyone invited to the storyboard that "${diagram.name}" sits on can open it.`
           : `You have access to "${diagram.name}" as a collaborator.`
       }
       footer={
@@ -67,7 +67,7 @@ export function ShareDialog({
       <div className="grid gap-4">
         <CopyLinkRow diagramId={diagram.id} />
 
-        {diagram.isOwner ? (
+        {diagram.ownsStoryboard ? (
           <form
             id={INVITE_FORM_ID}
             onSubmit={handleSubmit}
@@ -109,7 +109,7 @@ export function ShareDialog({
             members={members}
             isLoading={isLoading}
             isPending={isPending}
-            canRemove={diagram.isOwner}
+            canRemove={diagram.ownsStoryboard}
             onRemove={remove}
           />
         </div>

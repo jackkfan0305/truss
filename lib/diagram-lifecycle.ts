@@ -16,6 +16,17 @@ const TOMBSTONED = {
 /** The inverse, for every list and lookup that must not surface a tombstone. */
 export const NOT_TOMBSTONED = { deletingAt: null, deletedAt: null } as const;
 
+/**
+ * The same rule as `TOMBSTONED`, applied to a row already in hand rather than
+ * to a query. Kept beside its where-clause twins so the pair of columns that
+ * defines "tombstoned" is named in exactly one file.
+ */
+export function isTombstoned(
+  diagram: Readonly<{ deletingAt: Date | null; deletedAt: Date | null }>,
+): boolean {
+  return diagram.deletingAt !== null || diagram.deletedAt !== null;
+}
+
 export async function cleanupTombstonedRoom(
   diagramId: string,
   rooms: Readonly<RoomLifecycle>,

@@ -17,8 +17,14 @@ export interface DiagramSummary {
  * `storyboardId` is the diagram's parent board, or `null` for a standalone
  * diagram. Sharing hangs off it: collaborators are invited to a storyboard, so
  * a diagram with no parent has nobody to invite and no share dialog.
+ *
+ * `ownsStoryboard` is a separate question from `isOwner`, not a synonym.
+ * Inviting and removing collaborators are storyboard mutations, so they are the
+ * parent owner's to make — and a diagram you own can sit on a board you do not.
+ * `false` whenever there is no parent at all.
  */
 export interface DiagramAccess extends DiagramSummary {
   isOwner: boolean
   storyboardId: string | null
+  ownsStoryboard: boolean
 }

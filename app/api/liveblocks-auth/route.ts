@@ -13,9 +13,10 @@ import { jsonError, readJsonBody } from "@/lib/api-requests";
  * client asks for is exactly the diagram whose membership must be checked.
  *
  * Access tokens rather than ID tokens: membership here is dynamic — a
- * collaborator is a `DiagramCollaborator` row matched on email — so permission
- * is computed per request from the database instead of mirrored into the room's
- * `usersAccesses` on every invite and removal.
+ * collaborator is a `StoryboardCollaborator` row on the diagram's parent board,
+ * matched on email — so permission is computed per request from the database
+ * instead of mirrored into the room's `usersAccesses` on every invite and
+ * removal.
  */
 
 /** The room name the Liveblocks client sends, or `null` if the body is junk. */

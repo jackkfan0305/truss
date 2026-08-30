@@ -10,12 +10,6 @@ export const DEFAULT_DIAGRAM_NAME = "Untitled Diagram";
 export const MAX_DIAGRAM_NAME_LENGTH = 120;
 
 /**
- * A diagram ID doubles as the /editor/[roomId] segment and the Liveblocks room
- * ID, so it is a slug the client generates from the diagram name plus a short
- * suffix. Lowercase alphanumeric groups joined by single hyphens — never
- * leading, trailing or doubled.
- */
-/**
  * Deliberately loose: one `@`, no whitespace, a dot in the domain. Full RFC 5322
  * validation rejects addresses that really do deliver, and Clerk is the actual
  * authority on whether an address exists. This only has to keep obvious junk out

@@ -1,6 +1,6 @@
 import type { Authorization, Identity } from "@/lib/access";
 import { resolveIdentityEmail, resolveIdentitySource } from "@/lib/agent-identity";
-import { NOT_TOMBSTONED } from "@/lib/diagram-lifecycle";
+import { isTombstoned, NOT_TOMBSTONED } from "@/lib/diagram-lifecycle";
 import { jsonError } from "@/lib/api-requests";
 import { prisma } from "@/lib/prisma";
 import type { DiagramAccess } from "@/types/diagram";
@@ -45,7 +45,16 @@ export async function getAccessibleDiagram(
         ...(identity.email ? [collaboratesOn(identity.email)] : []),
       ],
     },
-    select: { id: true, name: true, ownerId: true, storyboardId: true },
+    select: {
+      id: true,
+      name: true,
+      ownerId: true,
+      storyboardId: true,
+      // Inviting and removing collaborators is a storyboard mutation, so the
+      // share dialog has to gate on *that* owner. The two columns are
+      // independent: a diagram you own can sit on someone else's board.
+      storyboard: { select: { ownerId: true } },
+    },
   });
 
   if (!diagram) {
@@ -57,6 +66,7 @@ export async function getAccessibleDiagram(
     name: diagram.name,
     isOwner: diagram.ownerId === identity.userId,
     storyboardId: diagram.storyboardId,
+    ownsStoryboard: diagram.storyboard?.ownerId === identity.userId,
   };
 }
 
@@ -112,9 +122,7 @@ export async function authorizeDiagram(
     return { ok: false, response: jsonError("Diagram not found", 404) };
   }
 
-  const isTombstoned = diagram.deletingAt !== null || diagram.deletedAt !== null;
-
-  if (isTombstoned && (!allowDeletionStates || diagram.ownerId !== userId)) {
+  if (isTombstoned(diagram) && (!allowDeletionStates || diagram.ownerId !== userId)) {
     return { ok: false, response: jsonError("Diagram not found", 404) };
   }
 

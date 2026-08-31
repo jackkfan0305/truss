@@ -22,8 +22,9 @@ import sanitizeHtml from "sanitize-html";
  */
 
 /**
- * Blocks are what a thread anchors to, so they are also what carries an `id`.
- * Inline tags are the emphasis and links inside one.
+ * Block-level tags. A thread anchors to one of these at the top level, so they
+ * are also the only tags that keep an `id`. Inline tags are the emphasis, links
+ * and images inside one.
  */
 const BLOCK_TAGS = [
   "p",
@@ -49,40 +50,38 @@ const BLOCK_TAGS = [
 const INLINE_TAGS = ["strong", "em", "a", "span", "br", "img"];
 
 /**
- * The vocabulary a panel may style itself with. Deliberately semantic rather
- * than Tailwind utilities: the panel stylesheet owns what these look like, so
- * an agent cannot position, hide or overlay anything, and the set widens by an
- * explicit edit here rather than by a class nobody reviewed. Per ADR 0002,
- * widening it widens it for every panel that already exists.
+ * The vocabulary a panel may style itself with — the columns, callouts and
+ * badges ADR 0002 names, and nothing beyond them. Semantic rather than Tailwind
+ * utilities: the panel stylesheet owns what these look like, so an agent cannot
+ * position, hide or overlay anything, and the set widens by an explicit edit
+ * here rather than by a class nobody reviewed. Per that ADR, widening it widens
+ * it for every panel that already exists.
  */
 export const PANEL_CLASS_ALLOWLIST = [
   // Layout
   "columns",
   "column",
-  "row",
-  "stack",
-  "spread",
-  "center",
   // Emphasis
   "callout",
   "callout-warn",
-  "callout-danger",
   "badge",
-  "lead",
   "muted",
 ];
 
 /**
- * Images come from our own Blob store or are inlined. Anything else would let a
- * panel phone out — an `img` src is a GET the browser makes unasked, which is
- * enough to report who read the plan and when.
+ * The one host a panel image may come from, named by `NEXT_PUBLIC_BLOB_HOSTNAME`
+ * because the store subdomain is assigned by Vercel and differs per
+ * environment. Unset means no remote image survives, which is the safe way to
+ * be wrong: a matched-by-shape allowlist such as `*.public.blob.vercel-storage.com`
+ * would admit every other Vercel tenant's store, and a foreign `img` src is a
+ * GET the browser makes unasked — enough to report who read the plan and when.
  *
- * A suffix rather than one exact host: the store subdomain is assigned by
- * Vercel and differs per environment, so this trusts Vercel Blob rather than
- * our own store specifically. Pin it to the store host once panels have an
- * upload path to pin it against.
+ * Read per call rather than at module load so a deploy that sets it late still
+ * sees it, and so the check is testable without import order mattering.
  */
-const BLOB_HOST_SUFFIX = ".public.blob.vercel-storage.com";
+function blobHostname(): string | undefined {
+  return process.env.NEXT_PUBLIC_BLOB_HOSTNAME || undefined;
+}
 
 const markdown: MarkdownIt = new MarkdownItCallable({
   // Panels are HTML. Safe only because of the sanitizing pass below.
@@ -117,15 +116,23 @@ function isSafeLink(url: string): boolean {
 function isPanelImageSource(url: string): boolean {
   const normalized = normalizeUrl(url);
 
-  if (!isSafeLink(normalized)) return false;
+  // Already normalized, so `validateLink` directly rather than `isSafeLink`.
+  if (!markdown.validateLink(normalized)) return false;
 
   // `validateLink` has already refused every `data:` that is not an image.
   if (normalized.toLowerCase().startsWith("data:")) return true;
 
-  try {
-    const { protocol, hostname } = new URL(normalized);
+  const host = blobHostname();
 
-    return protocol === "https:" && hostname.endsWith(BLOB_HOST_SUFFIX);
+  if (host === undefined) return false;
+
+  try {
+    const { protocol, hostname, username, password } = new URL(normalized);
+
+    // Credentials in an image source are a phishing shape, never our own URLs.
+    if (username !== "" || password !== "") return false;
+
+    return protocol === "https:" && hostname === host;
   } catch {
     // Relative and unparseable sources both land here. A panel names its images
     // absolutely; there is nothing app-relative for one to point at.
@@ -142,12 +149,14 @@ function isPanelImageSource(url: string): boolean {
  */
 export function renderPanelHtml(content: string): string {
   /*
-   * How deep the tag being transformed sits. `onOpenTag` fires for every open
-   * tag before `transformTags`, and `onCloseTag` for every close, so the pair
-   * stays balanced even inside subtrees the sanitizer is discarding — which is
-   * why the depth is counted here rather than read off the transform.
+   * `openTags` counts what the walk is currently inside; `tagDepth` is that
+   * count for the tag `transformTags` is looking at right now. `onOpenTag`
+   * fires for every open tag before `transformTags`, and `onCloseTag` for every
+   * close, so the pair stays balanced even inside subtrees the sanitizer is
+   * discarding — which is why the depth is counted here rather than read off
+   * the transform, which never sees those tags.
    */
-  let depth = 0;
+  let openTags = 0;
   let tagDepth = 0;
 
   return sanitizeHtml(markdown.render(content), {
@@ -166,11 +175,11 @@ export function renderPanelHtml(content: string): string {
      */
     allowedSchemesAppliedToAttributes: [],
     onOpenTag: () => {
-      tagDepth = depth;
-      depth += 1;
+      tagDepth = openTags;
+      openTags += 1;
     },
     onCloseTag: () => {
-      depth -= 1;
+      openTags -= 1;
     },
     transformTags: {
       "*": (tagName, attribs) => {
@@ -179,9 +188,14 @@ export function renderPanelHtml(content: string): string {
         if (tagDepth > 0 || !BLOCK_TAGS.includes(tagName)) delete next.id;
 
         if (tagName === "a") {
+          // A blank href is no destination at all, and it must not collect the
+          // rewrite below: sanitize-html drops the empty attribute afterwards,
+          // which would leave an anchor claiming a target it cannot open.
           if (next.href !== undefined && !isSafeLink(next.href)) {
             delete next.href;
           }
+
+          if (next.href?.trim() === "") delete next.href;
 
           if (next.href === undefined) {
             delete next.target;
@@ -224,7 +238,7 @@ export function renderPanelHtml(content: string): string {
  * Here rather than in a component because every surface rendering this module's
  * output needs the same steps, and a panel and its preview should not drift.
  */
-export const MARKDOWN_STYLES = [
+export const PANEL_STYLES = [
   "[&_p]:my-0 [&_p+p]:mt-2",
   "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-4",
   "[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-4",

@@ -14,16 +14,28 @@ Update this file whenever the current phase, active feature, or implementation s
   module. `renderChatMarkdown` is now `renderPanelHtml`, which renders and
   scrubs in one step so no caller can hold the unsanitized string. Nothing
   renders through it yet — this is a prefactor ahead of the board, per ADR 0002.
-  Tags outside the block and inline lists are dropped, along with every handler
-  attribute and every `style` attribute (which costs markdown table alignment).
-  Link schemes are still markdown-it's own rule, applied to raw HTML anchors
-  too, with control characters removed first so an obfuscated scheme is judged
-  as the browser will resolve it; every surviving link gets `target="_blank"`
-  and the full `rel`. An `img` survives only from our Blob host or as an inline
-  `data:` image and is dropped whole otherwise. `class` is a fixed semantic
-  vocabulary (`PANEL_CLASS_ALLOWLIST`) the panel stylesheet will own, and `id`
-  survives only on a top-level block, since that is what a thread anchors to.
-  `scripts/verify-panel-html.ts` covers all of it without a DOM.
+  The file keeps its name because the issue names it; the exports (`renderPanelHtml`,
+  `PANEL_CLASS_ALLOWLIST`, `PANEL_STYLES`) say what it is now.
+  - Tags outside the block and inline lists are dropped, along with every
+    handler attribute and every `style` attribute, which costs markdown table
+    alignment. Asserted, so the loss is a decision rather than a surprise.
+  - Link schemes stay markdown-it's own rule, applied to raw HTML anchors too,
+    with control characters removed first so an obfuscated scheme is judged as
+    the browser will resolve it. Every surviving link gets `target="_blank"` and
+    the full `rel`; a blank href gets neither, since it is no destination.
+  - An `img` survives only as an inline `data:` image or from the exact host in
+    `NEXT_PUBLIC_BLOB_HOSTNAME`, and is dropped whole otherwise. Exact rather
+    than `*.public.blob.vercel-storage.com`, which would admit every other
+    Vercel tenant's store — the beacon ADR 0002 is about. Unset means no remote
+    image, so the failure is closed.
+  - `class` is a fixed semantic vocabulary (`PANEL_CLASS_ALLOWLIST`), only the
+    columns, callouts and badges ADR 0002 names, pinned in the verify script so
+    widening it takes two deliberate edits. `id` survives only on a top-level
+    block, since that is what a thread anchors to.
+  - `scripts/verify-panel-html.ts` covers all of it without a DOM, and each rule
+    was mutation-checked: breaking either half of the `id` rule, the exact-host
+    match, the credential check, the blank-href case, or the control-character
+    strip fails the script.
 
 - PR review fixes applied: storyboard owners can read every diagram on their
   storyboard, the editor only exposes Share to storyboard owners, member-list
@@ -1136,6 +1148,19 @@ result is observed.
 
 ## Open Questions
 
+- **Panel images have no origin to come from yet (`28`).** The Blob store is
+  private, so its URLs answer a browser with `403` and are pointers only. An
+  `img` in a panel needs a URL a browser can fetch, which means a second, public
+  store and an upload path. Until then `NEXT_PUBLIC_BLOB_HOSTNAME` is unset and
+  only inline `data:` images render. Decide before the first panel carries a
+  screenshot: a public store, or serve panel images through an authorized route
+  and allow that path instead.
+- **The panel class vocabulary has no stylesheet (`28`).** `PANEL_CLASS_ALLOWLIST`
+  ships `columns`, `column`, `callout`, `callout-warn`, `badge` and `muted`
+  because ADR 0002 names columns, callouts and badges, but nothing styles them
+  and no spec defines what a callout looks like. `30` (prose panels) is where
+  they get a design, and where the list should be confirmed or narrowed against
+  what the agent authoring panels is actually told it can use.
 - **Still open after `09`**: `ProjectCollaborator` has no `userId` column, so access is keyed entirely on the email string. Two consequences, both unresolved because `09` says "do not add a local user table": a collaborator who changes their Clerk primary email loses access silently, and an invite sent to an address nobody has registered grants access to whoever registers it later. Adding a nullable `userId`, backfilled the first time a collaborator opens the project, would fix both without a user table.
 - **Resolved in `09`**: `architecture-context.md` now states owner-only for rename, delete, invite and remove, and owner-or-collaborator for opening and reading. That matches what the handlers enforce.
 - The share dialog invites by email but sends **no email**. The invitee only gets in if someone passes them the link, and nothing tells them they were added. A notification path is not in any spec yet.

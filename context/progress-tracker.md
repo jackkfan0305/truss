@@ -8,6 +8,23 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `sanitize-panel-html` complete (issue #28). `lib/markdown.ts` is the panel
+  trust boundary: markdown-it now runs with `html: true` and every render goes
+  through sanitize-html on the way out, under allowlists owned in that one
+  module. `renderChatMarkdown` is now `renderPanelHtml`, which renders and
+  scrubs in one step so no caller can hold the unsanitized string. Nothing
+  renders through it yet — this is a prefactor ahead of the board, per ADR 0002.
+  Tags outside the block and inline lists are dropped, along with every handler
+  attribute and every `style` attribute (which costs markdown table alignment).
+  Link schemes are still markdown-it's own rule, applied to raw HTML anchors
+  too, with control characters removed first so an obfuscated scheme is judged
+  as the browser will resolve it; every surviving link gets `target="_blank"`
+  and the full `rel`. An `img` survives only from our Blob host or as an inline
+  `data:` image and is dropped whole otherwise. `class` is a fixed semantic
+  vocabulary (`PANEL_CLASS_ALLOWLIST`) the panel stylesheet will own, and `id`
+  survives only on a top-level block, since that is what a thread anchors to.
+  `scripts/verify-panel-html.ts` covers all of it without a DOM.
+
 - PR review fixes applied: storyboard owners can read every diagram on their
   storyboard, the editor only exposes Share to storyboard owners, member-list
   fetches cancel stale effect runs without nested state updates, and independent

@@ -382,7 +382,7 @@ async function checkProxyTreatsAgentLinkAsPublicAndHandshakeBypassed(): Promise<
   assert.equal(isPublicPath(AGENT_LINK_PATH), true, "/agent/link must be a public path");
   assert.equal(isPublicPath(`${AGENT_LINK_PATH}/extra`), false);
   assert.equal(isPublicPath("/editor"), false);
-  assert.equal(isPublicPath("/api/projects"), false);
+  assert.equal(isPublicPath("/api/diagrams"), false);
 
   assert.equal(
     isClerkHandshakeBypassPath(AGENT_LINK_PATH),
@@ -391,7 +391,7 @@ async function checkProxyTreatsAgentLinkAsPublicAndHandshakeBypassed(): Promise<
   );
   assert.equal(isClerkHandshakeBypassPath(`${AGENT_LINK_PATH}/extra`), false);
   assert.equal(isClerkHandshakeBypassPath("/editor"), false);
-  assert.equal(isClerkHandshakeBypassPath("/api/projects"), false);
+  assert.equal(isClerkHandshakeBypassPath("/api/diagrams"), false);
 }
 
 async function main(): Promise<void> {

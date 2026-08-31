@@ -8,6 +8,75 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- PR review fixes applied: storyboard owners can read every diagram on their
+  storyboard, the editor only exposes Share to storyboard owners, member-list
+  fetches cancel stale effect runs without nested state updates, and independent
+  seed writes run concurrently while dependency-ordered cleanup stays serial.
+
+- Product decision recorded for the next storyboard flow: signed-out users can
+  build a temporary storyboard with every storyboard feature except inviting
+  collaborators. The temporary storyboard lives only in the current tab and
+  disappears on refresh or tab close. A top-right `Sign in to save` action
+  opens an in-page sign-in modal, preserves it through authentication, and
+  saves the complete work as a new storyboard owned by the user's account. A
+  cancelled or failed sign-in returns to the same temporary storyboard. The
+  invite control stays hidden until sign-in succeeds. Terminal-agent work is
+  included, save failures leave the temporary storyboard available for retry,
+  and each browser tab has its own independent temporary storyboard. After a
+  successful save, the sign-in action disappears and collaboration becomes
+  available.
+
+- `rename-project-to-storyboard` complete (issue #27). `Project` is gone. The
+  rows it held are now `Diagram` — the Liveblocks room, the canvas blob, the
+  `/editor/[roomId]` page, and every MCP tool — and `Storyboard` is a new
+  top-level model holding owner, name, description, and the collaborator list.
+  `Diagram.storyboardId` is nullable, so a diagram that belongs to no plan is
+  still a valid diagram. That is the shape every agent-created one starts in.
+  - Old rows are dropped, not migrated. Migration
+    `20260830210000_storyboards_and_diagrams` drops `Project`,
+    `ProjectCollaborator`, and the `ProjectStatus` enum, then creates
+    `Storyboard`, `StoryboardCollaborator`, and `Diagram`. A fresh database
+    from the migrations produces exactly four tables and a working app with no
+    rows; verified by applying the whole history to a throwaway Postgres.
+  - Deletion state is two nullable timestamps rather than a lifecycle enum.
+    `deletingAt` is the durable tombstone, `deletedAt` finalizes it after the
+    Liveblocks room is gone, and either one hides the diagram and reserves its
+    ID forever. They record *when*, which is what a stalled cleanup needs and a
+    `DELETING` state could never say.
+  - Collaborators moved to the storyboard, which is what the glossary says they
+    belong to. A diagram is reachable by its owner or by a collaborator on its
+    parent board, so `getSharedDiagrams` and `authorizeDiagram` both reach
+    through `storyboardId`. A standalone diagram has no list to consult and is
+    owner-only — `authorizeDiagram` refuses it before spending a Clerk call.
+  - The editor hides its Share control for a standalone diagram rather than
+    offering an invite with nowhere to land. Nothing creates a storyboard yet,
+    so today every diagram is standalone and the share path is dormant; #29
+    gives it its first rows.
+  - Deleting a diagram detaches it from its board and scrubs its name. It no
+    longer touches collaborator rows: those belong to the storyboard, and
+    deleting one diagram must not strip a plan of the people invited to it.
+    Deleting a *storyboard* cascades its collaborators but sets its diagrams'
+    `storyboardId` to null — a diagram outlives the plan it was drawn for.
+  - Routes moved: `/api/projects/*` → `/api/diagrams/*` with `[diagramId]`, and
+    the member routes to `/api/storyboards/[storyboardId]/members`. The MCP tool
+    arguments renamed with them (`projectId` → `diagramId`); tool *names* were
+    already diagram-shaped. The skill's credential cache keys renamed too, so an
+    existing `~/.truss/credentials.json` keeps its token and refills its list on
+    the next call.
+  - `lib/access.ts` is new and holds `Identity`, `getCurrentIdentity`, and
+    `Authorization`, so `lib/diagram-access.ts` and `lib/storyboard-access.ts`
+    need not depend on each other. `lib/project-requests.ts` became
+    `lib/api-requests.ts`, since both surfaces parse through it.
+  - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`, and
+    `npm run build` all exit 0. `verify:integration` was run against a
+    throwaway Postgres rather than the live database, since the migration drops
+    tables. `context/feature-specs/` was deliberately left alone: it is a record
+    of past increments, and renaming it would have it claim identifiers that
+    never existed.
+  - Not done: no live authenticated end-to-end MCP run against a dev server.
+    The dev Clerk instance's interactive sign-in still blocks automation, the
+    same limitation recorded for earlier tasks.
+
 - `remove-server-side-ai` complete (issue #26). Truss now runs no model of its
   own — see `docs/adr/0001-no-server-side-ai.md`. Deleted: the AI sidebar with
   its transcript and composer, `/api/ai/chat`, `/api/ai/orchestrate` and its
@@ -1496,3 +1565,12 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
+
+## CI quality fix — 2026-08-30
+
+- Restored only the vendored `.agents/skills/truss-diagram` sources required by
+  the unit verifiers and ignored unrelated local skills. A clean CI checkout
+  now includes the Truss loopback, core, and MCP implementations without
+  pulling in unrelated agent skills.
+- Configured `turbopack.root` to the current application directory so nested
+  worktrees do not make Next.js select a parent checkout's lockfile.

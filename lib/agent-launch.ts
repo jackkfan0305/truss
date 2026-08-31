@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { agentGraphSchema, type AgentGraph } from "@/lib/agent-graph";
-import { MAX_PROJECT_NAME_LENGTH } from "@/lib/project-requests";
+import { MAX_DIAGRAM_NAME_LENGTH } from "@/lib/api-requests";
 
 export const AGENT_LAUNCH_VERSION = 1 as const;
 export const AGENT_LAUNCH_PATH = "/agent/new";
@@ -13,7 +13,7 @@ const AGENT_LAUNCH_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-const agentLaunchTitleSchema = z.string().min(1).max(MAX_PROJECT_NAME_LENGTH).refine(
+const agentLaunchTitleSchema = z.string().min(1).max(MAX_DIAGRAM_NAME_LENGTH).refine(
   (value) => value === value.trim(),
   { message: "Title must already be trimmed." },
 );
@@ -27,15 +27,15 @@ export interface AgentLaunchPayloadV1 {
 
 export type AgentLaunchStage =
   | "captured"
-  | "creating-project"
-  | "project-created"
+  | "creating-diagram"
+  | "diagram-created"
   | "importing-graph"
   | "graph-imported"
   | "failed";
 
 export interface AgentLaunchRecord extends AgentLaunchPayloadV1 {
   stage: AgentLaunchStage;
-  projectId?: string;
+  diagramId?: string;
   error?: string;
 }
 
@@ -48,8 +48,8 @@ const agentLaunchPayloadSchema = z.strictObject({
 
 const agentLaunchStageSchema = z.enum([
   "captured",
-  "creating-project",
-  "project-created",
+  "creating-diagram",
+  "diagram-created",
   "importing-graph",
   "graph-imported",
   "failed",
@@ -61,7 +61,7 @@ const agentLaunchRecordSchema = z.strictObject({
   title: agentLaunchTitleSchema,
   graph: agentGraphSchema,
   stage: agentLaunchStageSchema,
-  projectId: z.string().optional(),
+  diagramId: z.string().optional(),
   error: z.string().optional(),
 });
 
@@ -69,12 +69,12 @@ const agentLaunchTransitions: Record<
   AgentLaunchStage,
   readonly AgentLaunchStage[]
 > = {
-  captured: ["creating-project", "failed"],
-  "creating-project": ["project-created", "failed"],
-  "project-created": ["importing-graph", "failed"],
+  captured: ["creating-diagram", "failed"],
+  "creating-diagram": ["diagram-created", "failed"],
+  "diagram-created": ["importing-graph", "failed"],
   "importing-graph": ["graph-imported", "failed"],
   "graph-imported": [],
-  failed: ["creating-project", "importing-graph", "failed"],
+  failed: ["creating-diagram", "importing-graph", "failed"],
 };
 
 // Exported so `lib/agent-pick.ts` can decode its own fragment contract
@@ -163,7 +163,7 @@ export function agentLaunchStorageKey(launchId: string): string {
 export function withAgentLaunchStage(
   record: AgentLaunchRecord,
   stage: AgentLaunchStage,
-  fields?: Pick<AgentLaunchRecord, "projectId" | "error">,
+  fields?: Pick<AgentLaunchRecord, "diagramId" | "error">,
 ): AgentLaunchRecord {
   if (!agentLaunchTransitions[record.stage].includes(stage)) {
     throw new Error(`Cannot transition agent launch from ${record.stage} to ${stage}`);

@@ -15,14 +15,14 @@ export interface AgentLaunchStorage {
   removeItem(key: string): void;
 }
 
-export interface AgentLaunchProjectDependencies {
+export interface AgentLaunchDiagramDependencies {
   fetch: typeof fetch;
   createSuffix: () => string;
   storage: AgentLaunchStorage;
 }
 
-const inFlightProjectLaunches = new Map<string, Promise<AgentLaunchRecord>>();
-const PROJECT_CREATION_ERROR = "We couldn't create your project. Please try again.";
+const inFlightDiagramLaunches = new Map<string, Promise<AgentLaunchRecord>>();
+const DIAGRAM_CREATION_ERROR = "We couldn't create your diagram. Please try again.";
 
 function saveAgentLaunch(
   record: AgentLaunchRecord,
@@ -32,17 +32,17 @@ function saveAgentLaunch(
   return record;
 }
 
-function failProjectCreation(
+function failDiagramCreation(
   record: AgentLaunchRecord,
   storage: AgentLaunchStorage,
 ): AgentLaunchRecord {
   return saveAgentLaunch(
-    withAgentLaunchStage(record, "failed", { error: PROJECT_CREATION_ERROR }),
+    withAgentLaunchStage(record, "failed", { error: DIAGRAM_CREATION_ERROR }),
     storage,
   );
 }
 
-async function readMatchingProject(
+async function readMatchingDiagram(
   response: Response,
   record: AgentLaunchRecord,
 ): Promise<boolean> {
@@ -52,67 +52,67 @@ async function readMatchingProject(
 
   try {
     const body: unknown = await response.json();
-    const project = (body as { project?: { id?: unknown; name?: unknown } })
-      .project;
+    const diagram = (body as { diagram?: { id?: unknown; name?: unknown } })
+      .diagram;
 
     return (
-      project !== undefined &&
-      project.id === record.projectId &&
-      project.name === record.title
+      diagram !== undefined &&
+      diagram.id === record.diagramId &&
+      diagram.name === record.title
     );
   } catch {
     return false;
   }
 }
 
-function createPendingProjectRecord(
+function createPendingDiagramRecord(
   record: AgentLaunchRecord,
-  dependencies: AgentLaunchProjectDependencies,
+  dependencies: AgentLaunchDiagramDependencies,
 ): AgentLaunchRecord | null {
-  const projectId =
-    record.projectId ?? buildRoomId(record.title, dependencies.createSuffix());
+  const diagramId =
+    record.diagramId ?? buildRoomId(record.title, dependencies.createSuffix());
 
-  if (!projectId) {
+  if (!diagramId) {
     return null;
   }
 
   return saveAgentLaunch(
-    withAgentLaunchStage(record, "creating-project", {
-      projectId,
+    withAgentLaunchStage(record, "creating-diagram", {
+      diagramId,
       error: undefined,
     }),
     dependencies.storage,
   );
 }
 
-async function postProject(
+async function postDiagram(
   record: AgentLaunchRecord,
-  dependencies: AgentLaunchProjectDependencies,
+  dependencies: AgentLaunchDiagramDependencies,
 ): Promise<Response> {
-  return dependencies.fetch("/api/projects", {
+  return dependencies.fetch("/api/diagrams", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: record.projectId, name: record.title }),
+    body: JSON.stringify({ id: record.diagramId, name: record.title }),
   });
 }
 
-function projectCreated(
+function diagramCreated(
   record: AgentLaunchRecord,
   storage: AgentLaunchStorage,
 ): AgentLaunchRecord {
   return saveAgentLaunch(
-    withAgentLaunchStage(record, "project-created", { error: undefined }),
+    withAgentLaunchStage(record, "diagram-created", { error: undefined }),
     storage,
   );
 }
 
-async function recoverPendingProject(
+async function recoverPendingDiagram(
   record: AgentLaunchRecord,
-  dependencies: AgentLaunchProjectDependencies,
+  dependencies: AgentLaunchDiagramDependencies,
 ): Promise<boolean> {
   try {
-    const response = await dependencies.fetch(`/api/projects/${record.projectId}`);
-    return readMatchingProject(response, record);
+    const response = await dependencies.fetch(`/api/diagrams/${record.diagramId}`);
+    return readMatchingDiagram(response, record);
   } catch {
     return false;
   }
@@ -156,57 +156,57 @@ export function getStoredAgentLaunch(
  * Creates an ID before posting so a lost response can be recovered through an
  * owner-only read. A real collision gets one fresh ID and one replacement POST.
  */
-export async function createAgentLaunchProject(
+export async function createAgentLaunchDiagram(
   record: AgentLaunchRecord,
-  dependencies: AgentLaunchProjectDependencies,
+  dependencies: AgentLaunchDiagramDependencies,
 ): Promise<AgentLaunchRecord> {
   let pending = record;
 
   try {
-    const prepared = createPendingProjectRecord(record, dependencies);
+    const prepared = createPendingDiagramRecord(record, dependencies);
 
     if (!prepared) {
-      return failProjectCreation(record, dependencies.storage);
+      return failDiagramCreation(record, dependencies.storage);
     }
 
     pending = prepared;
     let response: Response;
     try {
-      response = await postProject(pending, dependencies);
+      response = await postDiagram(pending, dependencies);
     } catch {
-      return (await recoverPendingProject(pending, dependencies))
-        ? projectCreated(pending, dependencies.storage)
-        : failProjectCreation(pending, dependencies.storage);
+      return (await recoverPendingDiagram(pending, dependencies))
+        ? diagramCreated(pending, dependencies.storage)
+        : failDiagramCreation(pending, dependencies.storage);
     }
 
-    if (await readMatchingProject(response, pending)) {
-      return projectCreated(pending, dependencies.storage);
+    if (await readMatchingDiagram(response, pending)) {
+      return diagramCreated(pending, dependencies.storage);
     }
 
     if (response.ok) {
-      return (await recoverPendingProject(pending, dependencies))
-        ? projectCreated(pending, dependencies.storage)
-        : failProjectCreation(pending, dependencies.storage);
+      return (await recoverPendingDiagram(pending, dependencies))
+        ? diagramCreated(pending, dependencies.storage)
+        : failDiagramCreation(pending, dependencies.storage);
     }
 
     if (response.status !== 409) {
-      return failProjectCreation(pending, dependencies.storage);
+      return failDiagramCreation(pending, dependencies.storage);
     }
 
-    if (await recoverPendingProject(pending, dependencies)) {
-      return projectCreated(pending, dependencies.storage);
+    if (await recoverPendingDiagram(pending, dependencies)) {
+      return diagramCreated(pending, dependencies.storage);
     }
 
     const replacementId = buildRoomId(record.title, dependencies.createSuffix());
     if (!replacementId) {
-      return failProjectCreation(pending, dependencies.storage);
+      return failDiagramCreation(pending, dependencies.storage);
     }
 
     pending = saveAgentLaunch(
-      pending.stage === "creating-project"
+      pending.stage === "creating-diagram"
         ? {
             ...pending,
-            projectId: replacementId,
+            diagramId: replacementId,
             error: undefined,
             graph: {
               version: pending.graph.version,
@@ -214,52 +214,52 @@ export async function createAgentLaunchProject(
               edges: pending.graph.edges.map((edge) => ({ ...edge })),
             },
           }
-        : withAgentLaunchStage(pending, "creating-project", {
-            projectId: replacementId,
+        : withAgentLaunchStage(pending, "creating-diagram", {
+            diagramId: replacementId,
             error: undefined,
           }),
       dependencies.storage,
     );
     try {
-      response = await postProject(pending, dependencies);
+      response = await postDiagram(pending, dependencies);
     } catch {
-      return (await recoverPendingProject(pending, dependencies))
-        ? projectCreated(pending, dependencies.storage)
-        : failProjectCreation(pending, dependencies.storage);
+      return (await recoverPendingDiagram(pending, dependencies))
+        ? diagramCreated(pending, dependencies.storage)
+        : failDiagramCreation(pending, dependencies.storage);
     }
 
-    if (await readMatchingProject(response, pending)) {
-      return projectCreated(pending, dependencies.storage);
+    if (await readMatchingDiagram(response, pending)) {
+      return diagramCreated(pending, dependencies.storage);
     }
 
-    if (response.ok && (await recoverPendingProject(pending, dependencies))) {
-      return projectCreated(pending, dependencies.storage);
+    if (response.ok && (await recoverPendingDiagram(pending, dependencies))) {
+      return diagramCreated(pending, dependencies.storage);
     }
 
-    return failProjectCreation(pending, dependencies.storage);
+    return failDiagramCreation(pending, dependencies.storage);
   } catch {
-    return failProjectCreation(pending, dependencies.storage);
+    return failDiagramCreation(pending, dependencies.storage);
   }
 }
 
-export function startAgentLaunchProjectOnce(
+export function startAgentLaunchDiagramOnce(
   launchId: string,
   operation: () => Promise<AgentLaunchRecord>,
 ): Promise<AgentLaunchRecord> {
-  const existing = inFlightProjectLaunches.get(launchId);
+  const existing = inFlightDiagramLaunches.get(launchId);
   if (existing) {
     return existing;
   }
 
   const promise = operation();
-  inFlightProjectLaunches.set(launchId, promise);
+  inFlightDiagramLaunches.set(launchId, promise);
   void promise
     .then(
       () => undefined,
       () => undefined,
     )
     .finally(() => {
-      inFlightProjectLaunches.delete(launchId);
+      inFlightDiagramLaunches.delete(launchId);
     });
 
   return promise;

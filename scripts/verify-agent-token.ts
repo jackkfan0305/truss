@@ -19,18 +19,18 @@ import {
   type AgentTokenMintDependencies,
 } from "../lib/agent-token-server";
 import { prisma } from "../lib/prisma";
-import { authorizeProject } from "../lib/project-access";
+import { authorizeDiagram } from "../lib/diagram-access";
 
 /**
  * Exercises the agent-token chokepoint against the live database: DB-backed
  * bearer resolution, the mint route's session-only guard, and
- * `authorizeProject`'s 401 → 404 → 403 ordering under a bearer identity.
+ * `authorizeDiagram`'s 401 → 404 → 403 ordering under a bearer identity.
  *
  * The Clerk *session-cookie* path (`auth()`/`currentUser()`) cannot run here —
  * both are guarded by Next.js request-scoped context that only exists inside
  * a real request, and throw when called from a plain script. That is exactly
  * why every other unit script (`verify-agent-graph-edit.ts`,
- * `verify-project-api.ts`, ...) mocks `authorizeProject` wholesale rather than
+ * `verify-diagram-api.ts`, ...) mocks `authorizeDiagram` wholesale rather than
  * calling it directly. This script instead proves the ordering logic itself —
  * shared by both identity sources, since nothing after identity resolution
  * branches on which kind produced `userId` — by driving it end to end through
@@ -42,11 +42,11 @@ const OTHER_OWNER_ID = "verify_agent_token_other_owner";
 // Separate from OWNER_ID so the cap test's fixture count is not polluted by
 // tokens the earlier bearer-resolution tests already minted for OWNER_ID.
 const MINT_OWNER_ID = "verify_agent_token_mint_owner";
-const PROJECT_ID = "verify-agent-token-project";
-const TOMBSTONE_PROJECT_ID = "verify-agent-token-tombstone";
+const DIAGRAM_ID = "verify-agent-token-diagram";
+const TOMBSTONE_DIAGRAM_ID = "verify-agent-token-tombstone";
 
 function bearerRequest(token: string): Request {
-  return new Request("http://localhost/api/projects", {
+  return new Request("http://localhost/api/diagrams", {
     headers: { authorization: `Bearer ${token}` },
   });
 }
@@ -55,8 +55,8 @@ async function cleanup(): Promise<void> {
   await prisma.agentToken.deleteMany({
     where: { ownerId: { in: [OWNER_ID, OTHER_OWNER_ID, MINT_OWNER_ID] } },
   });
-  await prisma.project.deleteMany({
-    where: { id: { in: [PROJECT_ID, TOMBSTONE_PROJECT_ID] } },
+  await prisma.diagram.deleteMany({
+    where: { id: { in: [DIAGRAM_ID, TOMBSTONE_DIAGRAM_ID] } },
   });
 }
 
@@ -136,9 +136,9 @@ async function checkUnknownMalformedAndRevokedTokensResolveToNothing(): Promise<
   assert.equal(await resolveIdentitySource(bearerRequest(revoked)), null, "revoked token");
 }
 
-/** `authorizeProject` answers 401 for a request an unknown bearer token cannot resolve. */
-async function checkAuthorizeProjectAnswers401ForAnUnknownToken(): Promise<void> {
-  const response = await authorizeProject(bearerRequest(mintAgentToken()), PROJECT_ID, {
+/** `authorizeDiagram` answers 401 for a request an unknown bearer token cannot resolve. */
+async function checkAuthorizeDiagramAnswers401ForAnUnknownToken(): Promise<void> {
+  const response = await authorizeDiagram(bearerRequest(mintAgentToken()), DIAGRAM_ID, {
     requireOwner: false,
   });
 
@@ -147,12 +147,12 @@ async function checkAuthorizeProjectAnswers401ForAnUnknownToken(): Promise<void>
 }
 
 /**
- * `authorizeProject`'s 401 → 404 → 403 ordering, deletion-tombstone rule, and
+ * `authorizeDiagram`'s 401 → 404 → 403 ordering, deletion-tombstone rule, and
  * owner-path laziness, all driven by a real bearer identity against the live
  * database. Nothing in this ordering logic branches on identity source, so
  * this is the same code path a Clerk session takes.
  */
-async function checkAuthorizeProjectOrderingUnderBearerIdentity(): Promise<void> {
+async function checkAuthorizeDiagramOrderingUnderBearerIdentity(): Promise<void> {
   const ownerToken = mintAgentToken();
   await prisma.agentToken.create({
     data: { ownerId: OWNER_ID, tokenHash: hashAgentToken(ownerToken), label: "owner" },
@@ -163,24 +163,24 @@ async function checkAuthorizeProjectOrderingUnderBearerIdentity(): Promise<void>
     data: { ownerId: OTHER_OWNER_ID, tokenHash: hashAgentToken(strangerToken), label: "stranger" },
   });
 
-  await prisma.project.create({
-    data: { id: PROJECT_ID, ownerId: OWNER_ID, name: "Agent Token Fixture" },
+  await prisma.diagram.create({
+    data: { id: DIAGRAM_ID, ownerId: OWNER_ID, name: "Agent Token Fixture" },
   });
 
-  // Unknown project: 404, before any role is considered.
-  const missing = await authorizeProject(bearerRequest(ownerToken), "no-such-project", {
+  // Unknown diagram: 404, before any role is considered.
+  const missing = await authorizeDiagram(bearerRequest(ownerToken), "no-such-diagram", {
     requireOwner: false,
   });
-  assert.equal(!missing.ok && missing.response.status, 404, "unknown project is 404");
+  assert.equal(!missing.ok && missing.response.status, 404, "unknown diagram is 404");
 
   // Owner match: ok, and this path never needed a Clerk email lookup to succeed.
-  const owner = await authorizeProject(bearerRequest(ownerToken), PROJECT_ID, {
+  const owner = await authorizeDiagram(bearerRequest(ownerToken), DIAGRAM_ID, {
     requireOwner: true,
   });
   assert.ok(owner.ok && owner.role === "owner" && owner.userId === OWNER_ID);
 
   // Non-owner + requireOwner: 403, before any collaborator lookup.
-  const forbiddenOwnerOnly = await authorizeProject(bearerRequest(strangerToken), PROJECT_ID, {
+  const forbiddenOwnerOnly = await authorizeDiagram(bearerRequest(strangerToken), DIAGRAM_ID, {
     requireOwner: true,
   });
   assert.equal(!forbiddenOwnerOnly.ok && forbiddenOwnerOnly.response.status, 403);
@@ -188,31 +188,31 @@ async function checkAuthorizeProjectOrderingUnderBearerIdentity(): Promise<void>
   // Non-owner, collaborator allowed: still 403, because this token's owner has
   // no real Clerk account to resolve an email for — the collaborator check
   // must deny safely rather than throw when email resolution comes back empty.
-  const forbiddenCollaborator = await authorizeProject(bearerRequest(strangerToken), PROJECT_ID, {
+  const forbiddenCollaborator = await authorizeDiagram(bearerRequest(strangerToken), DIAGRAM_ID, {
     requireOwner: false,
   });
   assert.equal(!forbiddenCollaborator.ok && forbiddenCollaborator.response.status, 403);
 
   // Deletion tombstone: 404 for everyone by default, retryable for the owner.
-  await prisma.project.create({
+  await prisma.diagram.create({
     data: {
-      id: TOMBSTONE_PROJECT_ID,
+      id: TOMBSTONE_DIAGRAM_ID,
       ownerId: OWNER_ID,
       name: "Tombstoned",
-      status: "DELETING",
+      deletingAt: new Date(),
     },
   });
 
-  const tombstoneDefault = await authorizeProject(bearerRequest(ownerToken), TOMBSTONE_PROJECT_ID, {
+  const tombstoneDefault = await authorizeDiagram(bearerRequest(ownerToken), TOMBSTONE_DIAGRAM_ID, {
     requireOwner: true,
   });
   assert.equal(!tombstoneDefault.ok && tombstoneDefault.response.status, 404);
 
-  const tombstoneRetry = await authorizeProject(bearerRequest(ownerToken), TOMBSTONE_PROJECT_ID, {
+  const tombstoneRetry = await authorizeDiagram(bearerRequest(ownerToken), TOMBSTONE_DIAGRAM_ID, {
     requireOwner: true,
     allowDeletionStates: true,
   });
-  assert.ok(tombstoneRetry.ok, "the owner may retry cleanup on a tombstoned project");
+  assert.ok(tombstoneRetry.ok, "the owner may retry cleanup on a tombstoned diagram");
 }
 
 /** The mint route never accepts a bearer token — a token must not mint another. */
@@ -312,8 +312,8 @@ async function main(): Promise<void> {
     checkTokenFormatHelpers();
     await checkBearerResolutionReturnsOwnerIdentity();
     await checkUnknownMalformedAndRevokedTokensResolveToNothing();
-    await checkAuthorizeProjectAnswers401ForAnUnknownToken();
-    await checkAuthorizeProjectOrderingUnderBearerIdentity();
+    await checkAuthorizeDiagramAnswers401ForAnUnknownToken();
+    await checkAuthorizeDiagramOrderingUnderBearerIdentity();
     await checkBearerRejectedAtTheMintRoute();
     await checkTenTokenCapAndLabelValidation();
     await checkStampFailureDoesNotFailResolution();

@@ -1,0 +1,198 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+
+import type { StoryboardMember } from "@/types/storyboard"
+
+/**
+ * The loaded member list for one storyboard. Stamped with the storyboard it
+ * belongs to, so a response for a storyboard you have navigated away from is
+ * never rendered as if it belonged to the current one.
+ */
+interface ListState {
+  storyboardId: string
+  members: StoryboardMember[]
+  error: string | null
+}
+
+/**
+ * Everyone with access to a storyboard, plus the owner-only invite and remove
+ * mutations. The list includes the owner; only collaborators can be removed,
+ * which the server enforces independently.
+ *
+ * Fetches when `isOpen` turns true rather than on mount: the list is only ever
+ * shown inside the share dialog, and it should be fresh each time it opens.
+ *
+ * `isLoading` is derived from whether `list` matches the current storyboard
+ * rather than being its own state, so opening the dialog does not cost an
+ * extra render pass just to flip a flag (react-hooks/set-state-in-effect).
+ */
+export function useStoryboardMembers(storyboardId: string, isOpen: boolean) {
+  const [list, setList] = useState<ListState | null>(null)
+  const [isPending, setIsPending] = useState(false)
+  const [email, setEmail] = useState("")
+
+  const endpoint = `/api/storyboards/${storyboardId}/members`
+  const isLoaded = list?.storyboardId === storyboardId
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    // Guards against a slow response landing after the dialog closed or the
+    // workspace changed.
+    const controller = new AbortController()
+    let ignore = false
+
+    void fetch(endpoint, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response))
+        }
+
+        return (await response.json()) as { members?: StoryboardMember[] }
+      })
+      .then(
+        (body) => {
+          // A response that resolved before the abort landed still belongs to
+          // a dead effect run; writing it would let an older list win the race.
+          if (ignore || controller.signal.aborted) return
+
+          setList({ storyboardId, members: body.members ?? [], error: null })
+        },
+      )
+      .catch((caught) => {
+        if (ignore || controller.signal.aborted) return
+
+        setList({ storyboardId, members: [], error: getErrorMessage(caught) })
+      })
+
+    return () => {
+      ignore = true
+      controller.abort()
+    }
+  }, [endpoint, isOpen, storyboardId])
+
+  /**
+   * Runs a mutation and folds its outcome into the list. Returning members
+   * replaces them; returning `null` leaves them untouched.
+   */
+  type MutationResult =
+    | StoryboardMember[]
+    | { removeMemberId: string }
+    | null
+
+  const run = useCallback(
+    async (request: () => Promise<MutationResult>) => {
+      if (isPending) return false
+
+      setIsPending(true)
+
+      try {
+        const members = await request()
+
+        setList((current) => {
+          if (!current) return current
+
+          if (members && "removeMemberId" in members) {
+            return {
+              ...current,
+              members: current.members.filter(
+                (member) => member.id !== members.removeMemberId,
+              ),
+              error: null,
+            }
+          }
+
+          return { ...current, ...(members ? { members } : {}), error: null }
+        })
+        return true
+      } catch (caught) {
+        setList((current) =>
+          current ? { ...current, error: getErrorMessage(caught) } : current,
+        )
+        return false
+      } finally {
+        setIsPending(false)
+      }
+    },
+    [isPending],
+  )
+
+  const invite = useCallback(async () => {
+    const trimmed = email.trim()
+
+    if (!trimmed) return
+
+    // The route answers with the refreshed list, so there is no second fetch
+    // and no local list surgery that could drift from the server.
+    const didInvite = await run(async () => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response))
+      }
+
+      const body = (await response.json()) as { members?: StoryboardMember[] }
+      return body.members ?? []
+    })
+
+    // Cleared only on success, so a rejected address stays in the field to fix.
+    if (didInvite) setEmail("")
+  }, [email, endpoint, run])
+
+  const remove = useCallback(
+    async (memberId: string) => {
+      await run(async () => {
+        const response = await fetch(`${endpoint}/${memberId}`, {
+          method: "DELETE",
+        })
+
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response))
+        }
+
+        // 204, no body — drop the row rather than refetching the whole list.
+        return { removeMemberId: memberId }
+      })
+    },
+    [endpoint, run],
+  )
+
+  return {
+    members: isLoaded ? list.members : [],
+    error: isLoaded ? list.error : null,
+    isLoading: isOpen && !isLoaded,
+    email,
+    setEmail,
+    isPending,
+    invite,
+    remove,
+  }
+}
+
+export type StoryboardMemberActions = ReturnType<typeof useStoryboardMembers>
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json()
+    const message = (body as { error?: unknown } | null)?.error
+
+    if (typeof message === "string" && message) {
+      return message
+    }
+  } catch {
+    // Fall through to the status-based message below.
+  }
+
+  return `Something went wrong (${response.status}). Please try again.`
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "Something went wrong. Please try again."
+}

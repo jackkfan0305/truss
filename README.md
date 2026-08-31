@@ -11,8 +11,12 @@ Truss runs no model of its own — see
 
 ## What it does
 
-- **Projects** — sign in, create a project, invite collaborators by email. The
-  owner can rename, delete, and manage members; collaborators can open and edit.
+- **Diagrams** — sign in, create a diagram, open it in the editor. The owner can
+  rename and delete it.
+- **Storyboards** — the plan a diagram sits on, and the thing collaborators are
+  invited to by email. A diagram with no parent storyboard is owner-only and
+  shows no Share control. Nothing creates a storyboard yet; the agent-facing
+  create lands with the storyboard tools.
 - **Collaborative canvas** — React Flow over Liveblocks Storage. Live cursors,
   presence avatars, shaped/colored nodes, right-angle labelled edges, and
   snapshots persisted to Vercel Blob.
@@ -80,7 +84,7 @@ LIVEBLOCKS_PUBLIC_KEY=pk_...
 
 # ------------------------------------------------------------ Vercel Blob
 # Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
-# client bundle would let anyone overwrite any project's canvas.
+# client bundle would let anyone overwrite any diagram's canvas.
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 ```
 
@@ -112,7 +116,7 @@ branches on environment.
 ```bash
 npx prisma migrate dev     # apply migrations
 npm run generate           # regenerate the client into generated/prisma
-npx prisma db seed         # optional: three sample projects
+npx prisma db seed         # optional: three sample storyboards + four diagrams
 ```
 
 ## Running it
@@ -138,11 +142,11 @@ npx skills add jackkfan0305/truss \
 **Create** turns the supplied description into a compact positioned graph, then
 sends only the title and graph to its launcher over stdin.
 
-**Edit** and **delete** need to read your projects, which the agent cannot do on
+**Edit** and **delete** need to read your diagrams, which the agent cannot do on
 its own — it never authenticates to Truss. The launcher opens `/agent/pick`,
 which uses your existing browser session to fetch the list and, for an edit, the
 live canvas, and hands them back over a one-shot listener bound to `127.0.0.1`.
-The agent asks which project you mean in the terminal. Deletes are confirmed
+The agent asks which diagram you mean in the terminal. Deletes are confirmed
 twice: once by name in the terminal, once in the browser.
 
 An edit is reconciled against the live canvas rather than replacing it, so
@@ -189,6 +193,24 @@ npx vercel --prod                      # deploy the app
 | `npm run verify:integration` | The checks that do hit the database and APIs |
 | `npm run generate` | Regenerate the Prisma client |
 | `npm run doctor` | React Doctor scan |
+| `npm run skills:link` | Point `.claude/skills/` at the vendored skills |
+
+## Agent skills
+
+The skills live in `.agents/skills/`, one copy, tracked. `skills-lock.json`
+records where the fetched ones came from; `npx skills` refreshes them and the
+diff gets committed like any other dependency.
+
+Per-tool directories are not tracked, because each is a rendering of those
+skills plus that tool's own local config. In a fresh worktree, build the one
+Claude Code reads:
+
+```bash
+npm run skills:link
+```
+
+It writes a relative symlink per skill into `.claude/skills/`, so nothing is
+copied and both paths stay in step. Re-run it after adding a skill.
 
 `scripts/verify-*.ts` are standalone contract checks — no test framework, no
 database, no network. Run one with `npx tsx scripts/verify-agent-graph.ts`;
@@ -197,8 +219,9 @@ each exits non-zero on failure.
 ## Layout
 
 ```
+.agents/skills The agent skills themselves, one copy
 app/api        Authenticated route handlers: validate → authorize → write → persist
-app/editor     The workspace (project sidebar, canvas)
+app/editor     The workspace (diagram sidebar, canvas)
 lib/           Prisma client, access control, Liveblocks server helpers
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed

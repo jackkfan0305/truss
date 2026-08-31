@@ -4,7 +4,7 @@ import {
   type PacedCanvasAction,
 } from "@/lib/canvas-drawing";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
-import type { Authorization } from "@/lib/project-access";
+import type { Authorization } from "@/lib/access";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 /**
@@ -30,15 +30,15 @@ export interface AgentCanvasFlow {
 }
 
 export interface AgentCanvasWriteDependencies extends CanvasDrawingDependencies {
-  authorizeProject: (
-    projectId: string,
+  authorizeDiagram: (
+    diagramId: string,
     options: { requireOwner: true },
   ) => Promise<Authorization>;
   mutateFlow: (
-    projectId: string,
+    diagramId: string,
     callback: (flow: AgentCanvasFlow) => void | Promise<void>,
   ) => Promise<void>;
-  saveCanvasSnapshot: (projectId: string, snapshot: CanvasSnapshot) => Promise<unknown>;
+  saveCanvasSnapshot: (diagramId: string, snapshot: CanvasSnapshot) => Promise<unknown>;
 }
 
 /**
@@ -57,7 +57,7 @@ export type AgentCanvasAddFlow = Pick<
  * so both draw at the same rhythm.
  */
 export async function drawNodesThenEdges(
-  projectId: string,
+  diagramId: string,
   flow: AgentCanvasAddFlow,
   nodes: CanvasNode[],
   edges: CanvasEdge[],
@@ -79,5 +79,5 @@ export async function drawNodesThenEdges(
     })),
   ];
 
-  await drawPacedCanvasActions(projectId, flow, actions, dependencies);
+  await drawPacedCanvasActions(diagramId, flow, actions, dependencies);
 }

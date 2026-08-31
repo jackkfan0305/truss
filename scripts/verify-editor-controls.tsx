@@ -2,12 +2,12 @@ import assert from "node:assert/strict"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { EditorNavbar } from "../components/editor/editor-navbar"
-import { ProjectSidebar } from "../components/editor/project-sidebar"
+import { DiagramSidebar } from "../components/editor/diagram-sidebar"
 
 const baseNavbarProps = {
   isSidebarOpen: false,
   onToggleSidebar: () => undefined,
-  projectName: "Checkout API",
+  diagramName: "Checkout API",
   onShare: () => undefined,
   onOpenTemplates: () => undefined,
   saveStatus: <span>Saved</span>,
@@ -16,7 +16,7 @@ const baseNavbarProps = {
 }
 
 const closedHtml = renderToStaticMarkup(<EditorNavbar {...baseNavbarProps} />)
-const projectsOpenHtml = renderToStaticMarkup(
+const diagramsOpenHtml = renderToStaticMarkup(
   <EditorNavbar {...baseNavbarProps} isSidebarOpen />
 )
 const homeHtml = renderToStaticMarkup(
@@ -27,20 +27,30 @@ const homeHtml = renderToStaticMarkup(
   />
 )
 
-const projectSidebarProps = {
+/*
+ * A diagram with no parent storyboard has nobody to invite — collaborators are
+ * invited to a storyboard, never to a diagram — so the shell passes no
+ * `onShare` and the navbar must render no Share control at all. Offering one
+ * would open a dialog whose invite POST the server answers 404.
+ */
+const standaloneHtml = renderToStaticMarkup(
+  <EditorNavbar {...baseNavbarProps} onShare={undefined} />
+)
+
+const diagramSidebarProps = {
   isOpen: true,
   onClose: () => undefined,
-  ownedProjects: [],
-  sharedProjects: [],
-  onCreateProject: () => undefined,
-  onRenameProject: () => undefined,
-  onDeleteProject: () => undefined,
+  ownedDiagrams: [],
+  sharedDiagrams: [],
+  onCreateDiagram: () => undefined,
+  onRenameDiagram: () => undefined,
+  onDeleteDiagram: () => undefined,
 }
-const openProjectSidebarHtml = renderToStaticMarkup(
-  <ProjectSidebar {...projectSidebarProps} />
+const openDiagramSidebarHtml = renderToStaticMarkup(
+  <DiagramSidebar {...diagramSidebarProps} />
 )
-const closedProjectSidebarHtml = renderToStaticMarkup(
-  <ProjectSidebar {...projectSidebarProps} isOpen={false} />
+const closedDiagramSidebarHtml = renderToStaticMarkup(
+  <DiagramSidebar {...diagramSidebarProps} isOpen={false} />
 )
 
 
@@ -79,47 +89,47 @@ function assertFloatingChrome(button: string): void {
   assert.match(button, /backdrop-blur-xl/)
 }
 
-const closedProjectsToggle = controlledButton(closedHtml, "projects-sidebar")
-const openProjectsToggle = controlledButton(
-  projectsOpenHtml,
-  "projects-sidebar"
+const closedDiagramsToggle = controlledButton(closedHtml, "diagrams-sidebar")
+const openDiagramsToggle = controlledButton(
+  diagramsOpenHtml,
+  "diagrams-sidebar"
 )
-const openProjectSidebar = controlledRegion(
-  openProjectSidebarHtml,
-  "projects-sidebar"
+const openDiagramSidebar = controlledRegion(
+  openDiagramSidebarHtml,
+  "diagrams-sidebar"
 )
-const closedProjectSidebar = controlledRegion(
-  closedProjectSidebarHtml,
-  "projects-sidebar"
+const closedDiagramSidebar = controlledRegion(
+  closedDiagramSidebarHtml,
+  "diagrams-sidebar"
 )
-const closedProjectTitle = parentDivContaining(closedHtml, "Checkout API")
+const closedDiagramTitle = parentDivContaining(closedHtml, "Checkout API")
 
-assertFloatingChrome(closedProjectsToggle)
+assertFloatingChrome(closedDiagramsToggle)
 assert.doesNotMatch(
   closedHtml,
-  /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="projects-sidebar"/
+  /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="diagrams-sidebar"/
 )
-assert.match(closedProjectsToggle, /top-3/)
-assert.match(closedProjectsToggle, /left-3/)
+assert.match(closedDiagramsToggle, /top-3/)
+assert.match(closedDiagramsToggle, /left-3/)
 assert.ok(
-  openProjectsToggle.includes(
+  openDiagramsToggle.includes(
     "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
   )
 )
-assert.match(closedProjectsToggle, /aria-expanded="false"/)
-assert.match(closedProjectsToggle, /aria-label="Open projects sidebar"/)
-assert.match(openProjectsToggle, /aria-expanded="true"/)
-assert.match(openProjectsToggle, /aria-label="Close projects sidebar"/)
+assert.match(closedDiagramsToggle, /aria-expanded="false"/)
+assert.match(closedDiagramsToggle, /aria-label="Open diagrams sidebar"/)
+assert.match(openDiagramsToggle, /aria-expanded="true"/)
+assert.match(openDiagramsToggle, /aria-label="Close diagrams sidebar"/)
 assert.match(closedHtml, /lucide-panel-left-open/)
-assert.match(projectsOpenHtml, /lucide-panel-left-close/)
+assert.match(diagramsOpenHtml, /lucide-panel-left-close/)
 
 // No right-hand toggle survives the AI removal (ADR 0001).
 assert.doesNotMatch(closedHtml, /lucide-panel-right-open|lucide-panel-right-close/)
 
 assert.match(closedHtml, /Checkout API/)
-assert.doesNotMatch(projectsOpenHtml, /Checkout API/)
-assert.match(closedProjectTitle, /top-3/)
-assert.match(closedProjectTitle, /left-14/)
+assert.doesNotMatch(diagramsOpenHtml, /Checkout API/)
+assert.match(closedDiagramTitle, /top-3/)
+assert.match(closedDiagramTitle, /left-14/)
 
 assert.match(closedHtml, /Saved/)
 assert.match(closedHtml, /Templates/)
@@ -130,17 +140,24 @@ assert.match(closedHtml, /pointer-events-none absolute/)
 assert.doesNotMatch(closedHtml, /border-b/)
 assert.match(homeHtml, /Profile/)
 
-assert.match(openProjectSidebar, /inset-y-0/)
-assert.match(openProjectSidebar, /left-0/)
-assert.match(openProjectSidebar, /w-72/)
-assert.match(openProjectSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
-assert.match(openProjectSidebar, /translate-x-0/)
-assert.match(openProjectSidebarHtml, /max-sm:pt-8/)
-assert.doesNotMatch(openProjectSidebarHtml, /Close projects sidebar/)
-assert.doesNotMatch(openProjectSidebarHtml, /lucide-x/)
-assert.match(closedProjectSidebar, /inert=""/)
+assert.doesNotMatch(standaloneHtml, /Share/)
+// The rest of the workspace chrome is untouched by the missing parent: only
+// Share goes, so a failure here is a gate that took too much with it.
+assert.match(standaloneHtml, /Templates/)
+assert.match(standaloneHtml, /Saved/)
+assert.match(standaloneHtml, /Checkout API/)
+
+assert.match(openDiagramSidebar, /inset-y-0/)
+assert.match(openDiagramSidebar, /left-0/)
+assert.match(openDiagramSidebar, /w-72/)
+assert.match(openDiagramSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
+assert.match(openDiagramSidebar, /translate-x-0/)
+assert.match(openDiagramSidebarHtml, /max-sm:pt-8/)
+assert.doesNotMatch(openDiagramSidebarHtml, /Close diagrams sidebar/)
+assert.doesNotMatch(openDiagramSidebarHtml, /lucide-x/)
+assert.match(closedDiagramSidebar, /inert=""/)
 assert.match(
-  closedProjectSidebar,
+  closedDiagramSidebar,
   /-translate-x-\[calc\(100%\+2rem\)\]/
 )
 

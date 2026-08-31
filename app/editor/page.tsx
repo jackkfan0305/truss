@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 
 import { EditorShell } from "@/components/editor/editor-shell";
-import { getCurrentIdentity } from "@/lib/project-access";
-import { getOwnedProjects, getSharedProjects } from "@/lib/projects";
+import { getCurrentIdentity } from "@/lib/access";
+import { getOwnedDiagrams, getSharedDiagrams } from "@/lib/diagrams";
 
-// Server component: both project lists are fetched here and passed down, so the
+// Server component: both diagram lists are fetched here and passed down, so the
 // sidebar never fetches on mount. Mutations go through the API routes.
 export default async function EditorPage() {
   const identity = await getCurrentIdentity();
@@ -15,15 +15,15 @@ export default async function EditorPage() {
     redirect(process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL as string);
   }
 
-  const [ownedProjects, sharedProjects] = await Promise.all([
-    getOwnedProjects(identity.userId),
-    getSharedProjects(identity),
+  const [ownedDiagrams, sharedDiagrams] = await Promise.all([
+    getOwnedDiagrams(identity.userId),
+    getSharedDiagrams(identity),
   ]);
 
   return (
     <EditorShell
-      ownedProjects={ownedProjects}
-      sharedProjects={sharedProjects}
+      ownedDiagrams={ownedDiagrams}
+      sharedDiagrams={sharedDiagrams}
     />
   );
 }

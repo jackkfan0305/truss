@@ -1568,9 +1568,9 @@ result is observed.
 
 ## CI quality fix — 2026-08-30
 
-- Restored the vendored `.agents/skills` sources required by the unit verifiers
-  and removed their `.gitignore` exclusion. A clean CI checkout now includes
-  the `truss-diagram` loopback, core, and MCP implementations instead of
-  relying on ignored files left in a developer worktree.
+- Restored only the vendored `.agents/skills/truss-diagram` sources required by
+  the unit verifiers and ignored unrelated local skills. A clean CI checkout
+  now includes the Truss loopback, core, and MCP implementations without
+  pulling in unrelated agent skills.
 - Configured `turbopack.root` to the current application directory so nested
   worktrees do not make Next.js select a parent checkout's lockfile.

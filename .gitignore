@@ -55,5 +55,8 @@ next-env.d.ts
 /.codex/
 /agent/
 
-# Vendored agent skills are part of the repository because the verification
-# suite and the published skill package import them directly.
+# Only the published Truss skill is part of this repository. Other local agent
+# skills are ignored so they cannot accidentally expand the CI checkout.
+/.agents/skills/*
+!/.agents/skills/truss-diagram/
+!/.agents/skills/truss-diagram/**

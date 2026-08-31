@@ -15,6 +15,12 @@
 
 - `app/api` — Authenticated request handlers: input validation, ownership checks, canvas writes, and persistence.
 - `lib` — Shared infrastructure: Prisma client, access control helpers, and utilities.
+- `lib/markdown.ts` — The panel trust boundary. Panel content is agent-authored
+  HTML rendered into collaborators' browsers, so markdown-it runs with
+  `html: true` and every render is sanitized on the way out under allowlists
+  owned in that one module. Nothing else may render panel content, and no other
+  module may hold the unsanitized string: `renderPanelHtml` renders and scrubs
+  in one step. See ADR 0002.
 - `components` — UI composition: canvas surfaces, sidebars, dialogs, and interactive elements.
 - `prisma` — Database schema and generated client output.
 - `data` — Legacy local directory. Not used for new artifacts.
@@ -33,7 +39,11 @@
   the token; `useCache: false` is required because every save overwrites the
   same pathname, so the CDN copy is exactly the stale artifact a read must not
   return. Artifact URLs are therefore pointers, never something to hand to a
-  browser directly.
+  browser directly. Panel images are the one place a Blob URL is meant to reach
+  a browser, and no such store exists yet: `lib/markdown.ts` accepts an `img`
+  source only from the exact host named by `NEXT_PUBLIC_BLOB_HOSTNAME`, and
+  refuses every remote source while that is unset. Serving panel images needs a
+  second, public store — the private one cannot answer a browser's `GET`.
 - Diagram IDs are never reused. Deletion first stamps `deletingAt`, a durable
   tombstone, then deletes its Liveblocks room, then finalizes the row by
   stamping `deletedAt`. Either stamp makes the diagram inaccessible and excludes

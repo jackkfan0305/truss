@@ -5,74 +5,240 @@
  * the class itself is a separate *type* export, hence the two-part import.
  */
 import MarkdownItCallable, { type MarkdownIt } from "markdown-it";
+import sanitizeHtml from "sanitize-html";
 
 /**
- * Markdown for assistant chat messages (26-ai-chat-functional).
+ * Panel content, from what an agent writes to what a browser is allowed to see
+ * (28-sanitize-panel-html).
  *
- * The output of this module is handed to `dangerouslySetInnerHTML`, so the
- * whole file is a trust boundary and the settings below are the sanitizer —
- * there is no second sanitizing pass to catch a mistake made here.
+ * Panels carry HTML rather than Markdown because a plan needs layout Markdown
+ * cannot express, and they are authored by somebody else's terminal agent and
+ * rendered into collaborators' browsers. So `html: true` is on and this module
+ * is the trust boundary: markdown-it renders, sanitize-html enforces the
+ * allowlists below, and nothing reaches the DOM by another route.
  *
- * - `html: false` is the load-bearing one, and it is why no DOM sanitizer is
- *   needed alongside it. markdown-it does not *strip* raw HTML in this mode, it
- *   escapes it: `<img onerror=...>` in a message renders as visible text. Never
- *   turn this on. If embedded HTML is ever genuinely wanted, that is the moment
- *   this file grows a real sanitizer, not the moment the flag flips.
- * - Link hrefs are filtered by markdown-it's own `validateLink`, which refuses
- *   `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs — the schemes
- *   that turn a link into script execution.
- *
- * Pure and DOM-free, so `scripts/verify-ai-chat.ts` can exercise the escaping
- * without a browser.
+ * Pure and DOM-free — `scripts/verify-panel-html.ts` exercises every rule here
+ * without a browser, which is the only reason the whole boundary is testable.
  */
+
+/**
+ * Block-level tags. A thread anchors to one of these at the top level, so they
+ * are also the only tags that keep an `id`. Inline tags are the emphasis, links
+ * and images inside one.
+ */
+const BLOCK_TAGS = [
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "pre",
+  "code",
+  "hr",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "div",
+];
+
+const INLINE_TAGS = ["strong", "em", "a", "span", "br", "img"];
+
+/**
+ * The vocabulary a panel may style itself with — the columns, callouts and
+ * badges ADR 0002 names, and nothing beyond them. Semantic rather than Tailwind
+ * utilities: the panel stylesheet owns what these look like, so an agent cannot
+ * position, hide or overlay anything, and the set widens by an explicit edit
+ * here rather than by a class nobody reviewed. Per that ADR, widening it widens
+ * it for every panel that already exists.
+ */
+export const PANEL_CLASS_ALLOWLIST = [
+  // Layout
+  "columns",
+  "column",
+  // Emphasis
+  "callout",
+  "callout-warn",
+  "badge",
+  "muted",
+];
+
+/**
+ * The one host a panel image may come from, named by `NEXT_PUBLIC_BLOB_HOSTNAME`
+ * because the store subdomain is assigned by Vercel and differs per
+ * environment. Unset means no remote image survives, which is the safe way to
+ * be wrong: a matched-by-shape allowlist such as `*.public.blob.vercel-storage.com`
+ * would admit every other Vercel tenant's store, and a foreign `img` src is a
+ * GET the browser makes unasked — enough to report who read the plan and when.
+ *
+ * Read per call rather than at module load so a deploy that sets it late still
+ * sees it, and so the check is testable without import order mattering.
+ */
+function blobHostname(): string | undefined {
+  return process.env.NEXT_PUBLIC_BLOB_HOSTNAME || undefined;
+}
+
 const markdown: MarkdownIt = new MarkdownItCallable({
-  html: false,
-  // Bare URLs become links. Chat is where people paste them without syntax.
+  // Panels are HTML. Safe only because of the sanitizing pass below.
+  html: true,
+  // Bare URLs become links. Agents paste them without syntax.
   linkify: true,
-  // A single newline is a line break here. Markdown's "two spaces or it is the
-  // same paragraph" rule is a writing convention nobody applies in a chat box,
-  // and the transcript rendered plain text with `whitespace-pre-wrap` before
-  // this existed — so this keeps messages breaking where they visibly broke.
+  // A single newline is a line break. Markdown's "two spaces or it is the same
+  // paragraph" rule is a writing convention nobody applies when dictating a
+  // plan, and a panel should break where its author visibly broke it.
   breaks: true,
 });
 
 /**
- * Links leave the app, so they open in a new tab rather than navigating the
- * editor away from a canvas with unsaved work. `noopener` is the security half:
- * without it the opened page can reach back through `window.opener` and
- * redirect this tab.
+ * A URL as the browser will resolve it. Browsers drop control characters before
+ * matching a scheme, so `java<TAB>script:` runs; dropping them here first means
+ * the check sees the string the browser will act on rather than the one the
+ * panel was written with.
  */
-const defaultLinkOpen =
-  markdown.renderer.rules.link_open ??
-  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-
-markdown.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  tokens[idx].attrSet("target", "_blank");
-  tokens[idx].attrSet("rel", "noopener noreferrer nofollow");
-
-  return defaultLinkOpen(tokens, idx, options, env, self);
-};
-
-/** Renders one chat message to HTML. Block-level: a message may be a list. */
-export function renderChatMarkdown(content: string): string {
-  return markdown.render(content);
+function normalizeUrl(url: string): string {
+  return url.replace(/[\u0000-\u0020]/g, "");
 }
 
 /**
- * Markdown output is plain tags with no classes on them, so it is styled from
- * the container. Arbitrary variants rather than a typography plugin: these are
- * short panel surfaces, and a prose preset would have to be half-overridden to
- * stop fighting the palette.
- *
- * Here rather than in a component because three surfaces render this module's
- * output — the chat transcript, the spec preview and the run's thinking
- * disclosure — and the transcript already imports the activity component, so
- * hanging the styles off it would close an import cycle.
- *
- * The spec preview overrides the heading steps for a document; `cn` merges
- * those, since a spec has real hierarchy and a chat message does not.
+ * markdown-it's own link filter, reused so a link written as HTML is refused on
+ * exactly the same grounds as one written as Markdown: `javascript:`,
+ * `vbscript:`, `file:` and any `data:` that is not an image.
  */
-export const MARKDOWN_STYLES = [
+function isSafeLink(url: string): boolean {
+  return markdown.validateLink(normalizeUrl(url));
+}
+
+function isPanelImageSource(url: string): boolean {
+  const normalized = normalizeUrl(url);
+
+  // Already normalized, so `validateLink` directly rather than `isSafeLink`.
+  if (!markdown.validateLink(normalized)) return false;
+
+  // `validateLink` has already refused every `data:` that is not an image.
+  if (normalized.toLowerCase().startsWith("data:")) return true;
+
+  const host = blobHostname();
+
+  if (host === undefined) return false;
+
+  try {
+    const { protocol, hostname, username, password } = new URL(normalized);
+
+    // Credentials in an image source are a phishing shape, never our own URLs.
+    if (username !== "" || password !== "") return false;
+
+    return protocol === "https:" && hostname === host;
+  } catch {
+    // Relative and unparseable sources both land here. A panel names its images
+    // absolutely; there is nothing app-relative for one to point at.
+    return false;
+  }
+}
+
+/**
+ * Renders one panel's content to HTML that is safe to hand
+ * `dangerouslySetInnerHTML`.
+ *
+ * Sanitizing happens here rather than at the call site so there is no way to
+ * get the unsanitized string: the render and the scrub are one step.
+ */
+export function renderPanelHtml(content: string): string {
+  /*
+   * `openTags` counts what the walk is currently inside; `tagDepth` is that
+   * count for the tag `transformTags` is looking at right now. `onOpenTag`
+   * fires for every open tag before `transformTags`, and `onCloseTag` for every
+   * close, so the pair stays balanced even inside subtrees the sanitizer is
+   * discarding — which is why the depth is counted here rather than read off
+   * the transform, which never sees those tags.
+   */
+  let openTags = 0;
+  let tagDepth = 0;
+
+  return sanitizeHtml(markdown.render(content), {
+    allowedTags: [...BLOCK_TAGS, ...INLINE_TAGS],
+    allowedAttributes: {
+      // `id` survives only where `transformTags` leaves it: a top-level block.
+      "*": ["class", "id"],
+      a: ["href", "target", "rel"],
+      img: ["src", "alt"],
+    },
+    allowedClasses: { "*": PANEL_CLASS_ALLOWLIST },
+    /*
+     * Scheme filtering is `isSafeLink`'s job below, not the library's. One rule
+     * in one place, and it is markdown-it's rule, so an HTML link and a
+     * Markdown link are refused on identical grounds.
+     */
+    allowedSchemesAppliedToAttributes: [],
+    onOpenTag: () => {
+      tagDepth = openTags;
+      openTags += 1;
+    },
+    onCloseTag: () => {
+      openTags -= 1;
+    },
+    transformTags: {
+      "*": (tagName, attribs) => {
+        const next: sanitizeHtml.Attributes = { ...attribs };
+
+        if (tagDepth > 0 || !BLOCK_TAGS.includes(tagName)) delete next.id;
+
+        if (tagName === "a") {
+          // A blank href is no destination at all, and it must not collect the
+          // rewrite below: sanitize-html drops the empty attribute afterwards,
+          // which would leave an anchor claiming a target it cannot open.
+          if (next.href !== undefined && !isSafeLink(next.href)) {
+            delete next.href;
+          }
+
+          if (next.href?.trim() === "") delete next.href;
+
+          if (next.href === undefined) {
+            delete next.target;
+            delete next.rel;
+          } else {
+            /*
+             * Links leave the app, so they open in a new tab rather than
+             * navigating away from a board someone is reading. `noopener` is
+             * the security half: without it the opened page can reach back
+             * through `window.opener` and redirect this tab. Assigned rather
+             * than defaulted, so an authored `rel` cannot weaken it.
+             */
+            next.target = "_blank";
+            next.rel = "noopener noreferrer nofollow";
+          }
+        }
+
+        if (
+          tagName === "img" &&
+          (next.src === undefined || !isPanelImageSource(next.src))
+        ) {
+          delete next.src;
+        }
+
+        return { tagName, attribs: next };
+      },
+    },
+    // An `img` whose source was refused is not a broken image, it is not an
+    // image; `exclusiveFilter` drops the element rather than leaving the frame.
+    exclusiveFilter: (frame) => frame.tag === "img" && !frame.attribs.src,
+  });
+}
+
+/**
+ * Panel HTML carries no classes of its own beyond the allowlist above, so it is
+ * styled from the container. Arbitrary variants rather than a typography
+ * plugin: panels are short surfaces, and a prose preset would have to be
+ * half-overridden to stop fighting the palette.
+ *
+ * Here rather than in a component because every surface rendering this module's
+ * output needs the same steps, and a panel and its preview should not drift.
+ */
+export const PANEL_STYLES = [
   "[&_p]:my-0 [&_p+p]:mt-2",
   "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-4",
   "[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-4",

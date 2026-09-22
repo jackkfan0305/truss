@@ -9,7 +9,12 @@
     },
     "truss-diagram": {
       "command": "node",
-      "args": [".agents/skills/truss-diagram/scripts/mcp-server.mjs"]
+      "args": [
+        ".agents/skills/truss-diagram/scripts/mcp-server.mjs"
+      ],
+      "env": {
+        "TRUSS_APP_URL": "https://truss-jet.vercel.app"
+      }
     }
   }
 }

@@ -9,7 +9,7 @@ import {
   getDiagram,
   listDiagrams,
   login,
-  promptDeleteDiagram,
+  deleteDiagram,
 } from "./core.mjs";
 
 // Loose on purpose: the wire-level authority is `validateGraph` inside
@@ -21,8 +21,8 @@ const nodeShape = z.object({
   label: z.string(),
   shape: z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]),
   color: z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]),
-  x: z.number().int(),
-  y: z.number().int(),
+  x: z.number().int().optional().describe("Omit both coordinates for new nodes so Truss arranges them. Preserve coordinates returned for existing nodes when editing."),
+  y: z.number().int().optional().describe("Supply only together with x; omit both for automatic layout."),
 });
 
 const edgeShape = z.object({
@@ -92,7 +92,7 @@ server.registerTool(
   {
     title: "Apply a full graph to an existing Truss diagram",
     description:
-      "Replaces a diagram's graph with `desiredGraph`, built by editing the graph truss_get_diagram returned in place: reuse the `id` of every node/edge kept or modified, assign new kebab-case ids only to genuinely new ones, and never reuse an id from `opaqueNodeIds`. `fingerprint` must be the value truss_get_diagram returned for this project — this call retries once on its own if it goes stale, but a fingerprint you made up will fail. If the result removes any node or edge present in the read graph, get an explicit yes from the user first and state exactly what will be removed, by label — this is the only safety net a destructive edit gets, since there is no browser tab in front of the user and Liveblocks undo does not cover a server-side edit.",
+      "Updates a diagram using the complete desiredGraph. Start with truss_get_diagram, preserve IDs and coordinates for existing nodes, and omit coordinates for new nodes. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo.",
     inputSchema: {
       baseUrl: baseUrlShape,
       projectId: z.string().describe("A project id returned by truss_list_diagrams."),
@@ -109,7 +109,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new project and draws `graph` into it in one call, returning its editor URL. Keep the primary request path left to right, node origins at least 240 flow units apart horizontally and 150 vertically, supporting systems on secondary rows, stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors. Do not include secrets in labels.",
+      "Creates a new project and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels.",
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),
@@ -120,17 +120,17 @@ server.registerTool(
 );
 
 server.registerTool(
-  "truss_delete_diagram_prompt",
+  "truss_delete_diagram",
   {
-    title: "Open Truss to confirm deleting a diagram",
+    title: "Delete a Truss diagram",
     description:
-      "Opens a browser tab to Truss's own delete-confirm dialog for `projectId` and returns once the choice has been relayed to it — it does not wait for, or report, the human's actual click, and it never deletes anything itself: only that dialog can, using the human's own session. Before calling this, resolve the project with truss_list_diagrams and get an explicit yes from the user, quoting the diagram's full name (never its position in a list) — a mistyped digit must never destroy the wrong project. Tell the user 'opening Truss to confirm the delete' before calling this.",
+      "Deletes a diagram owned by the linked user and reports success after deletion completes. Use truss_list_diagrams to resolve the exact project requested by the user. Only call when the user has authorized deleting that diagram; ask for clarification if the target is ambiguous. Uses the cached credential without a browser confirmation.",
     inputSchema: {
       baseUrl: baseUrlShape,
       projectId: z.string().describe("A project id returned by truss_list_diagrams."),
     },
   },
-  async ({ baseUrl, projectId }) => textResult(await promptDeleteDiagram(baseUrl, projectId)),
+  async ({ baseUrl, projectId }) => textResult(await deleteDiagram(baseUrl, projectId)),
 );
 
 const transport = new StdioServerTransport();

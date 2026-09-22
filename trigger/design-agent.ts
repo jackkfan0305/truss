@@ -36,6 +36,7 @@ import {
   type DesignPlan,
 } from "@/lib/design-plan";
 import { SYSTEM_PROMPT, buildDesignPrompt } from "@/lib/design-prompt";
+import { layoutDesignPlan } from "@/lib/layout-design-plan";
 import { getGoogleApiKey } from "@/lib/google-ai";
 import { getLiveblocks } from "@/lib/liveblocks";
 import {
@@ -172,10 +173,10 @@ const designPlanSchema = jsonSchema({
           },
           shape: { type: "string", enum: [...NODE_SHAPES] },
           color: { type: "string", enum: [...NODE_COLOR_NAMES] },
-          x: { type: "number" },
-          y: { type: "number" },
-          width: { type: "number" },
-          height: { type: "number" },
+          x: { type: "number", description: "Only used by moveNode. Send 0 for new blocks; Truss arranges them." },
+          y: { type: "number", description: "Only used by moveNode. Send 0 for new blocks." },
+          width: { type: "number", description: "Only used by resizeNode. Send 0 for new blocks." },
+          height: { type: "number", description: "Only used by resizeNode. Send 0 for new blocks." },
           source: {
             type: "string",
             description: "Edge source node id. Empty string on node actions.",
@@ -348,7 +349,7 @@ async function runDesignWithoutPresenceCleanup(
 
     activity.emit({ type: "step", text: "Validating the proposed changes" });
 
-    const plan = parseDesignPlan(object, context);
+    const plan = await layoutDesignPlan(parseDesignPlan(object, context), context);
 
     planned = plan.actions.length;
 

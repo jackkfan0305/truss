@@ -5,11 +5,20 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getSmoothStepPath,
+  Position,
   useReactFlow,
   type EdgeProps,
 } from "@xyflow/react";
 
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
+import {
+  useEdgeLabelOffset,
+  useEdgeRoute,
+  useSavedEdgeRoute,
+} from "@/components/canvas/canvas-edge-routes";
+import type { EdgeSide } from "@/lib/canvas-edge-route";
+import { DIAGRAM_LABEL_LINE_HEIGHT, DIAGRAM_LABEL_WIDTH } from "@/lib/diagram-route";
+import { positionParallelEdgeLabel } from "@/lib/edge-label-layout";
 import {
   CANVAS_EDGE_STYLE,
   type CanvasEdge,
@@ -36,6 +45,14 @@ const LABEL_HINT = "+ label";
 /** Keeps the empty input wide enough to aim at before anything is typed. */
 const MIN_LABEL_CHARS = 5;
 
+/** `EdgeSide` is a plain union so the routing module stays React Flow-free. */
+const SIDE_POSITIONS: Record<EdgeSide, Position> = {
+  top: Position.Top,
+  right: Position.Right,
+  bottom: Position.Bottom,
+  left: Position.Left,
+};
+
 const LABEL_BASE_CLASS =
   "nodrag nopan nokey rounded-xl border px-2 py-0.5 text-xs leading-tight";
 
@@ -54,23 +71,40 @@ export function CanvasEdgeRenderer({
 }: EdgeProps<CanvasEdge>) {
   const { updateEdgeData } = useReactFlow<CanvasNode, CanvasEdge>();
   const isFreshArrival = useIsFreshArrival();
+  // Present for an edge that named no handle, which is every generated one: it
+  // replaces React Flow's fixed top-handle endpoints with lane-separated ones.
+  const route = useEdgeRoute(id);
+  const savedRoute = useSavedEdgeRoute(id);
+  const labelOffset = useEdgeLabelOffset(id);
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   // `labelX`/`labelY` are the path's own midpoint, computed by the same call
   // that produced the path — deriving it from the endpoints instead would put
   // the label off the line wherever the route bends.
-  const [path, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
+  const [fallbackPath, labelX, labelY] = getSmoothStepPath({
+    sourceX: route?.source.x ?? sourceX,
+    sourceY: route?.source.y ?? sourceY,
+    sourcePosition: route ? SIDE_POSITIONS[route.source.side] : sourcePosition,
+    targetX: route?.target.x ?? targetX,
+    targetY: route?.target.y ?? targetY,
+    targetPosition: route ? SIDE_POSITIONS[route.target.side] : targetPosition,
+    centerX: route?.centerX,
+    centerY: route?.centerY,
   });
 
+  const path = savedRoute
+    ? savedRoute.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
+    : fallbackPath;
   const label = data?.label ?? "";
   const isActive = isHovered || selected === true || isEditing;
+  const positionedLabel = savedRoute?.label
+    ? { x: savedRoute.label.x, y: savedRoute.label.y }
+    : positionParallelEdgeLabel({
+    labelX,
+    labelY,
+    offset: labelOffset,
+  });
 
   const show = useCallback(() => setIsHovered(true), []);
   const hide = useCallback(() => setIsHovered(false), []);
@@ -88,12 +122,12 @@ export function CanvasEdgeRenderer({
       event.stopPropagation();
       setIsEditing(false);
     },
-    []
+    [],
   );
 
   const labelStyle = {
     position: "absolute" as const,
-    transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+    transform: `translate(-50%, -50%) translate(${positionedLabel.x}px, ${positionedLabel.y}px)`,
     // The `EdgeLabelRenderer` container is `pointer-events: none` so it does not
     // swallow clicks on the canvas; each label opts itself back in.
     pointerEvents: "all" as const,
@@ -160,7 +194,8 @@ export function CanvasEdgeRenderer({
               />
             ) : (
               <span
-                className={`${LABEL_BASE_CLASS} ${
+                style={{ width: savedRoute?.label?.width ?? DIAGRAM_LABEL_WIDTH, minHeight: savedRoute?.label?.height, lineHeight: `${DIAGRAM_LABEL_LINE_HEIGHT}px` }}
+                className={`${LABEL_BASE_CLASS} flex box-border max-w-40 items-center justify-center break-words whitespace-normal text-center ${
                   label
                     ? "border-surface-border bg-elevated text-copy-secondary"
                     : "border-surface-border/60 bg-surface text-copy-faint"

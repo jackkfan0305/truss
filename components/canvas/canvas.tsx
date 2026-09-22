@@ -28,6 +28,7 @@ import {
 
 import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
+import { CanvasEdgeRouteProvider } from "@/components/canvas/canvas-edge-routes";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
@@ -171,7 +172,7 @@ function CanvasFlow({
         cursor: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
       });
     },
-    [screenToFlowPosition, updateMyPresence]
+    [screenToFlowPosition, updateMyPresence],
   );
 
   /** Off the canvas, there is no position to show — the cursor is hidden. */
@@ -202,7 +203,7 @@ function CanvasFlow({
         },
       ]);
     },
-    [onNodesChange]
+    [onNodesChange],
   );
 
   /**
@@ -224,18 +225,21 @@ function CanvasFlow({
         template.nodes.map((node) => ({
           type: "add",
           item: { ...node, data: { ...node.data } },
-        }))
+        })),
       );
       onEdgesChange(
         template.edges.map((edge) => ({
           type: "add",
-          item: { ...edge, data: { ...edge.data, label: edge.data?.label ?? "" } },
-        }))
+          item: {
+            ...edge,
+            data: { ...edge.data, label: edge.data?.label ?? "" },
+          },
+        })),
       );
 
       isAwaitingImportedNodes.current = true;
     },
-    [edges, nodes, onDelete, onEdgesChange, onNodesChange]
+    [edges, nodes, onDelete, onEdgesChange, onNodesChange],
   );
 
   /**
@@ -259,12 +263,16 @@ function CanvasFlow({
    */
   const handleRestore = useCallback(
     (snapshot: CanvasSnapshot) => {
-      onNodesChange(snapshot.nodes.map((node) => ({ type: "add", item: node })));
-      onEdgesChange(snapshot.edges.map((edge) => ({ type: "add", item: edge })));
+      onNodesChange(
+        snapshot.nodes.map((node) => ({ type: "add", item: node })),
+      );
+      onEdgesChange(
+        snapshot.edges.map((edge) => ({ type: "add", item: edge })),
+      );
 
       isAwaitingImportedNodes.current = true;
     },
-    [onEdgesChange, onNodesChange]
+    [onEdgesChange, onNodesChange],
   );
 
   /*
@@ -276,7 +284,7 @@ function CanvasFlow({
   useCanvasRestore(
     projectId,
     nodes.length === 0 && edges.length === 0,
-    handleRestore
+    handleRestore,
   );
 
   // Status is set straight from the save lifecycle, so the navbar indicator
@@ -304,7 +312,7 @@ function CanvasFlow({
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       const payload = parseShapeDragPayload(
-        event.dataTransfer.getData(SHAPE_DRAG_MIME)
+        event.dataTransfer.getData(SHAPE_DRAG_MIME),
       );
 
       if (!payload) {
@@ -314,10 +322,10 @@ function CanvasFlow({
       event.preventDefault();
       addNode(
         payload,
-        screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        screenToFlowPosition({ x: event.clientX, y: event.clientY }),
       );
     },
-    [addNode, screenToFlowPosition]
+    [addNode, screenToFlowPosition],
   );
 
   /** Keyboard/click path: drop the shape into the middle of what is on screen. */
@@ -337,10 +345,10 @@ function CanvasFlow({
         screenToFlowPosition({
           x: bounds.left + bounds.width / 2,
           y: bounds.top + bounds.height / 2,
-        })
+        }),
       );
     },
-    [addNode, screenToFlowPosition]
+    [addNode, screenToFlowPosition],
   );
 
   return (
@@ -351,57 +359,59 @@ function CanvasFlow({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <ReactFlow<CanvasNode, CanvasEdge>
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
-        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onDelete={onDelete}
-        // On the wrapper rather than `onPaneMouseMove`, so the cursor keeps
-        // broadcasting while the pointer is over a node instead of freezing.
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        // Handles are drawn on all four sides, so a connection must be allowed to
-        // land on any of them rather than only on a declared target handle.
-        connectionMode={ConnectionMode.Loose}
-        // Release anywhere on a target node and the connection lands on that
-        // node's nearest handle. The default (20) is "release on the dot", which
-        // silently discarded any connection dropped on a node's body.
-        connectionRadius={CONNECTION_SNAP_RADIUS}
-        isValidConnection={isConnectionBetweenNodes}
-        // The line dragged out of a handle defaults to a bezier, which would not
-        // resemble the right-angle edge it is about to become.
-        connectionLineType={ConnectionLineType.SmoothStep}
-        // Programmatically focusable, but kept out of the tab order: closing the
-        // label editor hands focus back here (14-node-editing), and without a
-        // tabIndex the wrapper cannot take it and the browser drops focus on
-        // <body> instead. Nodes are still individually tab-reachable.
-        tabIndex={-1}
-        fitView
-        minZoom={MIN_ZOOM}
-        proOptions={{ hideAttribution: true }}
-        // Themes React Flow's remaining chrome (the minimap) to match the dark
-        // workspace without restyling its internals.
-        colorMode="dark"
-      >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={22}
-          size={1}
-          color="var(--border-subtle)"
-        />
-        <MiniMap pannable zoomable />
-        <Panel position="bottom-center">
-          <ShapePanel onAddShape={handleAddShape} />
-        </Panel>
-        <Panel position="bottom-left">
-          <CanvasControls />
-        </Panel>
-      </ReactFlow>
+      <CanvasEdgeRouteProvider nodes={nodes} edges={edges}>
+        <ReactFlow<CanvasNode, CanvasEdge>
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onDelete={onDelete}
+          // On the wrapper rather than `onPaneMouseMove`, so the cursor keeps
+          // broadcasting while the pointer is over a node instead of freezing.
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          // Handles are drawn on all four sides, so a connection must be allowed to
+          // land on any of them rather than only on a declared target handle.
+          connectionMode={ConnectionMode.Loose}
+          // Release anywhere on a target node and the connection lands on that
+          // node's nearest handle. The default (20) is "release on the dot", which
+          // silently discarded any connection dropped on a node's body.
+          connectionRadius={CONNECTION_SNAP_RADIUS}
+          isValidConnection={isConnectionBetweenNodes}
+          // The line dragged out of a handle defaults to a bezier, which would not
+          // resemble the right-angle edge it is about to become.
+          connectionLineType={ConnectionLineType.SmoothStep}
+          // Programmatically focusable, but kept out of the tab order: closing the
+          // label editor hands focus back here (14-node-editing), and without a
+          // tabIndex the wrapper cannot take it and the browser drops focus on
+          // <body> instead. Nodes are still individually tab-reachable.
+          tabIndex={-1}
+          fitView
+          minZoom={MIN_ZOOM}
+          proOptions={{ hideAttribution: true }}
+          // Themes React Flow's remaining chrome (the minimap) to match the dark
+          // workspace without restyling its internals.
+          colorMode="dark"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={22}
+            size={1}
+            color="var(--border-subtle)"
+          />
+          <MiniMap pannable zoomable />
+          <Panel position="bottom-center">
+            <ShapePanel onAddShape={handleAddShape} />
+          </Panel>
+          <Panel position="bottom-left">
+            <CanvasControls />
+          </Panel>
+        </ReactFlow>
+      </CanvasEdgeRouteProvider>
 
       <LiveCursors />
 

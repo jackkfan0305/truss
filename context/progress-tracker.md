@@ -8,6 +8,69 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `readable-diagrams` complete. Generated diagrams are laid out on the server by
+  ELK and rendered from saved geometry. `layoutDiagram` sizes every block from
+  its own label (the shape's default size is a floor, since the prompts now ask
+  the model for zeroes), routes connections orthogonally, and places edge labels
+  clear of blocks and of each other. Routes carry a `geometryKey` over every
+  node's position, size and shape, so moving any block or retyping a label drops
+  the saved route back to the canvas's interactive routing rather than leaving a
+  stale line behind. Routes round-trip through `parseCanvasSnapshot`, which
+  rebuilds untrusted geometry before it reaches an SVG attribute.
+  - Lines meet a block at the four handle points it shows on hover, and nowhere
+    else. ELK left to itself lands wherever the routing found room, which on a
+    diamond or a circle is off the drawn shape entirely. Layout runs twice: the
+    first pass decides which side each end belongs on, the second pins those
+    sides to the handles as `FIXED_POS` ports, so ELK routes around obstacles
+    knowing where every line has to land. Pinning the ends afterwards instead
+    was tried and rejected: it sent a back edge straight through a block ELK had
+    routed around. `scripts/verify-diagram-layout.ts` asserts every end sits on
+    a handle and fails without the ports.
+  - The arriving end stops half an arrowhead short of its block, so the marker
+    draws in the open instead of half under the border.
+  - Both AI prompts ask for an overview first, normally four to eight blocks,
+    and no longer do placement arithmetic. `layoutDesignPlan` lays new nodes out
+    once their edges are known and drops the model's own move/resize actions for
+    them; a label-only edit returns the plan untouched, so existing positions
+    survive.
+  - The agent boundary accepts graphs without coordinates.
+    `resolveAgentGraphLayout` fills omitted positions from the live graph, lays
+    genuinely new blocks out together in free space beside existing content, and
+    treats opaque canvas items as obstacles without importing them. Positioned
+    version 1 launches still parse exactly as before.
+  - The local MCP exposes coordinate-free create and a real `truss_delete_diagram`
+    against the owner-only project endpoint, replacing the browser-confirm
+    prompt. A stale edit returns a conflict and changes nothing: the agent must
+    reread and reapply rather than resubmit an outdated graph with a fresh
+    fingerprint. The link URL prints to stderr so it cannot corrupt the stdio
+    protocol, which the MCP verifier now asserts through a real login round trip.
+  - Gates: `npm run verify:unit`, `npm run typecheck`, `npm run lint`, and
+    `npm run build` all exit 0. New verifiers `verify-diagram-layout.ts`,
+    `verify-generated-diagrams.ts`, and `verify-diagram-rendering.tsx` are wired
+    into `verify:unit`. ELK appears in no client chunk; only server modules
+    import the layout.
+  - Not done: no authenticated end-to-end run in the live app. The visual check
+    rendered real `layoutDiagram` output for a chain, a branch/merge, a cycle,
+    and a disconnected graph in a browser, which is what caught the outline bug,
+    but the development Clerk instance's interactive sign-in still blocks a
+    signed-in canvas run, same limitation recorded for earlier tasks.
+
+- `parallel-edge-label-layout` complete. Generated edges no longer pile every
+  route and label onto the same midpoint. Edges without explicit handles now
+  leave from the node sides facing each other, spread shared endpoints across
+  lanes, and use separate turn corridors. Route lanes and label lanes share a
+  deterministic edge-ID order, so shuffled or opposite-direction edges cannot
+  cancel each other's separation. Labels for every edge between the same
+  unordered node pair receive stable 28-unit vertical lanes, matching the
+  measured pill height even when a narrow diagram edge runs vertically.
+  Generated endpoints intersect the visible outline of all six node shapes;
+  hand-drawn edges keep their chosen handles. Label groups are computed once
+  per edge change and stay cached during node drags. `scripts/verify-canvas.ts`
+  covers final rendered label clearance on horizontal and vertical routes,
+  reverse flows, resized shape boundaries on all four sides, fan-out routing,
+  and manual-handle preservation. The focused canvas verifier, strict
+  typecheck, and focused ESLint pass.
+
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
   ID the create dialog builds, retries once per 409 collision, then POSTs
@@ -1467,3 +1530,13 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
+- Arrowheads were missing on every AI-written edge. `types/canvas.ts` built
+  `CANVAS_EDGE_MARKER` from `MarkerType.ArrowClosed`, and `@xyflow/react` is a
+  `"use client"` package: in a server bundle its exports are React client
+  references, so the enum member read as `undefined` and each stored edge got a
+  `markerEnd` with no `type`. React Flow then built no arrowhead symbol, while
+  the stroke still drew because it comes from a plain `style` object. The marker
+  type is now the literal `"arrowclosed"` and the import is type-only;
+  `checkMarkerSurvivesServerBundling` in `scripts/verify-canvas.ts` guards both.
+  Rooms written before the fix keep the old marker until their edges are
+  rewritten — `test2-18dc49` was repaired by hand, others were not.

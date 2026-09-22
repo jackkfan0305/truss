@@ -59,4 +59,9 @@ next-env.d.ts
 # otherwise be silently left out of every commit.
 !/.agents/skills/truss-diagram/
 
+# Skills fetched into the newer `agent/skills/` layout. Same deal as
+# `.agents/skills/*`: skills-lock.json pins them, so re-fetch instead of
+# vendoring the files.
+/agent/
+
 .trigger

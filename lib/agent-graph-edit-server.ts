@@ -1,10 +1,10 @@
 import {
   canvasFingerprint,
-  materializeAgentGraph,
-  parseAgentGraphAllowingEmpty,
+  parseAgentGraphInput,
   projectCanvasToAgentGraph,
-  type AgentGraphView,
+  type AgentGraphInput,
 } from "@/lib/agent-graph";
+import { resolveAgentGraphLayout } from "@/lib/agent-graph-layout";
 import {
   collidesWithOpaque,
   diffAgentGraph,
@@ -24,7 +24,7 @@ export type AgentGraphEditDependencies = AgentCanvasWriteDependencies;
 
 interface EditRequest {
   fingerprint: string;
-  graph: AgentGraphView["graph"];
+  graph: AgentGraphInput;
 }
 
 function parseEditRequest(value: unknown): EditRequest | null {
@@ -44,7 +44,7 @@ function parseEditRequest(value: unknown): EditRequest | null {
     return null;
   }
 
-  const parsedGraph = parseAgentGraphAllowingEmpty(graph);
+  const parsedGraph = parseAgentGraphInput(graph, true);
 
   return parsedGraph ? { fingerprint, graph: parsedGraph } : null;
 }
@@ -160,8 +160,6 @@ export async function handleAgentGraphEditPost(
     return jsonError("Invalid graph edit request", 400);
   }
 
-  const desiredSnapshot = materializeAgentGraph(parsed.graph);
-
   let decision: EditDecision = "stale";
   let appliedSnapshot: CanvasSnapshot | null = null;
 
@@ -178,13 +176,15 @@ export async function handleAgentGraphEditPost(
       }
 
       const live = projectCanvasToAgentGraph(liveSnapshot);
+      const desiredSnapshot = await resolveAgentGraphLayout(parsed.graph, liveSnapshot);
+      const desiredGraph = projectCanvasToAgentGraph(desiredSnapshot).graph;
 
-      if (collidesWithOpaque(live, parsed.graph)) {
+      if (collidesWithOpaque(live, desiredGraph)) {
         decision = "collision";
         return;
       }
 
-      const diff = diffAgentGraph(live, parsed.graph);
+      const diff = diffAgentGraph(live, desiredGraph);
       await applyDiff(projectId, flow, diff, desiredSnapshot, liveSnapshot, dependencies);
       decision = "applied";
       appliedSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };

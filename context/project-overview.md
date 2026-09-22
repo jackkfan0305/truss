@@ -49,6 +49,10 @@ Truss is a real-time collaborative system design workspace. Users describe a sys
 
 ### AI Architecture Generation
 
+- Default to a small pictorial overview that explains the main flow. Add
+  technical detail when the user requests it.
+- Truss arranges generated blocks, connections, and labels so callers can focus
+  on what the diagram explains.
 - AI generates a system design from a user-supplied prompt.
 - Output is structured as canvas nodes and edges written into the shared room.
 - Generation runs as a durable background task.

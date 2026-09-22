@@ -97,35 +97,62 @@ const stub = await createStubServer((method, pathname, ctx) => {
   if (method === "POST" && pathname === "/api/projects/p1/agent-graph-edit") {
     return { status: 200, body: { applied: true } };
   }
+  if (method === "DELETE" && pathname === "/api/projects/p1") {
+    assert.equal(ctx.headers.authorization, `Bearer ${token}`);
+    return { status: 204, body: null };
+  }
   return null;
 });
 seedCredential(homeDir, stub.origin, token);
 
 const transport = new StdioClientTransport({
+  stderr: "pipe",
   command: process.execPath,
   args: [SERVER_SCRIPT],
   env: {
     ...process.env,
     HOME: homeDir,
     TRUSS_APP_URL: stub.origin,
-    // No browser call is exercised in this smoke test (every seeded
-    // credential is already cached), but blocking PATH keeps that true even
-    // if a future case forgets to seed one.
+    // Login exercises its link callback without opening a real browser.
     PATH: "/truss-mcp-verifier-no-such-directory",
   },
 });
 
+const protocolErrors = [];
+transport.onerror = (error) => protocolErrors.push(error);
 const client = new Client({ name: "truss-diagram-verify", version: "0.0.0" });
 await client.connect(transport);
 
 try {
+  const linkLine = new Promise((resolve) => {
+    let buffer = "";
+    const readLink = (chunk) => {
+      buffer += chunk.toString();
+      if (!buffer.includes("\n")) return;
+      transport.stderr.off("data", readLink);
+      resolve(buffer.split("\n")[0]);
+    };
+    transport.stderr.on("data", readLink);
+  });
+  const loginCall = client.callTool({ name: "truss_login", arguments: {} });
+  const linkUrl = new URL(await linkLine);
+  const payload = JSON.parse(Buffer.from(linkUrl.hash.slice(1), "base64url").toString("utf8"));
+  const callback = await fetch(`http://127.0.0.1:${payload.port}/`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: stub.origin },
+    body: JSON.stringify({ nonce: payload.nonce, token }),
+  });
+  assert.equal(callback.status, 200);
+  assert.equal((await loginCall).isError, undefined);
+  assert.deepEqual(protocolErrors, [], "auth output never corrupts MCP stdout");
+
   const { tools } = await client.listTools();
   assert.deepEqual(
     tools.map((tool) => tool.name).sort(),
     [
       "truss_apply_diagram_edit",
       "truss_create_diagram",
-      "truss_delete_diagram_prompt",
+      "truss_delete_diagram",
       "truss_get_diagram",
       "truss_list_diagrams",
       "truss_login",
@@ -153,6 +180,12 @@ try {
     },
   });
   assert.equal(editResult.structuredContent.editorUrl, `${stub.origin}/editor/p1`);
+
+  const deleteResult = await client.callTool({
+    name: "truss_delete_diagram",
+    arguments: { projectId: "p1" },
+  });
+  assert.deepEqual(deleteResult.structuredContent, { projectId: "p1", deleted: true });
 
   // A malformed call (missing the required `projectId`) must fail as a clean
   // tool-error result, never as an uncaught exception or a stack trace.

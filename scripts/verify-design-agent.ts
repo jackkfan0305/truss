@@ -53,7 +53,6 @@ import {
   DEFAULT_NODE_SHAPE,
   EDGE_LABEL_CLEARANCE,
   NODE_COLORS,
-  NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
   type CanvasEdge,
@@ -620,18 +619,12 @@ function checkAutoLayoutLeavesRoomForEdgeLabels() {
   }
 }
 
-/** The model cannot avoid an overlap it was never told the dimensions of. */
+/** Geometry is the app's responsibility; the model explains the main flow. */
 function checkPromptStatesSizesAndLabelClearance() {
-  for (const [shape, size] of Object.entries(NODE_DEFAULT_SIZES)) {
-    assert.ok(
-      SYSTEM_PROMPT.includes(`${shape} ${size.width}x${size.height}`),
-      `the prompt states the default size for ${shape}`
-    );
-  }
-
-  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.width)));
-  assert.ok(SYSTEM_PROMPT.includes(String(EDGE_LABEL_CLEARANCE.height)));
-  assert.ok(SYSTEM_PROMPT.includes(String(MIN_NODE_GAP)));
+  assert.match(SYSTEM_PROMPT, /small overview/);
+  assert.match(SYSTEM_PROMPT, /technical detail only when asked/);
+  assert.match(SYSTEM_PROMPT, /arranges new blocks, routes connections, and places labels automatically/);
+  assert.doesNotMatch(SYSTEM_PROMPT, /do the arithmetic|three-box sketch/);
 }
 
 /** One response can only ever spend one bounded write on the canvas. */

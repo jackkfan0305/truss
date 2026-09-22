@@ -37,6 +37,7 @@ import {
 import { runDesign } from "@/trigger/design-agent";
 import { runSpec } from "@/trigger/generate-spec";
 import {
+  AI_RUN_STEPS,
   DEFAULT_AI_DESIGN_MODEL_ID,
   type AiActivityTerminalPart,
 } from "@/types/tasks";
@@ -112,7 +113,7 @@ export const orchestrator = schemaTask({
     await publisher.start();
 
     try {
-      activity.emit({ type: "step", text: "Reading the canvas" });
+      activity.emit({ type: "step", text: AI_RUN_STEPS.readCanvas });
 
       // In parallel: neither read depends on the other, and both are pure reads
       // against the same room. `runId` is this run's own here, which is exactly
@@ -318,7 +319,7 @@ async function runTool(
       });
     }
 
-    activity.emit({ type: "step", text: "Designing the canvas" });
+    activity.emit({ type: "step", text: AI_RUN_STEPS.designCanvas });
 
     // Called, not triggered. `triggerAndWait` cost ~27s of child boot plus a
     // checkpoint and restore of this run, none of it model time — see the
@@ -360,7 +361,7 @@ async function runTool(
       });
     }
 
-    activity.emit({ type: "step", text: "Writing the spec" });
+    activity.emit({ type: "step", text: AI_RUN_STEPS.writeSpec });
 
     // Called, not triggered — the same change as `designCanvas`, and worth more
     // here: `triggerAndWait` was the only thing left suspending this run, so a

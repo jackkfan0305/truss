@@ -44,6 +44,7 @@ import {
   type CanvasNode,
 } from "@/types/canvas";
 import {
+  AI_RUN_STEPS,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
   parseAiDesignModelId,
@@ -312,7 +313,7 @@ async function runDesignWithoutPresenceCleanup(
       // has one.
       ({ context, history } = reads);
     } else {
-      activity.emit({ type: "step", text: "Reading the canvas" });
+      activity.emit({ type: "step", text: AI_RUN_STEPS.readCanvas });
 
       // In parallel: neither read depends on the other, and both are pure reads
       // against the same room.
@@ -337,7 +338,7 @@ async function runDesignWithoutPresenceCleanup(
       text: "Designing…",
     });
 
-    activity.emit({ type: "step", text: "Designing" });
+    activity.emit({ type: "step", text: AI_RUN_STEPS.design });
 
     const object = await generateDesign({
       modelId,
@@ -346,7 +347,7 @@ async function runDesignWithoutPresenceCleanup(
       activity,
     });
 
-    activity.emit({ type: "step", text: "Validating the proposed changes" });
+    activity.emit({ type: "step", text: AI_RUN_STEPS.validate });
 
     const plan = parseDesignPlan(object, context);
 
@@ -385,7 +386,7 @@ async function runDesignWithoutPresenceCleanup(
       isThinking: true,
     });
 
-    activity.emit({ type: "step", text: "Applying to the canvas" });
+    activity.emit({ type: "step", text: AI_RUN_STEPS.apply });
 
     applied = await buildCanvas(roomId, plan, context, activity);
 

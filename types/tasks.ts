@@ -218,6 +218,26 @@ export function getBuildStepMs(actionCount: number): number {
   return Math.min(Math.max(step, MIN_BUILD_STEP_MS), MAX_BUILD_STEP_MS);
 }
 
+/**
+ * The phases a run reports, named once.
+ *
+ * These strings are written into durable chat history by
+ * `trigger/orchestrator.ts` and `trigger/design-agent.ts`, and read back by
+ * the task stack and the orb state map. Changing a *value* orphans every
+ * persisted run that carries it, so treat them as a wire format: add a key,
+ * never edit one.
+ */
+export const AI_RUN_STEPS = {
+  readCanvas: "Reading the canvas",
+  designCanvas: "Designing the canvas",
+  design: "Designing",
+  validate: "Validating the proposed changes",
+  apply: "Applying to the canvas",
+  writeSpec: "Writing the spec",
+} as const;
+
+export type AiRunStep = (typeof AI_RUN_STEPS)[keyof typeof AI_RUN_STEPS];
+
 export const AI_ACTIVITY_PART_TYPES = [
   "step",
   "reasoning",

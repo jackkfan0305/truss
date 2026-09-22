@@ -7,19 +7,27 @@ Dark only. No light mode. The visual language is a dark technical workspace — 
 ### AI Sidechat
 
 The AI sidechat is intentionally monochrome. It uses only the page/surface,
-border, and copy tokens from the palette — no brand, AI, success, warning, or
-error accent colours. State is communicated with iconography and text, never
-colour alone.
+border, and copy tokens from the palette, with one exception: the composer's
+border beam and the thinking orb may use `--accent-ai` and `--accent-ai-text`.
+No other sidechat surface uses an accent. State is communicated with
+iconography and text, never colour alone — the beam and the orb annotate a
+state that the working indicator and the running task already state in words.
 
-- The header visibly names the active provider and exact model ID.
+- The panel has its own header. It names the active provider and the exact
+  model ID on the leading edge and carries the close control on the trailing
+  edge. The navbar's floating toggle opens the panel and is hidden while it is
+  open, so there is one close affordance rather than two.
 - Messages use one reading edge and minimal neutral surfaces, following modern
   AI chat conventions rather than coloured role bubbles.
 - Each generation renders as one shared, reloadable assistant work turn placed
-  directly after its prompt. A shadcn Accordion progressively discloses the
-  durable chronological phases, curated reasoning summaries, and canvas
-  operations. The initiating client retains a private Trigger subscription only
-  to settle its own composer; the transcript does not require that token. Raw
-  provider chain of thought is never displayed.
+  directly after its prompt. The turn is a stack of tasks, one per phase of the
+  run: the phase names the task, and the canvas operations and curated
+  reasoning summaries it produced sit inside it. Tasks are open by default,
+  because the steps are the record of what the agent did to the canvas; the
+  trigger folds one away. The running task is the run's single live region.
+  The initiating client retains a private Trigger subscription only to settle
+  its own composer; the transcript does not require that token. Raw provider
+  chain of thought is never displayed.
 - Canvas operations remain visually pending until the run's atomic canvas
   write completes. Completion and failure use both an icon and text.
 - The durable `ai-chat` row is updated in place as work arrives and carries the

@@ -8,6 +8,37 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `agent-chat-panel-overhaul` complete. All thirteen code tasks are done. The
+  AI sidebar now streams markdown answers through one sanitizer and one
+  renderer, renders runs as stacked collapsible tasks, and has a header and
+  composer with a thinking orb and a beam.
+  - `lib/markdown.ts` is deleted. `lib/markdown-tokens.ts` is the one sanitizer
+    (`html: false`, `linkify: true`, `breaks: true`, plus markdown-it's
+    `validateLink`), and `components/chat/response.tsx` is the only renderer.
+    The chat path has zero `dangerouslySetInnerHTML` call sites.
+  - The six step strings live in `AI_RUN_STEPS` in `types/tasks.ts` and are a
+    wire format: persisted chat history carries the values as they were at
+    save time, so renaming one orphans all stored runs containing the old value.
+  - `border-beam` uses `colorVariant="ocean"` with `staticColors`, not the
+    `mono` the spec named, because `mono` is baked grayscale filtered with
+    `hue-rotate` and `saturate` and the package exposes no colour override.
+    Ocean's lead stop is `rgba(100, 80, 220)` against `--accent-ai`'s
+    `rgb(100, 87, 249)` — within a few points without further tuning.
+  - The `role="status"` live region sits on the task title span, not on the
+    `<summary>`, because `role` on a summary overrides its implicit button role
+    and removes the disclosure from the accessibility tree. The title span is
+    inside the trigger and is still exactly one announcing element.
+  - `selectLiveRunStep`, the live step line above the composer, and the
+    `agent-step-sweep` CSS are all deleted. Step verbs are gone from the UI.
+  - New files: `components/chat/{response,code-block,task,ai-input,ai-input-settings,thinking-orb,border-beam}.tsx`,
+    `components/editor/ai-run-tasks.tsx`, `lib/{streaming-markdown,markdown-tokens,run-task-groups,run-orb-state}.ts`,
+    `components/ui/popover.tsx` (shadcn CLI). Deleted: `components/editor/ai-run-activity.tsx`.
+  - Six verify scripts added: `verify-run-steps.ts`, `verify-streaming-markdown.ts`,
+    `verify-markdown-tokens.ts`, `verify-chat-response.tsx`, `verify-run-task-groups.ts`,
+    `verify-chat-composer.tsx`.
+  - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`, and
+    `npm run build` all exit 0.
+
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
   ID the create dialog builds, retries once per 409 collision, then POSTs

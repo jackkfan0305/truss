@@ -131,7 +131,10 @@ export function EditorShell({
                 </CanvasSurface>
               </main>
 
-              <AiSidebar isOpen={isAiSidebarOpen} />
+              <AiSidebar
+                isOpen={isAiSidebarOpen}
+                onClose={() => setOpenSidebar(null)}
+              />
             </>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">

@@ -115,7 +115,6 @@ const openProjectsToggle = controlledButton(
   "projects-sidebar"
 )
 const closedAiToggle = controlledButton(closedHtml, "ai-sidebar")
-const openAiToggle = controlledButton(aiOpenHtml, "ai-sidebar")
 const openProjectSidebar = controlledRegion(
   openProjectSidebarHtml,
   "projects-sidebar"
@@ -145,12 +144,6 @@ assert.ok(
 )
 assert.match(closedAiToggle, /top-3/)
 assert.match(closedAiToggle, /right-3/)
-assert.ok(
-  openAiToggle.includes(
-    "right-[calc(min(26rem,calc(100vw-1.5rem))-3.75rem)]"
-  )
-)
-assert.match(openAiToggle, /xl:right-\[calc\(26rem-3rem\)\]/)
 
 assert.match(closedProjectsToggle, /aria-expanded="false"/)
 assert.match(closedProjectsToggle, /aria-label="Open projects sidebar"/)
@@ -161,10 +154,7 @@ assert.match(projectsOpenHtml, /lucide-panel-left-close/)
 
 assert.match(closedAiToggle, /aria-expanded="false"/)
 assert.match(closedAiToggle, /aria-label="Open AI sidebar"/)
-assert.match(openAiToggle, /aria-expanded="true"/)
-assert.match(openAiToggle, /aria-label="Close AI sidebar"/)
 assert.match(closedHtml, /lucide-panel-right-open/)
-assert.match(aiOpenHtml, /lucide-panel-right-close/)
 
 assert.match(closedHtml, /Checkout API/)
 assert.doesNotMatch(projectsOpenHtml, /Checkout API/)

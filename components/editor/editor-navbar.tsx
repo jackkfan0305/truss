@@ -5,7 +5,6 @@ import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
   PanelRightOpen,
   Share2,
 } from "lucide-react"
@@ -60,9 +59,6 @@ export function EditorNavbar({
   className,
 }: EditorNavbarProps) {
   const LeftToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
-  const RightToggleIcon = isAiSidebarOpen
-    ? PanelRightClose
-    : PanelRightOpen
 
   return (
     <header
@@ -144,22 +140,17 @@ export function EditorNavbar({
         {profile}
       </div>
 
-      {onToggleAiSidebar ? (
+      {onToggleAiSidebar && !isAiSidebarOpen ? (
         <Button
           variant="ghost"
           size="icon-lg"
           onClick={onToggleAiSidebar}
           aria-controls="ai-sidebar"
           aria-expanded={isAiSidebarOpen}
-          aria-label={isAiSidebarOpen ? "Close AI sidebar" : "Open AI sidebar"}
-          className={cn(
-            FLOATING_CONTROL,
-            isAiSidebarOpen
-              ? "right-[calc(min(26rem,calc(100vw-1.5rem))-3.75rem)] xl:right-[calc(26rem-3rem)]"
-              : "right-3"
-          )}
+          aria-label="Open AI sidebar"
+          className={cn(FLOATING_CONTROL, "right-3")}
         >
-          <RightToggleIcon className="size-5 text-copy-secondary" />
+          <PanelRightOpen className="size-5 text-copy-secondary" />
         </Button>
       ) : null}
     </header>

@@ -39,14 +39,39 @@ function canonicalTrimmedString(minimumLength: number, maximumLength: number) {
 
 const nodeColorValues = Object.keys(NODE_COLORS) as [NodeColor, ...NodeColor[]];
 
+const agentGraphPositionSchema = z
+  .number()
+  .int()
+  .min(MIN_AGENT_GRAPH_POSITION)
+  .max(MAX_AGENT_GRAPH_POSITION);
+
+/** Shared by both node schemas so only the coordinates differ between them. */
+const agentGraphNodeFields = {
+  id: agentGraphIdSchema,
+  label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
+  shape: z.enum(NODE_SHAPES),
+  color: z.enum(nodeColorValues),
+};
+
 const agentGraphNodeSchema = z.strictObject({
-    id: agentGraphIdSchema,
-    label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
-    shape: z.enum(NODE_SHAPES),
-    color: z.enum(nodeColorValues),
-    x: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
-    y: z.number().int().min(MIN_AGENT_GRAPH_POSITION).max(MAX_AGENT_GRAPH_POSITION),
+    ...agentGraphNodeFields,
+    x: agentGraphPositionSchema,
+    y: agentGraphPositionSchema,
 });
+
+/**
+ * The API boundary's node. A caller may omit both coordinates and let the
+ * server lay the block out; half a pair is a mistake, not a request.
+ */
+const agentGraphInputNodeSchema = z
+  .strictObject({
+    ...agentGraphNodeFields,
+    x: agentGraphPositionSchema.optional(),
+    y: agentGraphPositionSchema.optional(),
+  })
+  .refine((node) => (node.x === undefined) === (node.y === undefined), {
+    message: "Supply both coordinates or omit both for automatic layout.",
+  });
 
 const agentGraphEdgeSchema = z.strictObject({
     id: agentGraphIdSchema,
@@ -60,11 +85,14 @@ const agentGraphEdgeSchema = z.strictObject({
  * launch must draw something onto a blank canvas, but an edit may legitimately
  * empty one. Factored out so both schemas share every other rule verbatim.
  */
-function buildAgentGraphSchema(minimumNodes: 0 | 1) {
+function buildAgentGraphSchema<NodeSchema extends z.ZodType<{ id: string }>>(
+  minimumNodes: 0 | 1,
+  nodeSchema: NodeSchema,
+) {
   return z
     .strictObject({
       version: z.literal(1),
-      nodes: z.array(agentGraphNodeSchema).min(minimumNodes).max(MAX_AGENT_GRAPH_NODES),
+      nodes: z.array(nodeSchema).min(minimumNodes).max(MAX_AGENT_GRAPH_NODES),
       edges: z.array(agentGraphEdgeSchema).max(MAX_AGENT_GRAPH_EDGES),
     })
     .superRefine((graph, context) => {
@@ -131,14 +159,25 @@ function buildAgentGraphSchema(minimumNodes: 0 | 1) {
     });
 }
 
-export const agentGraphSchema = buildAgentGraphSchema(1);
+export const agentGraphSchema = buildAgentGraphSchema(1, agentGraphNodeSchema);
 
 /**
  * Same contract as `agentGraphSchema` with the one-node floor lifted. A launch
  * must draw something; an *edit* may legitimately empty a canvas, and rejecting
  * that would make "remove the last node" the one edit the skill cannot express.
  */
-const agentGraphEditSchema = buildAgentGraphSchema(0);
+const agentGraphEditSchema = buildAgentGraphSchema(0, agentGraphNodeSchema);
+
+const agentGraphInputSchema = buildAgentGraphSchema(1, agentGraphInputNodeSchema);
+const agentGraphEditInputSchema = buildAgentGraphSchema(0, agentGraphInputNodeSchema);
+
+export type AgentGraphInput = z.infer<typeof agentGraphInputSchema>;
+
+/** API input may omit geometry. Legacy fragment launches stay positioned. */
+export function parseAgentGraphInput(value: unknown, allowEmpty = false): AgentGraphInput | null {
+  const parsed = (allowEmpty ? agentGraphEditInputSchema : agentGraphInputSchema).safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 export type AgentGraph = z.infer<typeof agentGraphSchema>;
 

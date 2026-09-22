@@ -58,6 +58,10 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 ### Agent Diagram Operations
 
 - The `truss-diagram` skill creates, reads, edits, and deletes diagrams over MCP.
+- Default to a small pictorial overview that explains the main flow. Add
+  technical detail when the user requests it.
+- Truss arranges generated blocks, connections, and labels so callers can focus
+  on what the diagram explains.
 - Output is structured as canvas nodes and edges written into the shared room.
 - Writes are paced, so a mounted editor watches the agent's cursor place each item.
 

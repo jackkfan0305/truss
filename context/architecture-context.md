@@ -13,6 +13,20 @@
 
 ## System Boundaries
 
+### Readable generation
+
+Generated diagrams default to an explanatory overview. Models choose components
+and relationships; a shared server layout computes positions, connection routes,
+and label placement. The same layout serves every agent write, import and edit alike.
+Existing positions survive small edits. Saved route geometry is only valid while
+its diagram geometry and label match; manual changes use interactive routing.
+Positioned legacy imports remain supported. Coordinate-free agent edits resolve
+against live state after fingerprint validation.
+
+The local MCP keeps browser linking and cached bearer credentials. Its delete
+operation uses the existing owner-only diagram deletion endpoint. Edit conflicts
+require a fresh read and revised edit, without automatic fingerprint replacement.
+
 - `app/api` — Authenticated request handlers: input validation, ownership checks, canvas writes, and persistence.
 - `lib` — Shared infrastructure: Prisma client, access control helpers, and utilities.
 - `components` — UI composition: canvas surfaces, sidebars, dialogs, and interactive elements.

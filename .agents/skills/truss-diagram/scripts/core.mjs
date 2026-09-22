@@ -25,7 +25,6 @@ const GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // trs_agent_ + base64url(32 random bytes) — see the shared agent-auth
 // contract. 32 bytes encodes to exactly 43 base64url characters.
 const AGENT_TOKEN_PATTERN = /^trs_agent_[A-Za-z0-9_-]{43}$/;
-const MAX_EDIT_ATTEMPTS = 2;
 // How long a cached diagram list may answer a resolution before it is
 // refetched. Short: the cache exists to skip a round trip, not to be a source
 // of truth, and a stale miss costs the user a wrong answer about their own
@@ -121,12 +120,14 @@ export function validateGraph(rawGraph) {
       !isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH) ||
       !SHAPES.has(node.shape) ||
       !COLORS.has(node.color) ||
-      !Number.isInteger(node.x) ||
-      !Number.isInteger(node.y) ||
-      node.x < MIN_POSITION ||
-      node.x > MAX_POSITION ||
-      node.y < MIN_POSITION ||
-      node.y > MAX_POSITION ||
+      (("x" in node || "y" in node) && (
+        !Number.isInteger(node.x) ||
+        !Number.isInteger(node.y) ||
+        node.x < MIN_POSITION ||
+        node.x > MAX_POSITION ||
+        node.y < MIN_POSITION ||
+        node.y > MAX_POSITION
+      )) ||
       nodeIds.has(node.id)
     ) {
       throw new Error("The graph contains an invalid node.");
@@ -137,8 +138,7 @@ export function validateGraph(rawGraph) {
       label: node.label,
       shape: node.shape,
       color: node.color,
-      x: node.x,
-      y: node.y,
+      ...("x" in node ? { x: node.x, y: node.y } : {}),
     };
   });
 
@@ -279,7 +279,7 @@ async function performLink(baseUrl) {
   });
   try {
     const linkUrl = buildLinkUrl(baseUrl, { linkId, port: loopback.port, nonce });
-    process.stdout.write(`${linkUrl}\n`);
+    process.stderr.write(`${linkUrl}\n`);
     try {
       await openLaunchUrl(linkUrl, process.platform);
     } catch {
@@ -519,13 +519,7 @@ export async function getDiagram(rawBaseUrl, diagramId) {
   };
 }
 
-/**
- * Applies a full desired graph to an existing diagram. `fingerprint` is the
- * value `getDiagram` returned for this diagram — an optimistic-concurrency
- * token, not a value to invent. On a stale fingerprint (409) this re-reads
- * once and retries before giving up, matching the diagram's live-editing
- * guarantees.
- */
+/** Apply against the graph the caller read; conflicts require a new edit. */
 export async function applyDiagramEdit(rawBaseUrl, diagramId, fingerprint, desiredGraph) {
   if (!isDiagramId(diagramId)) {
     throw new Error("A diagram id is required.");
@@ -533,31 +527,41 @@ export async function applyDiagramEdit(rawBaseUrl, diagramId, fingerprint, desir
   const baseUrl = resolveBaseUrl(rawBaseUrl);
   const graph = validateGraph(desiredGraph);
   const auth = createAuthedFetcher(baseUrl, await ensureCredential(baseUrl));
-
-  let currentFingerprint = fingerprint;
-  for (let attempt = 0; attempt < MAX_EDIT_ATTEMPTS; attempt += 1) {
-    const editResult = await auth.call((token) =>
-      postGraphEdit(baseUrl, diagramId, token, currentFingerprint, graph),
-    );
-
-    if (editResult.status === 200) {
-      return { editorUrl: `${baseUrl}/editor/${diagramId}` };
-    }
-    if (editResult.status !== 409) {
-      throw new Error("We couldn't apply that change. Please try again.");
-    }
-    if (attempt === MAX_EDIT_ATTEMPTS - 1) break;
-
-    const retryRead = await auth.call((token) => fetchGraph(baseUrl, diagramId, token));
-    if (retryRead.status !== 200) {
-      throw new Error("We couldn't read this diagram. Please try again.");
-    }
-    currentFingerprint = retryRead.body?.fingerprint;
-  }
-
-  throw new Error(
-    "This diagram is being actively edited elsewhere. Please try again in a moment.",
+  const result = await auth.call((token) =>
+    postGraphEdit(baseUrl, diagramId, token, fingerprint, graph),
   );
+  if (result.status === 409) {
+    throw new Error(
+      "This diagram changed since you read it. Read it again with truss_get_diagram, reapply your changes to the current graph, and submit its fingerprint.",
+    );
+  }
+  if (result.status !== 200) {
+    throw new Error("We couldn't apply that change. Please try again.");
+  }
+  return { editorUrl: `${baseUrl}/editor/${diagramId}` };
+}
+
+/** Delete through the owner-authorized API and report its completed result. */
+export async function deleteDiagram(rawBaseUrl, diagramId) {
+  if (!isDiagramId(diagramId)) {
+    throw new Error("A diagram id is required.");
+  }
+  const baseUrl = resolveBaseUrl(rawBaseUrl);
+  const auth = createAuthedFetcher(baseUrl, await ensureCredential(baseUrl));
+  const result = await auth.call((token) =>
+    fetchJson(`${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    }),
+  );
+  if (result.status !== 204) {
+    throw new Error("We couldn't delete that diagram. Check that you own it and try again.");
+  }
+  const cached = await readDiagrams(baseUrl);
+  if (cached) {
+    await writeDiagrams(baseUrl, cached.diagrams.filter((diagram) => diagram.id !== diagramId));
+  }
+  return { diagramId, deleted: true };
 }
 
 /** Creates a new diagram: makes the diagram, then imports the graph into it. */

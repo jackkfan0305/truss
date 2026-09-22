@@ -56,6 +56,7 @@ const {
   buildPickUrl,
   buildRoomId,
   createDiagram,
+  deleteDiagram,
   getDiagram,
   listDiagrams,
   login,
@@ -192,18 +193,18 @@ function createStubServerDynamic(handler) {
   });
 }
 
-// Intercepts the next full line core.mjs writes to stdout (the printed
+// Intercepts the next full line core.mjs writes to stderr (the printed
 // link/pick URL a headless SSH session would fall back to) without spawning a
 // child process to read it from.
-function interceptStdoutLine() {
-  const originalWrite = process.stdout.write.bind(process.stdout);
+function interceptStderrLine() {
+  const originalWrite = process.stderr.write.bind(process.stderr);
   let buffer = "";
   return new Promise((resolve) => {
-    process.stdout.write = (chunk) => {
+    process.stderr.write = (chunk) => {
       buffer += typeof chunk === "string" ? chunk : chunk.toString();
       const newlineIndex = buffer.indexOf("\n");
       if (newlineIndex !== -1) {
-        process.stdout.write = originalWrite;
+        process.stderr.write = originalWrite;
         resolve(buffer.slice(0, newlineIndex));
       }
       return true;
@@ -258,6 +259,22 @@ function rejectsGraph(graphCandidate, reason) {
 }
 
 assert.deepEqual(validateGraph(GRAPH), GRAPH);
+const semanticGraph = {
+  ...GRAPH,
+  nodes: GRAPH.nodes.map((node) => ({
+    id: node.id,
+    label: node.label,
+    shape: node.shape,
+    color: node.color,
+  })),
+};
+assert.deepEqual(validateGraph(semanticGraph), semanticGraph, "coordinates may both be omitted");
+for (const coordinate of ["x", "y"]) {
+  const partial = { ...GRAPH.nodes[0] };
+  delete partial[coordinate];
+  rejectsGraph({ ...GRAPH, nodes: [partial], edges: [] }, "partial coordinates are invalid");
+}
+
 
 const graphSchemaMarkdown = await readFile(
   join(SKILL_DIR, "references", "graph-schema.md"),
@@ -564,7 +581,7 @@ await withHome(async (homeDir) => {
   await stub.close();
 });
 
-// --- a 409 retries exactly once from a fresh read, then fails cleanly -----
+// --- a 409 preserves concurrent changes and asks the caller to reread -----
 
 await withHome(async (homeDir) => {
   const token = mintToken();
@@ -589,11 +606,11 @@ await withHome(async (homeDir) => {
 
   const read = await getDiagram(stub.origin, "p1");
   await assert.rejects(applyDiagramEdit(stub.origin, "p1", read.fingerprint, graph), (error) => {
-    assert.equal(error.message, "This diagram is being actively edited elsewhere. Please try again in a moment.");
+    assert.equal(error.message, "This diagram changed since you read it. Read it again with truss_get_diagram, reapply your changes to the current graph, and submit its fingerprint.");
     return true;
   });
-  assert.equal(editAttempts, 2, "the edit is posted exactly twice: initial + one retry");
-  assert.equal(graphReads, 2, "the graph is read once by getDiagram and once for the 409 retry");
+  assert.equal(editAttempts, 1, "a conflict never retries the stale desired graph");
+  assert.equal(graphReads, 1, "the caller must read and merge concurrent changes");
 
   await stub.close();
 });
@@ -613,7 +630,7 @@ await withHome(async (homeDir) => {
   );
   // Deliberately no seedCredential call: the credentials file does not exist.
 
-  const linkUrlPromise = interceptStdoutLine();
+  const linkUrlPromise = interceptStderrLine();
   const listPromise = listDiagrams(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, newToken);
 
@@ -652,7 +669,7 @@ await withHome(async (homeDir) => {
   );
   seedCredential(homeDir, stub.origin, staleToken);
 
-  const linkUrlPromise = interceptStdoutLine();
+  const linkUrlPromise = interceptStderrLine();
   const listPromise = listDiagrams(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, newToken);
   const { diagrams } = await listPromise;
@@ -682,7 +699,7 @@ await withHome(async (homeDir) => {
   );
   seedCredential(homeDir, stub.origin, staleToken);
 
-  const linkUrlPromise = interceptStdoutLine();
+  const linkUrlPromise = interceptStderrLine();
   const listPromise = listDiagrams(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, mintToken());
 
@@ -894,7 +911,7 @@ await withHome(async (homeDir) => {
     return null;
   });
 
-  const linkUrlPromise = interceptStdoutLine();
+  const linkUrlPromise = interceptStderrLine();
   const loginPromise = login(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, token);
   await loginPromise;
@@ -920,6 +937,32 @@ await withHome(async () => {
   await clearCredential("http://example.test");
   assert.equal(await readDiagrams("http://example.test"), null);
 });
+
+// Direct delete reports success only after the server completes deletion.
+for (const status of [204, 403, 404, 500]) {
+  await withHome(async (homeDir) => {
+    const token = mintToken();
+    let deleteCalls = 0;
+    const stub = await createStubServer(new Map([
+      ["DELETE /api/projects/p1", [({ headers }) => {
+        deleteCalls += 1;
+        assert.equal(headers.authorization, `Bearer ${token}`);
+        return { status, body: status === 204 ? null : { error: "failed" } };
+      }]],
+    ]));
+    seedCredentialWithProjects(homeDir, stub.origin, token,
+      [{ id: "p1", name: "Payments" }, { id: "p2", name: "Other" }], Date.now());
+    if (status === 204) {
+      assert.deepEqual(await deleteDiagram(stub.origin, "p1"), { projectId: "p1", deleted: true });
+      assert.deepEqual(await listDiagrams(stub.origin), { projects: [{ id: "p2", name: "Other" }] });
+    } else {
+      await assert.rejects(deleteDiagram(stub.origin, "p1"), /couldn't delete/);
+    }
+    assert.equal(deleteCalls, 1);
+    await assert.rejects(deleteDiagram(stub.origin, ""), /project id is required/);
+    await stub.close();
+  });
+}
 
 // --- delete: never deletes anything itself, and cannot silently no-op ------
 //
@@ -970,7 +1013,7 @@ const operationsMarkdown = await readFile(join(SKILL_DIR, "references", "operati
 assert.match(operationsMarkdown, /empty library, editing/i, "operations.md covers the empty-library branch for edit");
 assert.match(operationsMarkdown, /empty library, deleting/i, "operations.md covers the empty-library branch for delete");
 assert.match(operationsMarkdown, /truss_apply_diagram_edit/, "operations.md names the edit tool");
-assert.match(operationsMarkdown, /truss_delete_diagram_prompt/, "operations.md names the delete tool");
+assert.match(operationsMarkdown, /truss_delete_diagram\b/, "operations.md names the delete tool");
 
 unblockRealBrowser(realPath);
 console.info("Truss diagram core checks passed");

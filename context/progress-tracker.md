@@ -31,8 +31,10 @@ Update this file whenever the current phase, active feature, or implementation s
   - `selectLiveRunStep`, the live step line above the composer, and the
     `agent-step-sweep` CSS are all deleted. Step verbs are gone from the UI.
   - New files: `components/chat/{response,code-block,task,ai-input,ai-input-settings,thinking-orb,border-beam}.tsx`,
-    `components/editor/ai-run-tasks.tsx`, `lib/{streaming-markdown,markdown-tokens,run-task-groups,run-orb-state}.ts`,
+    `components/editor/ai-run-tasks.tsx`, `lib/{streaming-markdown,markdown-tokens,run-task-groups}.ts`,
     `components/ui/popover.tsx` (shadcn CLI). Deleted: `components/editor/ai-run-activity.tsx`.
+    (`lib/run-orb-state.ts` shipped here too but was dead on arrival and was
+    removed in the final-review fix pass below — see that entry.)
   - Six verify scripts added: `verify-run-steps.ts`, `verify-streaming-markdown.ts`,
     `verify-markdown-tokens.ts`, `verify-chat-response.tsx`, `verify-run-task-groups.ts`,
     `verify-chat-composer.tsx`.
@@ -1498,3 +1500,40 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
+
+## Final whole-branch review fix pass
+
+- Three findings from a final review of the whole `agent-chat-overhaul`
+  branch, all fixed:
+  1. `components/editor/chat-entry.tsx` rendered the assistant answer through
+     `Response` without `isStreaming`, so `lib/streaming-markdown.ts`'s tail
+     repair never ran on the one text stream it exists for. Fixed by deriving
+     `isStreaming` from `message.run?.phase === "running"` — confirmed against
+     `lib/ai-run-chat.ts`, where `appendContent` streams deltas into `content`
+     while `phase` stays `"running"`, and only `finish()` flips it alongside
+     the final content — and forwarding it to `Response`. Regression test:
+     `checkChatEntryDerivesStreamingStateForResponse` in
+     `scripts/verify-ai-chat-ui.tsx`, asserting on the component's source
+     rather than rendered markup, because `useSmoothText` reveals from zero on
+     first render and a static render of a streaming vs. non-streaming
+     `Response` looks the same either way.
+  2. `AiInputPill` (`components/chat/ai-input.tsx`) only destructured
+     `{ label, detail, onClick, disabled, render }`, so wrapping it in a
+     `PopoverTrigger`'s `render` prop (`ai-input-settings.tsx`) silently
+     dropped the ref and ARIA props Base UI clones onto it (`ref`,
+     `aria-haspopup`, `aria-expanded`, `aria-controls`, `id`). Fixed by
+     accepting `ref` plus `...rest` and forwarding both to `Button`, and by
+     giving `Button` (`components/ui/button.tsx`) a `ref` parameter it
+     forwards to the underlying `@base-ui/react/button` primitive.
+  3. `lib/run-orb-state.ts`'s `selectOrbState` was dead: nothing called it.
+     The natural caller, the remote-run row in
+     `components/editor/ai-chat-transcript.tsx`, has `status?.text` available,
+     but that text (`trigger/design-agent.ts`: `"Reading the canvas…"`,
+     `"Designing…"`, free-form summaries) never matches an `AI_RUN_STEPS`
+     value — those are ellipsis-free step verbs written to the *chat run's*
+     activity log, not to the status feed. Wiring `selectOrbState(status?.text)`
+     would only ever return its `"working"` fallback, i.e. the literal already
+     hardcoded there. Deleted `lib/run-orb-state.ts` and its two orb-mapping
+     checks in `scripts/verify-run-steps.ts` instead of wiring a call that
+     could never do anything.
+- Gates: typecheck, lint, `verify:unit`, and `build` all exit 0.

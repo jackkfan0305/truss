@@ -9,9 +9,9 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  AiRunActivity,
-  type AiRunActivityState,
-} from "../components/editor/ai-run-activity";
+  AiRunTasks,
+  type AiRunTasksState,
+} from "../components/editor/ai-run-tasks";
 import { AiChatTranscript } from "../components/editor/ai-chat-transcript";
 import { ChatEntry } from "../components/editor/chat-entry";
 import { ManualSpecCopyFallback } from "../components/editor/spec-attachment";
@@ -106,7 +106,7 @@ function checkOwnPromptStaysQuiet() {
 
 /** A stale snapshot must state that work stopped without discarding its ledger. */
 function checkIncompleteRunKeepsItsPartialWork() {
-  const incomplete: AiRunActivityState = {
+  const incomplete: AiRunTasksState = {
     id: "chat-run",
     runId: "run-123",
     phase: "incomplete",
@@ -115,24 +115,19 @@ function checkIncompleteRunKeepsItsPartialWork() {
       { id: "activity-1", type: "action", text: "addNode", detail: "Add Cache" },
     ],
   };
-  const html = renderEntry(<AiRunActivity state={incomplete} />);
+  const html = renderEntry(<AiRunTasks state={incomplete} />);
 
   assert.ok(
     html.includes("Work stopped before completion"),
     "an incomplete run states that it stopped",
   );
   assert.ok(
+    html.includes("Reading the canvas"),
+    "the step that opened the task is the task title",
+  );
+  assert.ok(
     html.includes("Add Cache"),
     "the canvas work a stopped run did manage remains inspectable",
-  );
-
-  // Steps are the live line above the composer now (38-live-step-status).
-  // Listing them here too would print the same verbs twice, and they are the
-  // least useful part of a log read after the fact.
-  assert.equal(
-    html.includes("Reading the canvas"),
-    false,
-    "step verbs are status, not ledger, and do not appear in the work log",
   );
 }
 
@@ -145,7 +140,7 @@ function checkIncompleteRunKeepsItsPartialWork() {
  * static diff and obvious to anyone watching the panel.
  */
 function checkOnlyTheNewestThoughtIsStillThinking() {
-  const running: AiRunActivityState = {
+  const running: AiRunTasksState = {
     id: "chat-run",
     runId: "run-123",
     phase: "running",
@@ -154,7 +149,7 @@ function checkOnlyTheNewestThoughtIsStillThinking() {
       { id: "activity-1", type: "reasoning", text: "Second thought" },
     ],
   };
-  const html = renderEntry(<AiRunActivity state={running} />);
+  const html = renderEntry(<AiRunTasks state={running} />);
 
   assert.equal(
     html.match(/Thinking/g)?.length,
@@ -171,7 +166,7 @@ function checkOnlyTheNewestThoughtIsStillThinking() {
   // not rendered — which is why the streaming part is chosen against the
   // unfiltered activity rather than the list on screen.
   const afterStep = renderEntry(
-    <AiRunActivity
+    <AiRunTasks
       state={{
         ...running,
         activity: [
@@ -189,20 +184,88 @@ function checkOnlyTheNewestThoughtIsStillThinking() {
   );
 }
 
-/** A turn that only answered has nothing to show once steps are out of the log. */
-function checkACompletedTurnWithNoWorkRendersNothing() {
-  const answered: AiRunActivityState = {
-    id: "chat-run",
-    runId: "run-123",
-    phase: "complete",
-    activity: [{ id: "activity-0", type: "step", text: "Reading the canvas" }],
-  };
+const TASK_RUN: AiRunTasksState = {
+  id: "chat-prompt",
+  runId: "run_1",
+  phase: "running",
+  activity: [
+    { id: "a0", type: "step", text: "Reading the canvas" },
+    { id: "a1", type: "reasoning", text: "Three services, no queue." },
+    { id: "a2", type: "step", text: "Applying to the canvas" },
+    { id: "a3", type: "action", text: "addNode", detail: "Queue" },
+    { id: "a4", type: "artifact", text: "design.md", detail: "spec_1" },
+  ],
+};
 
-  assert.equal(
-    renderEntry(<AiRunActivity state={answered} />),
-    "",
-    "an empty work log renders no disclosure rather than an empty one",
+/**
+ * The steps used to be a status line above the composer and a filtered-out
+ * part of the log. They are the log now, so this is the check that each one
+ * actually opens a task and that its work lands under it.
+ */
+function checkEachStepBecomesATask() {
+  const html = renderEntry(<AiRunTasks state={TASK_RUN} />);
+
+  assert.ok(html.includes("Reading the canvas"), "the first step is a task");
+  assert.ok(html.includes("Applying to the canvas"), "the second step is a task");
+  assert.ok(html.includes("addNode"), "an operation lands under its step");
+  assert.ok(
+    !html.includes("design.md"),
+    "an artifact is attached to the message, not to a step",
   );
+}
+
+/** Tasks stay open: the steps are the record of what happened to the canvas. */
+function checkTasksDefaultToOpen() {
+  const html = renderEntry(<AiRunTasks state={TASK_RUN} />);
+  const open = html.match(/<details open/g) ?? [];
+
+  assert.equal(open.length, 2, "every task starts open");
+}
+
+/**
+ * The live step line above the composer is gone, so the running task is the
+ * one announcing element. Two live regions reading one verb read it twice.
+ */
+function checkExactlyOneElementAnnouncesTheStep() {
+  const html = renderEntry(<AiRunTasks state={TASK_RUN} />);
+  const regions = html.match(/aria-live="polite"/g) ?? [];
+
+  assert.equal(regions.length, 1, "exactly one live region in a running turn");
+}
+
+function checkAFinishedRunAnnouncesNothing() {
+  const html = renderEntry(
+    <AiRunTasks state={{ ...TASK_RUN, phase: "complete" }} />,
+  );
+
+  assert.ok(!html.includes('aria-live="polite"'), "nothing announces a finished run");
+}
+
+/**
+ * A stopped run is not a failed one. Both take the error glyph, and the
+ * wording is what tells them apart — colour never does.
+ */
+function checkAStoppedRunSaysItStoppedRatherThanFailed() {
+  const stopped = renderEntry(
+    <AiRunTasks state={{ ...TASK_RUN, phase: "incomplete" }} />,
+  );
+  const failed = renderEntry(<AiRunTasks state={{ ...TASK_RUN, phase: "error" }} />);
+
+  assert.ok(stopped.includes("stopped"), "an incomplete run says it stopped");
+  assert.ok(!stopped.includes("failed"), "and does not claim to have failed");
+  assert.ok(failed.includes("failed"), "a failed run says so");
+  assert.ok(stopped.includes("addNode"), "its partial work is still shown");
+}
+
+/** A turn that answered in words and did nothing else renders nothing. */
+function checkACompletedTurnWithNoStepsRendersNothing() {
+  const html = renderEntry(
+    <AiRunTasks
+      state={{ id: "chat-2", runId: "run_2", phase: "complete", activity: [] }}
+    />,
+  );
+
+  assert.equal(html, "", "no empty disclosure is left behind");
 }
 
 /**
@@ -351,7 +414,12 @@ checkLegacyCollaboratorUsesLivePresenceAvatar();
 checkOwnPromptStaysQuiet();
 checkIncompleteRunKeepsItsPartialWork();
 checkOnlyTheNewestThoughtIsStillThinking();
-checkACompletedTurnWithNoWorkRendersNothing();
+checkEachStepBecomesATask();
+checkTasksDefaultToOpen();
+checkExactlyOneElementAnnouncesTheStep();
+checkAFinishedRunAnnouncesNothing();
+checkAStoppedRunSaysItStoppedRatherThanFailed();
+checkACompletedTurnWithNoStepsRendersNothing();
 checkRunObserverDoesNotDependOnVisibleMessages();
 checkSpecPreviewCopiesMarkdownSource();
 checkSpecCopyFailureExposesSelectableMarkdown();

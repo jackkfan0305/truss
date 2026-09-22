@@ -11,9 +11,9 @@ import {
 import { ArrowDown, Loader2 } from "lucide-react"
 
 import {
-  AiRunActivity,
-  type AiRunActivityState,
-} from "@/components/editor/ai-run-activity"
+  AiRunTasks,
+  type AiRunTasksState,
+} from "@/components/editor/ai-run-tasks"
 import { ChatEntry } from "@/components/editor/chat-entry"
 import { SpecAttachmentList } from "@/components/editor/spec-attachment"
 import {
@@ -373,14 +373,14 @@ function MessageWithRun({
       />
       {turn && showLocalActivity ? (
         <li>
-          <AiRunActivity state={toAiRunActivityState(turn)} />
+          <AiRunTasks state={toAiRunTasksState(turn)} />
         </li>
       ) : null}
     </>
   )
 }
 
-function toAiRunActivityState(turn: AiRunTurn): AiRunActivityState {
+function toAiRunTasksState(turn: AiRunTurn): AiRunTasksState {
   return {
     id: turn.promptMessageId,
     runId: turn.runId,
@@ -411,7 +411,7 @@ function PersistedAiRunActivity({ message }: { message: ChatMessage }) {
   if (!run) return null
 
   return (
-    <AiRunActivity
+    <AiRunTasks
       state={{
         id: message.id,
         runId: run.runId,

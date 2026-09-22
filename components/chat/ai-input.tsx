@@ -144,37 +144,50 @@ function AiInputToolbar({ children }: { children: ReactNode }) {
   return <div className="mt-2 flex items-center gap-1.5">{children}</div>
 }
 
+interface AiInputPillProps extends React.ComponentPropsWithRef<typeof Button> {
+  label: string
+  detail: string
+}
+
 /**
  * The composer's one setting surface: a label and a detail on a borderless
  * control. Borderless because it sits inside the composer's own border, and a
  * second bordered control there reads as a nested box rather than as a setting
  * on the thing it belongs to.
+ *
+ * Accepts and forwards `ref` and any unrecognised props (`...rest`) rather
+ * than a fixed prop list: wrapped in a `PopoverTrigger`'s `render` prop, Base
+ * UI clones this element with its own computed `ref`, `aria-haspopup`,
+ * `aria-expanded`, `aria-controls` and `id` — Floating UI needs the ref as its
+ * anchor, and a screen reader needs the ARIA to know this opens a dialog.
+ * Dropping any of them silently breaks the popover.
  */
 function AiInputPill({
+  ref,
   label,
   detail,
-  onClick,
   disabled = false,
-  render,
-}: {
-  label: string
-  detail: string
-  onClick?: () => void
-  disabled?: boolean
-  /** A trigger supplied by a popover primitive, when one wraps this. */
-  render?: React.ReactElement
-}) {
+  className,
+  "aria-label": ariaLabel,
+  ...rest
+}: AiInputPillProps) {
   return (
     <Button
+      ref={ref}
       type="button"
       variant="ghost"
       size="sm"
-      onClick={onClick}
       disabled={disabled}
       data-composer-pill=""
-      aria-label={`Model and effort: ${label}, ${detail}`}
-      render={render}
-      className="min-w-0 gap-1.5 px-2 text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30"
+      // Base UI's PopoverTrigger never injects its own `aria-label`, so this
+      // composed one always wins — but an explicit caller-supplied label (the
+      // `??` branch) still takes priority over the default.
+      aria-label={ariaLabel ?? `Model and effort: ${label}, ${detail}`}
+      className={cn(
+        "min-w-0 gap-1.5 px-2 text-xs text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30",
+        className
+      )}
+      {...rest}
     >
       <span className="truncate">{label}</span>
       <span className="shrink-0 text-copy-faint">{detail}</span>

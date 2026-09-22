@@ -453,6 +453,34 @@ function checkAssistantContentRendersAsMarkdown() {
   assert.ok(!html.includes("**"), "no literal markdown reaches the reader");
 }
 
+/**
+ * The streaming tail repair (`lib/streaming-markdown.ts`) only engages when
+ * `Response` is told a message is still streaming. Wiring that up is a
+ * one-line regression waiting to happen, and it is invisible to a markup
+ * assertion: `useSmoothText` reveals from zero on first render, so a
+ * `Response` given `isStreaming` renders no more text than one given nothing
+ * at all under `renderToStaticMarkup`. Assert on the source instead, in the
+ * style of `checkTheTranscriptHasNoRawHtmlSink` above — the wiring itself is
+ * what this bug removed, so the wiring is what the test has to pin down.
+ */
+function checkChatEntryDerivesStreamingStateForResponse() {
+  const source = readFileSync(
+    new URL("../components/editor/chat-entry.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /message\.run\?\.phase\s*===\s*"running"/,
+    "chat-entry.tsx derives streaming state from the run's own phase",
+  );
+  assert.match(
+    source,
+    /<Response[\s\S]*?isStreaming=\{isStreaming\}/,
+    "chat-entry.tsx forwards the derived flag to Response",
+  );
+}
+
 checkCollaboratorIdentityIsVisible();
 checkLegacyCollaboratorUsesInitials();
 checkLegacyCollaboratorUsesLivePresenceAvatar();
@@ -471,4 +499,5 @@ checkSpecCopyFailureExposesSelectableMarkdown();
 checkClipboardFeedbackLivesInOneHook();
 checkTheTranscriptHasNoRawHtmlSink();
 checkAssistantContentRendersAsMarkdown();
+checkChatEntryDerivesStreamingStateForResponse();
 console.log("✅ ai-chat collaborator markup and spec copy checks passed");

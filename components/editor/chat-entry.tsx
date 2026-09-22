@@ -27,6 +27,11 @@ export function ChatEntry({
 }: ChatEntryProps) {
   const isAssistant = message.role === "assistant"
   const timestamp = new Date(message.sentAt).toISOString()
+  // Deltas are still landing while the run's own row reports "running" — see
+  // `appendContent` in `lib/ai-run-chat.ts`, which only flips the phase at
+  // `finish()`, alongside the final content. That is the one signal this
+  // message carries for whether more text is still arriving.
+  const isStreaming = message.run?.phase === "running"
 
   if (isAssistant) {
     return (
@@ -37,7 +42,10 @@ export function ChatEntry({
         </time>
         {activity}
         {message.content ? (
-          <Response className="text-sm leading-relaxed text-copy-primary">
+          <Response
+            className="text-sm leading-relaxed text-copy-primary"
+            isStreaming={isStreaming}
+          >
             {message.content}
           </Response>
         ) : null}

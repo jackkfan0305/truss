@@ -83,8 +83,9 @@ function checkAWorkingRunShowsANonInteractiveIndicator() {
 function checkTheFieldCarriesTheContentLimit() {
   const html = composer({ value: "", status: "ready", isDisabled: false });
 
-  assert.ok(
-    html.includes(`maxlength="${MAX_CHAT_CONTENT_LENGTH}"`),
+  assert.match(
+    html,
+    new RegExp(`maxlength="${MAX_CHAT_CONTENT_LENGTH}"`, "i"),
     "the field cannot outgrow what the feed accepts",
   );
 }

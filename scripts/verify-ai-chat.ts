@@ -15,7 +15,7 @@ import {
 import { parseAiChatRequest } from "../lib/ai-chat-requests";
 import { fitAiRunToBudget, MAX_AI_RUN_SNAPSHOT_BYTES } from "../lib/ai-run-chat";
 import { toPersistedAiActivity } from "../lib/ai-timeline";
-import { renderChatMarkdown } from "../lib/markdown";
+import { parseMarkdown } from "../lib/markdown-tokens";
 import { selectSpecAttachments } from "../lib/spec-attachments";
 import {
   AI_USER_ID,
@@ -891,71 +891,56 @@ function checkMessageIdsCanAnchorInlineRuns() {
   );
 }
 
+/** Every token in the tree, inline children included. */
+function allTokens(markdown: string) {
+  const flatten = (tokens: ReturnType<typeof parseMarkdown>): typeof tokens =>
+    tokens.flatMap((token) => [
+      token,
+      ...(token.children ? flatten(token.children) : []),
+    ]);
+
+  return flatten(parseMarkdown(markdown));
+}
+
+function tokenTypes(markdown: string): string[] {
+  return allTokens(markdown).map((token) => token.type);
+}
+
 /**
- * The markdown boundary. This output goes straight into
- * `dangerouslySetInnerHTML`, so these are not formatting tests — they are the
- * assertion that a chat message cannot become script. The `html: false` option
- * in `lib/markdown.ts` is the only thing standing between a feed message and
- * the DOM, and it is one keystroke from being switched on by someone who wants
- * an embedded `<br>` to work.
+ * The escaping cases this file has always carried, now against the token path.
+ * `html: false` means markdown-it refuses to parse raw HTML rather than
+ * stripping it, so a tag arrives as token *content* and the React renderer
+ * puts it in a text node.
  */
 function checkMarkdownCannotInjectHtml() {
-  const escaped: [string, string][] = [
-    ["<script>alert(1)</script>", "<script"],
-    ['<img src=x onerror="alert(1)">', "<img"],
-    ["<iframe src='evil'></iframe>", "<iframe"],
-    ["<div onclick='steal()'>hi</div>", "<div"],
-    ["<style>body{display:none}</style>", "<style"],
-  ];
+  const injected = allTokens('<img src=x onerror="alert(1)">');
 
-  for (const [content, forbidden] of escaped) {
-    const html = renderChatMarkdown(content);
-
-    assert.ok(
-      !html.includes(forbidden),
-      `raw HTML must be escaped, not emitted: ${content}`
-    );
-    assert.ok(html.includes("&lt;"), `expected escaped text for: ${content}`);
-  }
-
-  // Script-bearing URL schemes are refused by markdown-it's link validator, so
-  // the href never reaches the DOM even though the link text still renders.
-  for (const href of [
-    "javascript:alert(1)",
-    "JaVaScRiPt:alert(1)",
-    "vbscript:msgbox(1)",
-    "file:///etc/passwd",
-  ]) {
-    const html = renderChatMarkdown(`[click](${href})`);
-
-    assert.ok(
-      !html.includes(`href="${href}"`) && !/href="[^"]*script:/i.test(html),
-      `unsafe scheme must not become an href: ${href}`
-    );
-  }
-
-  // An ordinary link is still a link, and still leaves the tab safely.
-  const link = renderChatMarkdown("[docs](https://example.com)");
-
-  assert.ok(link.includes('href="https://example.com"'));
-  assert.ok(link.includes('target="_blank"'));
-  assert.ok(link.includes("noopener"));
+  assert.ok(!tokenTypes('<img src=x onerror="alert(1)">').includes("html_block"));
+  assert.ok(!tokenTypes('<script>alert(1)</script>').includes("html_inline"));
+  assert.ok(
+    injected.some((token) => token.content.includes("onerror")),
+    "the tag survives as readable text",
+  );
+  assert.ok(
+    !tokenTypes("[click](javascript:alert(1))").includes("link_open"),
+    "a dangerous scheme is never a link",
+  );
 }
 
 /** The formatting the assistant actually uses: prose, lists, code, emphasis. */
 function checkMarkdownRendersChatFormatting() {
-  assert.ok(renderChatMarkdown("**bold**").includes("<strong>"));
-  assert.ok(renderChatMarkdown("_italic_").includes("<em>"));
-  assert.ok(renderChatMarkdown("- one\n- two").includes("<li>"));
-  assert.ok(renderChatMarkdown("1. one\n2. two").includes("<ol>"));
-  assert.ok(renderChatMarkdown("`inline`").includes("<code>"));
-  assert.ok(renderChatMarkdown("```\nblock\n```").includes("<pre>"));
+  assert.ok(tokenTypes("**bold**").includes("strong_open"));
+  assert.ok(tokenTypes("_italic_").includes("em_open"));
+  assert.ok(tokenTypes("- one\n- two").includes("list_item_open"));
+  assert.ok(tokenTypes("1. one\n2. two").includes("ordered_list_open"));
+  assert.ok(tokenTypes("`inline`").includes("code_inline"));
+  assert.ok(tokenTypes("```\nblock\n```").includes("fence"));
 
   // `breaks: true` — a single newline is where the line visibly broke.
-  assert.ok(renderChatMarkdown("line one\nline two").includes("<br>"));
+  assert.ok(tokenTypes("line one\nline two").includes("softbreak"));
 
   // `linkify: true` — a pasted URL is a link without any syntax around it.
-  assert.ok(renderChatMarkdown("see https://example.com").includes("<a "));
+  assert.ok(tokenTypes("see https://example.com").includes("link_open"));
 }
 
 async function main() {

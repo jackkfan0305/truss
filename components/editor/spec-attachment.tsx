@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Check, CircleAlert, Copy, Download, FileText, Loader2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Response } from "@/components/chat/response"
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useHydrated } from "@/hooks/use-hydrated"
 import { specDownloadHref, useSpecContent } from "@/hooks/use-project-specs"
-import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
 import { cn } from "@/lib/utils"
 import type { SpecAttachmentRef } from "@/lib/spec-attachments"
 
@@ -158,20 +158,19 @@ function SpecPreviewBody({
           </p>
         ) : markdown ? (
           /*
-           * Safe for exactly one reason: `lib/markdown.ts` runs markdown-it
-           * with `html: false`, so raw HTML in a document is escaped into
-           * visible text rather than parsed. That file is the sanitizer, and
-           * this content is model-authored — read it before changing this.
+           * A document rather than a chat message, so it passes a heading scale.
+           * `Response` sets a heading's weight and rhythm but never its size, which
+           * is what makes this override possible — without it a spec's hierarchy
+           * would flatten to the `text-sm` every chat heading uses.
            */
-          <div
+          <Response
             className={cn(
-              "wrap-anywhere text-sm leading-relaxed text-copy-primary",
-              MARKDOWN_STYLES,
-              // A document, unlike a chat message, has hierarchy worth seeing.
-              "[&_h1]:mt-0 [&_h1]:mb-2 [&_h1]:text-base [&_h2]:mt-5 [&_h2]:text-sm [&_h3]:mt-4"
+              "text-sm leading-relaxed text-copy-primary",
+              "[&_h1]:mt-0 [&_h1]:mb-2 [&_h1]:text-base [&_h2]:mt-5 [&_h2]:text-sm [&_h3]:mt-4 [&_h3]:text-sm"
             )}
-            dangerouslySetInnerHTML={{ __html: renderChatMarkdown(markdown) }}
-          />
+          >
+            {markdown}
+          </Response>
         ) : null}
       </ScrollArea>
 

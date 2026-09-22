@@ -2,8 +2,7 @@ import Image from "next/image"
 
 import { getInitials } from "@/lib/presence"
 import type { ChatMessage } from "@/lib/ai-chat"
-import { MARKDOWN_STYLES, renderChatMarkdown } from "@/lib/markdown"
-import { cn } from "@/lib/utils"
+import { Response } from "@/components/chat/response"
 
 interface ChatEntryProps {
   message: ChatMessage
@@ -38,15 +37,9 @@ export function ChatEntry({
         </time>
         {activity}
         {message.content ? (
-          <div
-            className={cn(
-              "wrap-anywhere text-sm leading-relaxed text-copy-primary",
-              MARKDOWN_STYLES
-            )}
-            dangerouslySetInnerHTML={{
-              __html: renderChatMarkdown(message.content),
-            }}
-          />
+          <Response className="text-sm leading-relaxed text-copy-primary">
+            {message.content}
+          </Response>
         ) : null}
         {attachments}
       </li>
@@ -67,7 +60,7 @@ export function ChatEntry({
           <time className="sr-only" dateTime={timestamp}>
             Sent at {timestamp}
           </time>
-          <p className="whitespace-pre-wrap wrap-anywhere rounded-xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
+          <p className="whitespace-pre-wrap wrap-anywhere rounded-2xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
             {message.content}
           </p>
         </div>
@@ -81,7 +74,7 @@ export function ChatEntry({
       <time className="sr-only" dateTime={timestamp}>
         Sent at {timestamp}
       </time>
-      <p className="whitespace-pre-wrap wrap-anywhere rounded-xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
+      <p className="whitespace-pre-wrap wrap-anywhere rounded-2xl bg-elevated px-3 py-2 text-sm leading-relaxed text-copy-primary">
         {message.content}
       </p>
     </li>

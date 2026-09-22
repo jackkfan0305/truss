@@ -10,6 +10,8 @@ import {
 } from "react"
 import { ArrowDown, Loader2 } from "lucide-react"
 
+import { ThinkingOrb } from "@/components/chat/thinking-orb"
+
 import {
   AiRunTasks,
   type AiRunTasksState,
@@ -475,10 +477,13 @@ function RemoteRunStatus({
       aria-live="polite"
       className="flex items-center gap-2 text-xs text-copy-muted"
     >
-      <Loader2
-        aria-hidden
-        className="size-3.5 motion-safe:animate-spin text-copy-primary"
-      />
+      {/*
+        This row stays a single line rather than becoming an empty task stack.
+        When a collaborator’s agent is working this client has no activity
+        stream at all — only the room status message — so there are no steps to
+        group and nothing to fold.
+      */}
+      <ThinkingOrb state="working" size={20} label="" />
       <span>{status?.text ?? "A collaborator’s agent is working…"}</span>
     </li>
   )

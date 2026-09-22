@@ -408,6 +408,51 @@ function checkClipboardFeedbackLivesInOneHook() {
   }
 }
 
+/**
+ * The chat path had three `dangerouslySetInnerHTML` sites. The point of the
+ * token renderer was removing them, so this is the check that keeps them gone.
+ */
+function checkTheTranscriptHasNoRawHtmlSink() {
+  for (const path of [
+    "../components/editor/chat-entry.tsx",
+    "../components/editor/ai-run-tasks.tsx",
+  ]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+
+    assert.doesNotMatch(
+      source,
+      /dangerouslySetInnerHTML/,
+      `${path} renders elements, never an HTML string`,
+    );
+    assert.doesNotMatch(
+      source,
+      /renderChatMarkdown|MARKDOWN_STYLES/,
+      `${path} is off the HTML-string markdown path`,
+    );
+  }
+}
+
+/** An assistant answer is markdown, and it renders as elements. */
+function checkAssistantContentRendersAsMarkdown() {
+  const html = renderEntry(
+    <ChatEntry
+      message={{
+        id: "chat-answer",
+        role: "assistant",
+        senderId: "truss-ai-architect",
+        senderName: "AI Architect",
+        content: "The **gateway** owns retries.",
+        sentAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      }}
+      isOwn={false}
+    />,
+  );
+
+  assert.ok(html.includes("<strong"), "emphasis is a real element");
+  assert.ok(!html.includes("**"), "no literal markdown reaches the reader");
+}
+
 checkCollaboratorIdentityIsVisible();
 checkLegacyCollaboratorUsesInitials();
 checkLegacyCollaboratorUsesLivePresenceAvatar();
@@ -424,4 +469,6 @@ checkRunObserverDoesNotDependOnVisibleMessages();
 checkSpecPreviewCopiesMarkdownSource();
 checkSpecCopyFailureExposesSelectableMarkdown();
 checkClipboardFeedbackLivesInOneHook();
+checkTheTranscriptHasNoRawHtmlSink();
+checkAssistantContentRendersAsMarkdown();
 console.log("✅ ai-chat collaborator markup and spec copy checks passed");

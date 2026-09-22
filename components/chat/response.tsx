@@ -48,6 +48,9 @@ const RESPONSE_TAGS = [
   "ol",
   "li",
   "blockquote",
+  "strong",
+  "em",
+  "s",
   "a",
   "table",
   "thead",
@@ -87,6 +90,9 @@ const RESPONSE_CLASSES: Partial<Record<ResponseTag | "code", string>> = {
   ol: "my-2 list-decimal pl-4",
   li: "my-0.5 marker:text-copy-faint",
   blockquote: "my-2 border-l border-surface-border pl-3 text-copy-muted",
+  strong: "font-medium text-copy-primary",
+  em: "italic",
+  s: "line-through",
   a: "underline underline-offset-2 decoration-copy-faint hover:decoration-copy-primary",
   // Fixed layout: a markdown table carries no widths, and deriving them from
   // the longest cell makes columns jump as rows stream in.

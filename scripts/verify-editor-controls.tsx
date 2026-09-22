@@ -156,6 +156,15 @@ assert.match(closedAiToggle, /aria-expanded="false"/)
 assert.match(closedAiToggle, /aria-label="Open AI sidebar"/)
 assert.match(closedHtml, /lucide-panel-right-open/)
 
+// One close affordance, not two: the panel header carries the close control
+// while the panel is open, so the navbar's floating toggle must not render
+// there as well.
+assert.doesNotMatch(
+  aiOpenHtml,
+  /aria-controls="ai-sidebar"/,
+  "the navbar toggle does not duplicate the panel header's close control"
+)
+
 assert.match(closedHtml, /Checkout API/)
 assert.doesNotMatch(projectsOpenHtml, /Checkout API/)
 assert.match(aiOpenHtml, /Checkout API/)

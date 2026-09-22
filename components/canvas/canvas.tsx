@@ -121,8 +121,8 @@ export function Canvas(props: CanvasProps) {
 }
 
 interface CanvasProps {
-  /** Doubles as the room ID and the project the canvas is persisted under. */
-  projectId: string;
+  /** Doubles as the room ID and the diagram the canvas is persisted under. */
+  diagramId: string;
   /**
    * The starter template picker is opened from the editor navbar, which sits
    * outside the room — but importing one is a Storage write, so the dialog is
@@ -133,7 +133,7 @@ interface CanvasProps {
 }
 
 function CanvasFlow({
-  projectId,
+  diagramId,
   isTemplatesOpen,
   onTemplatesOpenChange,
 }: CanvasProps) {
@@ -282,14 +282,14 @@ function CanvasFlow({
    * last save. A Storage-held "restored" flag is the fix if it ever shows up.
    */
   useCanvasRestore(
-    projectId,
+    diagramId,
     nodes.length === 0 && edges.length === 0,
     handleRestore,
   );
 
   // Status is set straight from the save lifecycle, so the navbar indicator
   // updates without this component re-rendering to report it.
-  const { saveNow } = useCanvasAutosave(projectId, nodes, edges, setSaveStatus);
+  const { saveNow } = useCanvasAutosave(diagramId, nodes, edges, setSaveStatus);
 
   useEffect(() => {
     registerSaveNow(saveNow);

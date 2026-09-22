@@ -25,19 +25,35 @@ async function main() {
     ? "Accelerate"
     : "direct (adapter-pg)";
 
-  const projects = await prisma.project.findMany({
-    include: { _count: { select: { collaborators: true } } },
+  const storyboards = await prisma.storyboard.findMany({
+    include: { _count: { select: { collaborators: true, diagrams: true } } },
     orderBy: { createdAt: "asc" },
+  });
+  const diagrams = await prisma.diagram.findMany({
+    orderBy: { createdAt: "asc" },
+    select: { name: true, storyboardId: true, deletingAt: true, deletedAt: true },
   });
 
   console.log("✅ Connected");
   console.log(`Connection mode: ${mode}`);
-  console.log(`Projects: ${projects.length}`);
+  console.log(`Storyboards: ${storyboards.length}`);
 
-  for (const project of projects) {
+  for (const storyboard of storyboards) {
     console.log(
-      `  - ${project.name} [${project.status}] (${project._count.collaborators} collaborators)`,
+      `  - ${storyboard.name} (${storyboard._count.collaborators} collaborators, ${storyboard._count.diagrams} diagrams)`,
     );
+  }
+
+  console.log(`Diagrams: ${diagrams.length}`);
+
+  for (const diagram of diagrams) {
+    const parent = diagram.storyboardId ?? "standalone";
+    const state = diagram.deletedAt
+      ? "deleted"
+      : diagram.deletingAt
+        ? "deleting"
+        : "live";
+    console.log(`  - ${diagram.name} [${state}] (${parent})`);
   }
 }
 

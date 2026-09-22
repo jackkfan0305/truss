@@ -42,9 +42,9 @@ export interface CanvasSnapshot {
 export const MAX_SNAPSHOT_NODES = 2000;
 export const MAX_SNAPSHOT_EDGES = 4000;
 
-/** Snapshots are keyed by project, so a save overwrites its own predecessor. */
-export function canvasBlobPath(projectId: string): string {
-  return `canvas/${projectId}.json`;
+/** Snapshots are keyed by diagram, so a save overwrites its own predecessor. */
+export function canvasBlobPath(diagramId: string): string {
+  return `canvas/${diagramId}.json`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

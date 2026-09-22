@@ -12,7 +12,7 @@ const MAX_VISIBLE_AVATARS = 5;
 /**
  * The collaborator avatar stack for a canvas room (19-presence-avatars-cursors).
  *
- * Rendered by the editor navbar *only* when a project is open, immediately
+ * Rendered by the editor navbar *only* when a diagram is open, immediately
  * before the Clerk `UserButton` — so the current user is represented once, by
  * the control that already handles their profile and sign-out, and never a
  * second time from the presence list.

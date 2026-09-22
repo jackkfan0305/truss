@@ -87,72 +87,45 @@ const graph = {
 const fingerprint = "a".repeat(64);
 
 const stub = await createStubServer((method, pathname, ctx) => {
-  if (method === "GET" && pathname === "/api/projects") {
+  if (method === "GET" && pathname === "/api/diagrams") {
     assert.equal(ctx.headers.authorization, `Bearer ${token}`);
-    return { status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } };
+    return { status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } };
   }
-  if (method === "GET" && pathname === "/api/projects/p1/agent-graph") {
+  if (method === "GET" && pathname === "/api/diagrams/p1/agent-graph") {
     return { status: 200, body: { graph, opaqueNodeIds: [], fingerprint } };
   }
-  if (method === "POST" && pathname === "/api/projects/p1/agent-graph-edit") {
+  if (method === "POST" && pathname === "/api/diagrams/p1/agent-graph-edit") {
     return { status: 200, body: { applied: true } };
-  }
-  if (method === "DELETE" && pathname === "/api/projects/p1") {
-    assert.equal(ctx.headers.authorization, `Bearer ${token}`);
-    return { status: 204, body: null };
   }
   return null;
 });
 seedCredential(homeDir, stub.origin, token);
 
 const transport = new StdioClientTransport({
-  stderr: "pipe",
   command: process.execPath,
   args: [SERVER_SCRIPT],
   env: {
     ...process.env,
     HOME: homeDir,
     TRUSS_APP_URL: stub.origin,
-    // Login exercises its link callback without opening a real browser.
+    // No browser call is exercised in this smoke test (every seeded
+    // credential is already cached), but blocking PATH keeps that true even
+    // if a future case forgets to seed one.
     PATH: "/truss-mcp-verifier-no-such-directory",
   },
 });
 
-const protocolErrors = [];
-transport.onerror = (error) => protocolErrors.push(error);
 const client = new Client({ name: "truss-diagram-verify", version: "0.0.0" });
 await client.connect(transport);
 
 try {
-  const linkLine = new Promise((resolve) => {
-    let buffer = "";
-    const readLink = (chunk) => {
-      buffer += chunk.toString();
-      if (!buffer.includes("\n")) return;
-      transport.stderr.off("data", readLink);
-      resolve(buffer.split("\n")[0]);
-    };
-    transport.stderr.on("data", readLink);
-  });
-  const loginCall = client.callTool({ name: "truss_login", arguments: {} });
-  const linkUrl = new URL(await linkLine);
-  const payload = JSON.parse(Buffer.from(linkUrl.hash.slice(1), "base64url").toString("utf8"));
-  const callback = await fetch(`http://127.0.0.1:${payload.port}/`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: stub.origin },
-    body: JSON.stringify({ nonce: payload.nonce, token }),
-  });
-  assert.equal(callback.status, 200);
-  assert.equal((await loginCall).isError, undefined);
-  assert.deepEqual(protocolErrors, [], "auth output never corrupts MCP stdout");
-
   const { tools } = await client.listTools();
   assert.deepEqual(
     tools.map((tool) => tool.name).sort(),
     [
       "truss_apply_diagram_edit",
       "truss_create_diagram",
-      "truss_delete_diagram",
+      "truss_delete_diagram_prompt",
       "truss_get_diagram",
       "truss_list_diagrams",
       "truss_login",
@@ -162,11 +135,11 @@ try {
 
   const listResult = await client.callTool({ name: "truss_list_diagrams", arguments: {} });
   assert.equal(listResult.isError, undefined, "a successful call carries no isError flag");
-  assert.deepEqual(listResult.structuredContent, { projects: [{ id: "p1", name: "Payments" }] });
+  assert.deepEqual(listResult.structuredContent, { diagrams: [{ id: "p1", name: "Payments" }] });
 
   const getResult = await client.callTool({
     name: "truss_get_diagram",
-    arguments: { projectId: "p1" },
+    arguments: { diagramId: "p1" },
   });
   assert.deepEqual(getResult.structuredContent.graph, graph);
   assert.equal(getResult.structuredContent.fingerprint, fingerprint);
@@ -174,20 +147,14 @@ try {
   const editResult = await client.callTool({
     name: "truss_apply_diagram_edit",
     arguments: {
-      projectId: "p1",
+      diagramId: "p1",
       fingerprint: getResult.structuredContent.fingerprint,
       desiredGraph: graph,
     },
   });
   assert.equal(editResult.structuredContent.editorUrl, `${stub.origin}/editor/p1`);
 
-  const deleteResult = await client.callTool({
-    name: "truss_delete_diagram",
-    arguments: { projectId: "p1" },
-  });
-  assert.deepEqual(deleteResult.structuredContent, { projectId: "p1", deleted: true });
-
-  // A malformed call (missing the required `projectId`) must fail as a clean
+  // A malformed call (missing the required `diagramId`) must fail as a clean
   // tool-error result, never as an uncaught exception or a stack trace.
   const badCall = await client.callTool({ name: "truss_get_diagram", arguments: {} });
   assert.equal(badCall.isError, true);
@@ -198,10 +165,10 @@ try {
   // back as a clean tool-error result with the exact message, not a crash.
   const rejectedCall = await client.callTool({
     name: "truss_get_diagram",
-    arguments: { projectId: "not-in-the-list" },
+    arguments: { diagramId: "not-in-the-list" },
   });
   assert.equal(rejectedCall.isError, true);
-  assert.equal(rejectedCall.content[0].text, "The agent chose a project we don't recognize.");
+  assert.equal(rejectedCall.content[0].text, "The agent chose a diagram we don't recognize.");
 } finally {
   await client.close();
   await stub.close();

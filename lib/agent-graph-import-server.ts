@@ -10,7 +10,7 @@ import {
 } from "@/lib/agent-canvas-write";
 import { isAgentLaunchId } from "@/lib/agent-launch";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
-import { jsonError, readJsonBody } from "@/lib/project-requests";
+import { jsonError, readJsonBody } from "@/lib/api-requests";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 export type AgentGraphImportDependencies = AgentCanvasWriteDependencies;
@@ -109,10 +109,10 @@ function findMissingCanonicalItems(
  */
 export async function handleAgentGraphImportPost(
   request: Request,
-  projectId: string,
+  diagramId: string,
   dependencies: AgentGraphImportDependencies,
 ): Promise<Response> {
-  const access = await dependencies.authorizeProject(projectId, { requireOwner: true });
+  const access = await dependencies.authorizeDiagram(diagramId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;
@@ -128,7 +128,7 @@ export async function handleAgentGraphImportPost(
   let requestedSnapshot: CanvasSnapshot;
   try {
     requestedSnapshot = await resolveAgentGraphLayout(graph);
-    await dependencies.mutateFlow(projectId, async (flow) => {
+    await dependencies.mutateFlow(diagramId, async (flow) => {
       const existingSnapshot: CanvasSnapshot = {
         nodes: [...flow.nodes],
         edges: [...flow.edges],
@@ -158,7 +158,7 @@ export async function handleAgentGraphImportPost(
       );
 
       await drawNodesThenEdges(
-        projectId,
+        diagramId,
         flow,
         missingItems.nodes,
         missingItems.edges,
@@ -175,7 +175,7 @@ export async function handleAgentGraphImportPost(
   }
 
   try {
-    await dependencies.saveCanvasSnapshot(projectId, requestedSnapshot);
+    await dependencies.saveCanvasSnapshot(diagramId, requestedSnapshot);
   } catch {
     // A Liveblocks write may already have landed. An exact replay will skip the
     // flow write above and retry this persistence boundary.

@@ -18,18 +18,18 @@ export class CanvasSnapshotUploadError extends Error {
 }
 
 /**
- * Stores a private snapshot before pointing the project at it. A pointer never
+ * Stores a private snapshot before pointing the diagram at it. A pointer never
  * names an artifact that has not been uploaded successfully.
  */
 export async function saveCanvasSnapshot(
-  projectId: string,
+  diagramId: string,
   snapshot: CanvasSnapshot,
 ): Promise<string> {
   let url: string;
 
   try {
     const blob = await put(
-      canvasBlobPath(projectId),
+      canvasBlobPath(diagramId),
       serializeCanvasSnapshot(snapshot),
       {
         access: BLOB_ACCESS,
@@ -44,8 +44,8 @@ export async function saveCanvasSnapshot(
     throw new CanvasSnapshotUploadError(error);
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
+  await prisma.diagram.update({
+    where: { id: diagramId },
     data: { canvasJsonPath: url },
   });
 

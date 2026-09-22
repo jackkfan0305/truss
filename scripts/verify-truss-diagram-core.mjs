@@ -89,7 +89,7 @@ function seedCredential(homeDir, origin, token) {
   );
 }
 
-function seedCredentialWithProjects(homeDir, origin, token, projects, fetchedAt) {
+function seedCredentialWithDiagrams(homeDir, origin, token, diagrams, fetchedAt) {
   const dir = join(homeDir, ".truss");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(
@@ -100,8 +100,8 @@ function seedCredentialWithProjects(homeDir, origin, token, projects, fetchedAt)
         [origin]: {
           token,
           createdAt: new Date().toISOString(),
-          projects,
-          projectsFetchedAt: fetchedAt,
+          diagrams,
+          diagramsFetchedAt: fetchedAt,
         },
       },
     }),
@@ -531,15 +531,15 @@ await withHome(async (homeDir) => {
 
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [({ headers }) => {
+      ["GET /api/diagrams", [({ headers }) => {
         assert.equal(headers.authorization, `Bearer ${token}`);
-        return { status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } };
+        return { status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } };
       }]],
-      ["GET /api/projects/p1/agent-graph", [({ headers }) => {
+      ["GET /api/diagrams/p1/agent-graph", [({ headers }) => {
         assert.equal(headers.authorization, `Bearer ${token}`);
         return { status: 200, body: { graph, opaqueNodeIds: ["opaque-1"], fingerprint } };
       }]],
-      ["POST /api/projects/p1/agent-graph-edit", [({ headers, body }) => {
+      ["POST /api/diagrams/p1/agent-graph-edit", [({ headers, body }) => {
         assert.equal(headers.authorization, `Bearer ${token}`);
         assert.deepEqual(body, { fingerprint, graph: desiredGraph });
         return { status: 200, body: { applied: true } };
@@ -548,8 +548,8 @@ await withHome(async (homeDir) => {
   );
   seedCredential(homeDir, stub.origin, token);
 
-  const { projects } = await listDiagrams(stub.origin);
-  assert.deepEqual(projects, [{ id: "p1", name: "Payments" }]);
+  const { diagrams } = await listDiagrams(stub.origin);
+  assert.deepEqual(diagrams, [{ id: "p1", name: "Payments" }]);
 
   const read = await getDiagram(stub.origin, "p1");
   assert.deepEqual(read.graph, graph);
@@ -562,19 +562,19 @@ await withHome(async (homeDir) => {
   await stub.close();
 });
 
-// --- a hallucinated projectId is rejected, never reaches the graph read ---
+// --- a hallucinated diagramId is rejected, never reaches the graph read ---
 
 await withHome(async (homeDir) => {
   const token = mintToken();
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [() => ({ status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } })]],
+      ["GET /api/diagrams", [() => ({ status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } })]],
     ]),
   );
   seedCredential(homeDir, stub.origin, token);
 
   await assert.rejects(getDiagram(stub.origin, "not-in-the-list"), (error) => {
-    assert.equal(error.message, "The agent chose a project we don't recognize.");
+    assert.equal(error.message, "The agent chose a diagram we don't recognize.");
     return true;
   });
 
@@ -591,12 +591,12 @@ await withHome(async (homeDir) => {
 
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [() => ({ status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } })]],
-      ["GET /api/projects/p1/agent-graph", [
+      ["GET /api/diagrams", [() => ({ status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } })]],
+      ["GET /api/diagrams/p1/agent-graph", [
         () => { graphReads += 1; return { status: 200, body: { graph, opaqueNodeIds: [], fingerprint: `${graphReads}`.repeat(64).slice(0, 64) } }; },
         () => { graphReads += 1; return { status: 200, body: { graph, opaqueNodeIds: [], fingerprint: `${graphReads}`.repeat(64).slice(0, 64) } }; },
       ]],
-      ["POST /api/projects/p1/agent-graph-edit", [
+      ["POST /api/diagrams/p1/agent-graph-edit", [
         () => { editAttempts += 1; return { status: 409, body: { error: "stale" } }; },
         () => { editAttempts += 1; return { status: 409, body: { error: "stale" } }; },
       ]],
@@ -622,9 +622,9 @@ await withHome(async (homeDir) => {
 
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [({ headers }) => {
+      ["GET /api/diagrams", [({ headers }) => {
         assert.equal(headers.authorization, `Bearer ${newToken}`);
-        return { status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } };
+        return { status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } };
       }]],
     ]),
   );
@@ -634,8 +634,8 @@ await withHome(async (homeDir) => {
   const listPromise = listDiagrams(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, newToken);
 
-  const { projects } = await listPromise;
-  assert.deepEqual(projects, [{ id: "p1", name: "Payments" }]);
+  const { diagrams } = await listPromise;
+  assert.deepEqual(diagrams, [{ id: "p1", name: "Payments" }]);
 
   const credPath = join(homeDir, ".truss", "credentials.json");
   assert.ok(existsSync(credPath), "the newly-linked token is cached for next time");
@@ -649,20 +649,20 @@ await withHome(async (homeDir) => {
 await withHome(async (homeDir) => {
   const staleToken = mintToken();
   const newToken = mintToken();
-  let projectCalls = 0;
+  let diagramCalls = 0;
 
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [
+      ["GET /api/diagrams", [
         ({ headers }) => {
-          projectCalls += 1;
+          diagramCalls += 1;
           assert.equal(headers.authorization, `Bearer ${staleToken}`, "first attempt uses the stale cached token");
           return { status: 401, body: { error: "Unauthorized" } };
         },
         ({ headers }) => {
-          projectCalls += 1;
+          diagramCalls += 1;
           assert.equal(headers.authorization, `Bearer ${newToken}`, "retry uses the freshly-linked token");
-          return { status: 200, body: { projects: [{ id: "p1", name: "Payments" }] } };
+          return { status: 200, body: { diagrams: [{ id: "p1", name: "Payments" }] } };
         },
       ]],
     ]),
@@ -672,10 +672,10 @@ await withHome(async (homeDir) => {
   const linkUrlPromise = interceptStderrLine();
   const listPromise = listDiagrams(stub.origin);
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, newToken);
-  const { projects } = await listPromise;
+  const { diagrams } = await listPromise;
 
-  assert.deepEqual(projects, [{ id: "p1", name: "Payments" }]);
-  assert.equal(projectCalls, 2, "exactly one retry after the single relink");
+  assert.deepEqual(diagrams, [{ id: "p1", name: "Payments" }]);
+  assert.equal(diagramCalls, 2, "exactly one retry after the single relink");
 
   const raw = JSON.parse(readFileSync(join(homeDir, ".truss", "credentials.json"), "utf8"));
   assert.equal(raw.origins[stub.origin].token, newToken, "the cache now holds the new token");
@@ -687,13 +687,13 @@ await withHome(async (homeDir) => {
 
 await withHome(async (homeDir) => {
   const staleToken = mintToken();
-  let projectCalls = 0;
+  let diagramCalls = 0;
 
   const stub = await createStubServer(
     new Map([
-      ["GET /api/projects", [
-        () => { projectCalls += 1; return { status: 401, body: { error: "Unauthorized" } }; },
-        () => { projectCalls += 1; return { status: 401, body: { error: "Unauthorized" } }; },
+      ["GET /api/diagrams", [
+        () => { diagramCalls += 1; return { status: 401, body: { error: "Unauthorized" } }; },
+        () => { diagramCalls += 1; return { status: 401, body: { error: "Unauthorized" } }; },
       ]],
     ]),
   );
@@ -704,10 +704,10 @@ await withHome(async (homeDir) => {
   await performBrowserLinkCallback(linkUrlPromise, stub.origin, mintToken());
 
   await assert.rejects(listPromise, (error) => {
-    assert.equal(error.message, "We couldn't read your projects. Please try again.");
+    assert.equal(error.message, "We couldn't read your diagrams. Please try again.");
     return true;
   });
-  assert.equal(projectCalls, 2, "the request is retried exactly once after the relink");
+  assert.equal(diagramCalls, 2, "the request is retried exactly once after the relink");
 
   await stub.close();
 });
@@ -719,20 +719,20 @@ await withHome(async (homeDir) => {
   const seen = {};
 
   const stub = await createStubServerDynamic((method, pathname, ctx) => {
-    if (method === "POST" && pathname === "/api/projects") {
+    if (method === "POST" && pathname === "/api/diagrams") {
       seen.createAuth = ctx.headers.authorization;
       seen.createdId = ctx.body.id;
       seen.createdName = ctx.body.name;
-      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+      return { status: 201, body: { diagram: { id: ctx.body.id, name: ctx.body.name } } };
     }
-    if (method === "POST" && pathname === `/api/projects/${seen.createdId}/agent-launch-import`) {
+    if (method === "POST" && pathname === `/api/diagrams/${seen.createdId}/agent-launch-import`) {
       seen.importAuth = ctx.headers.authorization;
       seen.importLaunchId = ctx.body.launchId;
       seen.importGraph = ctx.body.graph;
       return { status: 200, body: { imported: true } };
     }
-    if (method === "GET" && pathname === "/api/projects") {
-      return { status: 200, body: { projects: [{ id: seen.createdId, name: seen.createdName }] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      return { status: 200, body: { diagrams: [{ id: seen.createdId, name: seen.createdName }] } };
     }
     return null;
   });
@@ -749,7 +749,7 @@ await withHome(async (homeDir) => {
   assert.deepEqual(seen.importGraph, GRAPH, "the graph reaches the import route unchanged");
 
   const cached = JSON.parse(readFileSync(join(homeDir, ".truss", "credentials.json"), "utf8")).origins[stub.origin];
-  assert.ok(cached.projects.some((project) => project.id === seen.createdId), "create refreshes the project cache");
+  assert.ok(cached.diagrams.some((diagram) => diagram.id === seen.createdId), "create refreshes the diagram cache");
 
   await stub.close();
 });
@@ -760,17 +760,17 @@ await withHome(async (homeDir) => {
   let created = null;
 
   const stub = await createStubServerDynamic((method, pathname, ctx) => {
-    if (method === "POST" && pathname === "/api/projects") {
+    if (method === "POST" && pathname === "/api/diagrams") {
       attempted.push(ctx.body.id);
       if (attempted.length === 1) return { status: 409, body: { error: "taken" } };
       created = ctx.body.id;
-      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+      return { status: 201, body: { diagram: { id: ctx.body.id, name: ctx.body.name } } };
     }
-    if (method === "POST" && pathname === `/api/projects/${created}/agent-launch-import`) {
+    if (method === "POST" && pathname === `/api/diagrams/${created}/agent-launch-import`) {
       return { status: 200, body: { imported: true } };
     }
-    if (method === "GET" && pathname === "/api/projects") {
-      return { status: 200, body: { projects: [] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      return { status: 200, body: { diagrams: [] } };
     }
     return null;
   });
@@ -790,11 +790,11 @@ await withHome(async (homeDir) => {
   let created = null;
 
   const stub = await createStubServerDynamic((method, pathname, ctx) => {
-    if (method === "POST" && pathname === "/api/projects") {
+    if (method === "POST" && pathname === "/api/diagrams") {
       created = ctx.body.id;
-      return { status: 201, body: { project: { id: ctx.body.id, name: ctx.body.name } } };
+      return { status: 201, body: { diagram: { id: ctx.body.id, name: ctx.body.name } } };
     }
-    if (method === "POST" && pathname === `/api/projects/${created}/agent-launch-import`) {
+    if (method === "POST" && pathname === `/api/diagrams/${created}/agent-launch-import`) {
       return { status: 502, body: { error: "nope" } };
     }
     return null;
@@ -802,7 +802,7 @@ await withHome(async (homeDir) => {
   seedCredential(homeDir, stub.origin, token);
 
   await assert.rejects(createDiagram(stub.origin, "My Diagram", GRAPH), (error) => {
-    // The project exists and is empty; the message has to say so and point at
+    // The diagram exists and is empty; the message has to say so and point at
     // it, rather than implying nothing happened.
     assert.match(error.message, /created but the diagram could not be drawn/);
     assert.ok(error.message.includes(`${stub.origin}/editor/${created}`), "names the editor URL");
@@ -812,69 +812,69 @@ await withHome(async (homeDir) => {
   await stub.close();
 });
 
-// --- project cache: fresh, stale, and cache-miss-before-rejecting ---------
+// --- diagram cache: fresh, stale, and cache-miss-before-rejecting ---------
 
 await withHome(async (homeDir) => {
   const token = mintToken();
-  let projectListCalls = 0;
+  let diagramListCalls = 0;
 
   const stub = await createStubServerDynamic((method, pathname) => {
-    if (method === "GET" && pathname === "/api/projects") {
-      projectListCalls += 1;
-      return { status: 200, body: { projects: [{ id: "p1", name: "Cached" }] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      diagramListCalls += 1;
+      return { status: 200, body: { diagrams: [{ id: "p1", name: "Cached" }] } };
     }
     return null;
   });
-  seedCredentialWithProjects(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+  seedCredentialWithDiagrams(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
 
-  const { projects } = await listDiagrams(stub.origin);
-  assert.deepEqual(projects, [{ id: "p1", name: "Cached" }]);
-  assert.equal(projectListCalls, 0, "a fresh cache must not hit the network");
+  const { diagrams } = await listDiagrams(stub.origin);
+  assert.deepEqual(diagrams, [{ id: "p1", name: "Cached" }]);
+  assert.equal(diagramListCalls, 0, "a fresh cache must not hit the network");
 
   await stub.close();
 });
 
 await withHome(async (homeDir) => {
   const token = mintToken();
-  let projectListCalls = 0;
+  let diagramListCalls = 0;
 
   const stub = await createStubServerDynamic((method, pathname) => {
-    if (method === "GET" && pathname === "/api/projects") {
-      projectListCalls += 1;
-      return { status: 200, body: { projects: [{ id: "p2", name: "Fresh" }] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      diagramListCalls += 1;
+      return { status: 200, body: { diagrams: [{ id: "p2", name: "Fresh" }] } };
     }
     return null;
   });
   // Older than the 5-minute TTL.
-  seedCredentialWithProjects(homeDir, stub.origin, token, [{ id: "p1", name: "Stale" }], Date.now() - 600_000);
+  seedCredentialWithDiagrams(homeDir, stub.origin, token, [{ id: "p1", name: "Stale" }], Date.now() - 600_000);
 
-  const { projects } = await listDiagrams(stub.origin);
-  assert.equal(projectListCalls, 1, "a stale cache must refetch");
-  assert.deepEqual(projects, [{ id: "p2", name: "Fresh" }], "serves the fresh list");
+  const { diagrams } = await listDiagrams(stub.origin);
+  assert.equal(diagramListCalls, 1, "a stale cache must refetch");
+  assert.deepEqual(diagrams, [{ id: "p2", name: "Fresh" }], "serves the fresh list");
 
   await stub.close();
 });
 
 await withHome(async (homeDir) => {
   const token = mintToken();
-  let projectListCalls = 0;
+  let diagramListCalls = 0;
 
   const stub = await createStubServerDynamic((method, pathname) => {
-    if (method === "GET" && pathname === "/api/projects") {
-      projectListCalls += 1;
-      // The project was created after the cache was written.
-      return { status: 200, body: { projects: [{ id: "p1", name: "Cached" }, { id: "new", name: "Brand New" }] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      diagramListCalls += 1;
+      // The diagram was created after the cache was written.
+      return { status: 200, body: { diagrams: [{ id: "p1", name: "Cached" }, { id: "new", name: "Brand New" }] } };
     }
-    if (method === "GET" && pathname === "/api/projects/new/agent-graph") {
+    if (method === "GET" && pathname === "/api/diagrams/new/agent-graph") {
       return { status: 200, body: { graph: GRAPH, opaqueNodeIds: [], fingerprint: "a".repeat(64) } };
     }
     return null;
   });
-  seedCredentialWithProjects(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+  seedCredentialWithDiagrams(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
 
   const read = await getDiagram(stub.origin, "new");
   assert.deepEqual(read.graph, GRAPH, "a cache miss refetches instead of rejecting outright");
-  assert.equal(projectListCalls, 1, "exactly one forced refetch");
+  assert.equal(diagramListCalls, 1, "exactly one forced refetch");
 
   await stub.close();
 });
@@ -883,12 +883,12 @@ await withHome(async (homeDir) => {
   const token = mintToken();
 
   const stub = await createStubServerDynamic((method, pathname) => {
-    if (method === "GET" && pathname === "/api/projects") {
-      return { status: 200, body: { projects: [{ id: "p1", name: "Cached" }] } };
+    if (method === "GET" && pathname === "/api/diagrams") {
+      return { status: 200, body: { diagrams: [{ id: "p1", name: "Cached" }] } };
     }
     return null;
   });
-  seedCredentialWithProjects(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
+  seedCredentialWithDiagrams(homeDir, stub.origin, token, [{ id: "p1", name: "Cached" }], Date.now());
 
   await assert.rejects(getDiagram(stub.origin, "ghost"), (error) => {
     assert.match(error.message, /don't recognize/);
@@ -898,15 +898,15 @@ await withHome(async (homeDir) => {
   await stub.close();
 });
 
-// --- login primes the project cache ---------------------------------------
+// --- login primes the diagram cache ---------------------------------------
 
 await withHome(async (homeDir) => {
   const token = mintToken();
 
   const stub = await createStubServerDynamic((method, pathname, ctx) => {
-    if (method === "GET" && pathname === "/api/projects") {
+    if (method === "GET" && pathname === "/api/diagrams") {
       assert.equal(ctx.headers.authorization, `Bearer ${token}`);
-      return { status: 200, body: { projects: [{ id: "p1", name: "Primed" }] } };
+      return { status: 200, body: { diagrams: [{ id: "p1", name: "Primed" }] } };
     }
     return null;
   });
@@ -917,25 +917,25 @@ await withHome(async (homeDir) => {
   await loginPromise;
 
   const stored = JSON.parse(readFileSync(join(homeDir, ".truss", "credentials.json"), "utf8"));
-  assert.deepEqual(stored.origins[stub.origin].projects, [{ id: "p1", name: "Primed" }], "login writes the cache to disk");
-  assert.equal(typeof stored.origins[stub.origin].projectsFetchedAt, "number");
+  assert.deepEqual(stored.origins[stub.origin].diagrams, [{ id: "p1", name: "Primed" }], "login writes the cache to disk");
+  assert.equal(typeof stored.origins[stub.origin].diagramsFetchedAt, "number");
 
   await stub.close();
 });
 
-// --- clearing a credential drops its cached projects too -------------------
+// --- clearing a credential drops its cached diagrams too -------------------
 
 await withHome(async () => {
-  const { clearCredential, readProjects, writeCredential, writeProjects } = await import(
+  const { clearCredential, readDiagrams, writeCredential, writeDiagrams } = await import(
     join(SKILL_DIR, "scripts", "credentials.mjs")
   );
   // A re-link can be a different user; a surviving list would resolve names
-  // against the previous account's projects.
+  // against the previous account's diagrams.
   await writeCredential("http://example.test", mintToken());
-  await writeProjects("http://example.test", [{ id: "p1", name: "Theirs" }]);
-  assert.ok(await readProjects("http://example.test"));
+  await writeDiagrams("http://example.test", [{ id: "p1", name: "Theirs" }]);
+  assert.ok(await readDiagrams("http://example.test"));
   await clearCredential("http://example.test");
-  assert.equal(await readProjects("http://example.test"), null);
+  assert.equal(await readDiagrams("http://example.test"), null);
 });
 
 // Direct delete reports success only after the server completes deletion.
@@ -992,7 +992,7 @@ await withHome(async (homeDir) => {
   seedCredential(homeDir, stub.origin, token);
 
   await assert.rejects(promptDeleteDiagram(stub.origin, ""), (error) => {
-    assert.equal(error.message, "A project id is required.");
+    assert.equal(error.message, "A diagram id is required.");
     return true;
   });
 

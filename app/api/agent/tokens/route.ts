@@ -5,7 +5,7 @@ import {
   type AgentTokenMintDependencies,
 } from "@/lib/agent-token-server";
 import { prisma } from "@/lib/prisma";
-import { jsonError } from "@/lib/project-requests";
+import { jsonError } from "@/lib/api-requests";
 
 const dependencies: AgentTokenMintDependencies = {
   countTokens: (ownerId) => prisma.agentToken.count({ where: { ownerId } }),
@@ -19,7 +19,7 @@ const dependencies: AgentTokenMintDependencies = {
  * headlessly (the shared agent-auth contract).
  *
  * Clerk SESSION COOKIE only. This deliberately does not go through
- * `resolveIdentity`/`authorizeProject` — both treat a bearer token as a
+ * `resolveIdentity`/`authorizeDiagram` — both treat a bearer token as a
  * legitimate identity, which is exactly what this one route must refuse: a
  * caller presenting an `Authorization` header is rejected outright, so a
  * minted token can never be used to mint another.

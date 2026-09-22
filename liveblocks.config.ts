@@ -13,8 +13,6 @@ declare global {
     Presence: {
       /** Canvas coordinates, not screen coordinates. `null` while off-canvas. */
       cursor: { x: number; y: number } | null;
-      /** True while an AI generation this user started is in flight. */
-      isThinking: boolean;
     };
 
     /**

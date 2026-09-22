@@ -925,7 +925,7 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
     "a snapshot above the node ceiling is rejected",
   );
 
-  assert.equal(canvasBlobPath("my-project"), "canvas/my-project.json");
+  assert.equal(canvasBlobPath("my-diagram"), "canvas/my-diagram.json");
 }
 
 function checkTemplateBoundsEncloseEveryNode() {

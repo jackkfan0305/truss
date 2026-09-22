@@ -13,7 +13,7 @@ import {
 // calls).
 export type PickStorage = Pick<Storage, "getItem" | "setItem">;
 
-export interface PickProject {
+export interface PickDiagram {
   id: string;
   name: string;
 }
@@ -24,8 +24,8 @@ export interface AgentPickDependencies {
 }
 
 export type AgentPickResult =
-  | { kind: "redirect"; projectId: string }
-  | { kind: "confirm-delete"; projectId: string; projectName: string }
+  | { kind: "redirect"; diagramId: string }
+  | { kind: "confirm-delete"; diagramId: string; diagramName: string }
   | { kind: "failed"; message: string };
 
 export interface RedirectGuard {
@@ -66,20 +66,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export function toPickProjects(value: unknown): PickProject[] {
+export function toPickDiagrams(value: unknown): PickDiagram[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const projects: PickProject[] = [];
+  const diagrams: PickDiagram[] = [];
 
   for (const item of value) {
     if (isRecord(item) && typeof item.id === "string" && typeof item.name === "string") {
-      projects.push({ id: item.id, name: item.name });
+      diagrams.push({ id: item.id, name: item.name });
     }
   }
 
-  return projects;
+  return diagrams;
 }
 
 export function agentPickResumePath(pickId: string): string {
@@ -166,14 +166,14 @@ export function startAgentPickOperationOnce(
 /**
  * Same re-entrancy rigor as `startAgentPickOperationOnce`: a double-click on
  * Delete before React commits the "working" state must not fire the DELETE
- * request twice. Keyed by project id since a pick session only ever deletes
- * one project.
+ * request twice. Keyed by diagram id since a pick session only ever deletes
+ * one diagram.
  */
 export function startAgentPickDeleteOnce(
-  projectId: string,
+  diagramId: string,
   operation: () => Promise<"done" | "failed">,
 ): Promise<"done" | "failed"> {
-  return runOnce(inFlightPickDeletes, projectId, operation);
+  return runOnce(inFlightPickDeletes, diagramId, operation);
 }
 
 async function agentPickCallback(
@@ -205,10 +205,10 @@ interface AgentGraphRead {
 }
 
 async function fetchAgentGraph(
-  projectId: string,
+  diagramId: string,
   dependencies: AgentPickDependencies,
 ): Promise<AgentGraphRead | null> {
-  const response = await dependencies.fetch(`/api/projects/${projectId}/agent-graph`);
+  const response = await dependencies.fetch(`/api/diagrams/${diagramId}/agent-graph`);
 
   if (!response.ok) {
     return null;
@@ -240,21 +240,21 @@ async function fetchAgentGraph(
  * one collaborator-collision retry the spec allows before giving up.
  */
 async function runEditFlow(
-  projectId: string,
+  diagramId: string,
   payload: AgentPickPayloadV1,
   dependencies: AgentPickDependencies,
 ): Promise<AgentPickResult> {
   const maxAttempts = 2;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const read = await fetchAgentGraph(projectId, dependencies);
+    const read = await fetchAgentGraph(diagramId, dependencies);
 
     if (!read) {
       return { kind: "failed", message: "We couldn't read this diagram. Please try again." };
     }
 
     const desired = await agentPickCallback(dependencies, payload.port, payload.nonce, {
-      projectId,
+      diagramId,
       graph: read.graph,
       opaqueNodeIds: read.opaqueNodeIds,
       opaqueEdgeIds: read.opaqueEdgeIds,
@@ -267,7 +267,7 @@ async function runEditFlow(
     }
 
     const applyResponse = await dependencies.fetch(
-      `/api/projects/${projectId}/agent-graph-edit`,
+      `/api/diagrams/${diagramId}/agent-graph-edit`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -276,7 +276,7 @@ async function runEditFlow(
     );
 
     if (applyResponse.status === 200) {
-      return { kind: "redirect", projectId };
+      return { kind: "redirect", diagramId };
     }
 
     if (applyResponse.status !== 409) {
@@ -291,14 +291,14 @@ async function runEditFlow(
 }
 
 /**
- * Runs the shared first exchange — list projects, hand them to the agent,
- * get back the chosen project — then branches: edit continues into the
+ * Runs the shared first exchange — list diagrams, hand them to the agent,
+ * get back the chosen diagram — then branches: edit continues into the
  * read/apply loop, delete stops and hands the caller a name to confirm.
  * Never sends more than `{id, name}` to the loopback.
  *
- * The agent's chosen `projectId` is only ever trusted if it matches an id we
+ * The agent's chosen `diagramId` is only ever trusted if it matches an id we
  * actually listed. Otherwise a malformed or hallucinated response would flow
- * straight into the delete confirmation dialog with a blank project name and
+ * straight into the delete confirmation dialog with a blank diagram name and
  * a live Delete button next to it — confirming by nothing, which is exactly
  * what "confirm by real name, never by index" rules out.
  */
@@ -307,49 +307,49 @@ export async function runAgentPickOperation(
   dependencies: AgentPickDependencies,
 ): Promise<AgentPickResult> {
   try {
-    const projectsResponse = await dependencies.fetch("/api/projects");
+    const diagramsResponse = await dependencies.fetch("/api/diagrams");
 
-    if (!projectsResponse.ok) {
-      return { kind: "failed", message: "We couldn't read your projects. Please try again." };
+    if (!diagramsResponse.ok) {
+      return { kind: "failed", message: "We couldn't read your diagrams. Please try again." };
     }
 
-    const projectsBody: unknown = await projectsResponse.json();
-    const projects = toPickProjects(isRecord(projectsBody) ? projectsBody.projects : undefined);
+    const diagramsBody: unknown = await diagramsResponse.json();
+    const diagrams = toPickDiagrams(isRecord(diagramsBody) ? diagramsBody.diagrams : undefined);
 
     const picked = await agentPickCallback(dependencies, payload.port, payload.nonce, {
       op: payload.op,
-      projects,
+      diagrams,
     });
-    const pickedProjectId =
-      isRecord(picked) && typeof picked.projectId === "string" ? picked.projectId : null;
-    const matchedProject = pickedProjectId
-      ? projects.find((project) => project.id === pickedProjectId)
+    const pickedDiagramId =
+      isRecord(picked) && typeof picked.diagramId === "string" ? picked.diagramId : null;
+    const matchedDiagram = pickedDiagramId
+      ? diagrams.find((diagram) => diagram.id === pickedDiagramId)
       : undefined;
 
-    if (!matchedProject) {
-      return { kind: "failed", message: "The agent chose a project we don't recognize." };
+    if (!matchedDiagram) {
+      return { kind: "failed", message: "The agent chose a diagram we don't recognize." };
     }
 
     if (payload.op === "delete") {
       return {
         kind: "confirm-delete",
-        projectId: matchedProject.id,
-        projectName: matchedProject.name,
+        diagramId: matchedDiagram.id,
+        diagramName: matchedDiagram.name,
       };
     }
 
-    return await runEditFlow(matchedProject.id, payload, dependencies);
+    return await runEditFlow(matchedDiagram.id, payload, dependencies);
   } catch {
     return { kind: "failed", message: "We couldn't reach your agent. Please try again." };
   }
 }
 
-export async function deleteAgentPickProject(
-  projectId: string,
+export async function deleteAgentPickDiagram(
+  diagramId: string,
   dependencies: AgentPickDependencies,
 ): Promise<"done" | "failed"> {
   try {
-    const response = await dependencies.fetch(`/api/projects/${projectId}`, {
+    const response = await dependencies.fetch(`/api/diagrams/${diagramId}`, {
       method: "DELETE",
     });
     return response.status === 204 ? "done" : "failed";

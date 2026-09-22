@@ -300,7 +300,7 @@ export function parseAgentGraphAllowingEmpty(
  * reported as opaque rather than dropped, because a caller that cannot see an
  * item must never be able to delete it.
  */
-export function projectCanvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
+export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
   const nodes: AgentGraphNode[] = [];
   const opaqueNodeIds: string[] = [];
 

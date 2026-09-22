@@ -16,12 +16,12 @@ import { parseCanvasSnapshot, type CanvasSnapshot } from "@/lib/canvas-snapshot"
  * "empty" means with the flow state it already has.
  */
 export function useCanvasRestore(
-  projectId: string,
+  diagramId: string,
   isEmpty: boolean,
   onRestore: (snapshot: CanvasSnapshot) => void,
 ): void {
   /**
-   * One attempt per mount, whatever the outcome. Without this a project with no
+   * One attempt per mount, whatever the outcome. Without this a diagram with no
    * saved canvas would re-fetch on every render that leaves the room empty.
    */
   const hasAttempted = useRef(false);
@@ -49,7 +49,7 @@ export function useCanvasRestore(
 
     const load = async () => {
       try {
-        const response = await fetch(`/api/projects/${projectId}/canvas`, {
+        const response = await fetch(`/api/diagrams/${diagramId}/canvas`, {
           signal: controller.signal,
         });
 
@@ -82,5 +82,5 @@ export function useCanvasRestore(
     void load();
 
     return () => controller.abort();
-  }, [isEmpty, projectId]);
+  }, [isEmpty, diagramId]);
 }

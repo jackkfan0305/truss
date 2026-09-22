@@ -53,19 +53,19 @@ function deps(
   saved: { snapshot?: unknown },
 ): AgentGraphEditDependencies {
   return {
-    authorizeProject: async () => ({
+    authorizeDiagram: async () => ({
       ok: true as const,
       role: "owner" as const,
       userId: "u1",
       ownerId: "u1",
     }),
     mutateFlow: async (
-      _projectId: string,
+      _diagramId: string,
       callback: (f: AgentCanvasFlow) => void | Promise<void>,
     ) => {
       await callback(flow);
     },
-    saveCanvasSnapshot: async (_projectId: string, snapshot: unknown) => {
+    saveCanvasSnapshot: async (_diagramId: string, snapshot: unknown) => {
       saved.snapshot = snapshot;
     },
     setAiPresence: async () => {},
@@ -482,7 +482,7 @@ async function checkAuthorizationPrecedesBodyParsing(): Promise<void> {
 
   const response = await handleAgentGraphEditPost(guarded, "p1", {
     ...deps(flow, {}),
-    authorizeProject: async () => ({
+    authorizeDiagram: async () => ({
       ok: false as const,
       response: new Response("Forbidden", { status: 403 }),
     }),

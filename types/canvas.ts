@@ -168,3 +168,14 @@ export const CANVAS_EDGE_MARKER: EdgeMarker = {
   height: 16,
   color: "var(--canvas-edge)",
 };
+
+/**
+ * A canvas as an agent request sees it — what IDs and space are already taken.
+ *
+ * Lives here rather than beside the read that returns it because both the read
+ * and the graph contract that consumes it are canvas shapes, not server ones.
+ */
+export interface DesignContext {
+  nodes: readonly CanvasNode[];
+  edges: readonly CanvasEdge[];
+}

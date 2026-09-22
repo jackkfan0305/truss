@@ -12,19 +12,19 @@ import { Canvas } from "@/components/canvas/canvas";
 
 interface CanvasRoomProps {
   /**
-   * The project ID — one identifier for the route, the row and the room.
-   * Absent on the editor home, which has no project and so no room to join.
+   * The diagram ID — one identifier for the route, the row and the room.
+   * Absent on the editor home, which has no diagram and so no room to join.
    */
   roomId?: string;
   children: ReactNode;
 }
 
 /**
- * Joins the Liveblocks room for a project (11-base-canvas).
+ * Joins the Liveblocks room for a diagram (11-base-canvas).
  *
  * The room is authenticated through `/api/liveblocks-auth`, which verifies
- * project membership before issuing a token — so a user who cannot open the
- * project cannot join its room either.
+ * diagram membership before issuing a token — so a user who cannot open the
+ * diagram cannot join its room either.
  *
  * This wraps the whole editor workspace rather than only the canvas, because
  * the presence avatars sit in the navbar (19-presence-avatars-cursors) and need
@@ -39,7 +39,7 @@ export function CanvasRoom({ roomId, children }: CanvasRoomProps) {
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
         id={roomId}
-        initialPresence={{ cursor: null, isThinking: false }}
+        initialPresence={{ cursor: null }}
       >
         {children}
       </RoomProvider>
@@ -48,7 +48,7 @@ export function CanvasRoom({ roomId, children }: CanvasRoomProps) {
 }
 
 interface CanvasSurfaceProps {
-  projectId: string;
+  diagramId: string;
   /** Owned by the editor shell, since the navbar is what opens the picker. */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
@@ -58,7 +58,7 @@ interface CanvasSurfaceProps {
 
 /** The canvas itself, with the room's connection and loading states around it. */
 export function CanvasSurface({
-  projectId,
+  diagramId,
   isTemplatesOpen,
   onTemplatesOpenChange,
   children,
@@ -72,7 +72,7 @@ export function CanvasSurface({
         fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
       >
         <Canvas
-          projectId={projectId}
+          diagramId={diagramId}
           isTemplatesOpen={isTemplatesOpen}
           onTemplatesOpenChange={onTemplatesOpenChange}
         />

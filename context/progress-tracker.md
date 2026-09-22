@@ -28,26 +28,22 @@ Update this file whenever the current phase, active feature, or implementation s
     a handle and fails without the ports.
   - The arriving end stops half an arrowhead short of its block, so the marker
     draws in the open instead of half under the border.
-  - Both AI prompts ask for an overview first, normally four to eight blocks,
-    and no longer do placement arithmetic. `layoutDesignPlan` lays new nodes out
-    once their edges are known and drops the model's own move/resize actions for
-    them; a label-only edit returns the plan untouched, so existing positions
-    survive.
+  - The skill asks for an overview first, normally four to eight blocks, and no
+    longer does placement arithmetic of its own.
   - The agent boundary accepts graphs without coordinates.
     `resolveAgentGraphLayout` fills omitted positions from the live graph, lays
     genuinely new blocks out together in free space beside existing content, and
     treats opaque canvas items as obstacles without importing them. Positioned
     version 1 launches still parse exactly as before.
   - The local MCP exposes coordinate-free create and a real `truss_delete_diagram`
-    against the owner-only project endpoint, replacing the browser-confirm
+    against the owner-only diagram endpoint, replacing the browser-confirm
     prompt. A stale edit returns a conflict and changes nothing: the agent must
     reread and reapply rather than resubmit an outdated graph with a fresh
     fingerprint. The link URL prints to stderr so it cannot corrupt the stdio
     protocol, which the MCP verifier now asserts through a real login round trip.
   - Gates: `npm run verify:unit`, `npm run typecheck`, `npm run lint`, and
-    `npm run build` all exit 0. New verifiers `verify-diagram-layout.ts`,
-    `verify-generated-diagrams.ts`, and `verify-diagram-rendering.tsx` are wired
-    into `verify:unit`. ELK appears in no client chunk; only server modules
+    `npm run build` all exit 0. New verifiers `verify-diagram-layout.ts` and
+    `verify-diagram-rendering.tsx` are wired into `verify:unit`. ELK appears in no client chunk; only server modules
     import the layout.
   - Not done: no authenticated end-to-end run in the live app. The visual check
     rendered real `layoutDiagram` output for a chain, a branch/merge, a cycle,
@@ -70,6 +66,104 @@ Update this file whenever the current phase, active feature, or implementation s
   reverse flows, resized shape boundaries on all four sides, fan-out routing,
   and manual-handle preservation. The focused canvas verifier, strict
   typecheck, and focused ESLint pass.
+
+- PR review fixes applied: storyboard owners can read every diagram on their
+  storyboard, the editor only exposes Share to storyboard owners, member-list
+  fetches cancel stale effect runs without nested state updates, and independent
+  seed writes run concurrently while dependency-ordered cleanup stays serial.
+
+- Product decision recorded for the next storyboard flow: signed-out users can
+  build a temporary storyboard with every storyboard feature except inviting
+  collaborators. The temporary storyboard lives only in the current tab and
+  disappears on refresh or tab close. A top-right `Sign in to save` action
+  opens an in-page sign-in modal, preserves it through authentication, and
+  saves the complete work as a new storyboard owned by the user's account. A
+  cancelled or failed sign-in returns to the same temporary storyboard. The
+  invite control stays hidden until sign-in succeeds. Terminal-agent work is
+  included, save failures leave the temporary storyboard available for retry,
+  and each browser tab has its own independent temporary storyboard. After a
+  successful save, the sign-in action disappears and collaboration becomes
+  available.
+
+- `rename-project-to-storyboard` complete (issue #27). `Project` is gone. The
+  rows it held are now `Diagram` — the Liveblocks room, the canvas blob, the
+  `/editor/[roomId]` page, and every MCP tool — and `Storyboard` is a new
+  top-level model holding owner, name, description, and the collaborator list.
+  `Diagram.storyboardId` is nullable, so a diagram that belongs to no plan is
+  still a valid diagram. That is the shape every agent-created one starts in.
+  - Old rows are dropped, not migrated. Migration
+    `20260830210000_storyboards_and_diagrams` drops `Project`,
+    `ProjectCollaborator`, and the `ProjectStatus` enum, then creates
+    `Storyboard`, `StoryboardCollaborator`, and `Diagram`. A fresh database
+    from the migrations produces exactly four tables and a working app with no
+    rows; verified by applying the whole history to a throwaway Postgres.
+  - Deletion state is two nullable timestamps rather than a lifecycle enum.
+    `deletingAt` is the durable tombstone, `deletedAt` finalizes it after the
+    Liveblocks room is gone, and either one hides the diagram and reserves its
+    ID forever. They record *when*, which is what a stalled cleanup needs and a
+    `DELETING` state could never say.
+  - Collaborators moved to the storyboard, which is what the glossary says they
+    belong to. A diagram is reachable by its owner or by a collaborator on its
+    parent board, so `getSharedDiagrams` and `authorizeDiagram` both reach
+    through `storyboardId`. A standalone diagram has no list to consult and is
+    owner-only — `authorizeDiagram` refuses it before spending a Clerk call.
+  - The editor hides its Share control for a standalone diagram rather than
+    offering an invite with nowhere to land. Nothing creates a storyboard yet,
+    so today every diagram is standalone and the share path is dormant; #29
+    gives it its first rows.
+  - Deleting a diagram detaches it from its board and scrubs its name. It no
+    longer touches collaborator rows: those belong to the storyboard, and
+    deleting one diagram must not strip a plan of the people invited to it.
+    Deleting a *storyboard* cascades its collaborators but sets its diagrams'
+    `storyboardId` to null — a diagram outlives the plan it was drawn for.
+  - Routes moved: `/api/projects/*` → `/api/diagrams/*` with `[diagramId]`, and
+    the member routes to `/api/storyboards/[storyboardId]/members`. The MCP tool
+    arguments renamed with them (`projectId` → `diagramId`); tool *names* were
+    already diagram-shaped. The skill's credential cache keys renamed too, so an
+    existing `~/.truss/credentials.json` keeps its token and refills its list on
+    the next call.
+  - `lib/access.ts` is new and holds `Identity`, `getCurrentIdentity`, and
+    `Authorization`, so `lib/diagram-access.ts` and `lib/storyboard-access.ts`
+    need not depend on each other. `lib/project-requests.ts` became
+    `lib/api-requests.ts`, since both surfaces parse through it.
+  - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`, and
+    `npm run build` all exit 0. `verify:integration` was run against a
+    throwaway Postgres rather than the live database, since the migration drops
+    tables. `context/feature-specs/` was deliberately left alone: it is a record
+    of past increments, and renaming it would have it claim identifiers that
+    never existed.
+  - Not done: no live authenticated end-to-end MCP run against a dev server.
+    The dev Clerk instance's interactive sign-in still blocks automation, the
+    same limitation recorded for earlier tasks.
+
+- `remove-server-side-ai` complete (issue #26). Truss now runs no model of its
+  own — see `docs/adr/0001-no-server-side-ai.md`. Deleted: the AI sidebar with
+  its transcript and composer, `/api/ai/chat`, `/api/ai/orchestrate` and its
+  token route, the orchestrator loop, run tokens, the activity stream, the
+  design run observer, spec generation and download, and all three Trigger.dev
+  tasks with `trigger.config.ts`. `TaskRun`, `ProjectSpec`, and
+  `AiRequestRateLimit` are dropped by migration
+  `20260830120000_drop_server_side_ai`. `ai`, `@ai-sdk/google`, and the three
+  `@trigger.dev/*` packages are out of `package.json`.
+  - What survives is everything the terminal agent uses. `lib/ai-activity.ts`
+    keeps `setAiPresence`/`clearAiPresence` for the paced draw and lost
+    `publishAiStatus`; `lib/canvas-read.ts` keeps only `readCanvas` and no
+    longer imports a Trigger logger; `types/tasks.ts` is down to the agent
+    identity and the pacing constants.
+  - `isThinking` is gone from the global `Liveblocks` presence interface, so the
+    cursor badge no longer renders a spinner.
+  - `lib/design-plan.ts` went too: 805 lines of plan parsing, action application
+    and cursor targeting that only the removed tier called. Its one live
+    export, `DesignContext`, moved to `types/canvas.ts` beside the node and edge
+    shapes it is made of.
+  - `TRIGGER_SECRET_KEY` and its `_PROD` twin are out of the env-key verifier,
+    which now pins the rule with `BLOB_READ_WRITE_TOKEN`. `push-vercel-env.ts`
+    is the only caller of `resolveEnvKeys` left.
+  - Ten verify scripts covering the removed surfaces are deleted;
+    `verify-editor-controls.tsx` lost its AI-sidebar and right-toggle
+    assertions and gained one that no right toggle renders at all.
+  - Gates: `typecheck`, `lint`, `verify:unit`, and `build` all exit 0. The build
+    lists no `/api/ai` route.
 
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
@@ -1530,7 +1624,7 @@ result is observed.
   ID. A diagram drawn through prod therefore appears in the local project list
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
-- Arrowheads were missing on every AI-written edge. `types/canvas.ts` built
+- Arrowheads were missing on every agent-written edge. `types/canvas.ts` built
   `CANVAS_EDGE_MARKER` from `MarkerType.ArrowClosed`, and `@xyflow/react` is a
   `"use client"` package: in a server bundle its exports are React client
   references, so the enum member read as `undefined` and each stored edge got a
@@ -1540,3 +1634,12 @@ result is observed.
   `checkMarkerSurvivesServerBundling` in `scripts/verify-canvas.ts` guards both.
   Rooms written before the fix keep the old marker until their edges are
   rewritten — `test2-18dc49` was repaired by hand, others were not.
+
+## CI quality fix — 2026-08-30
+
+- Restored only the vendored `.agents/skills/truss-diagram` sources required by
+  the unit verifiers and ignored unrelated local skills. A clean CI checkout
+  now includes the Truss loopback, core, and MCP implementations without
+  pulling in unrelated agent skills.
+- Configured `turbopack.root` to the current application directory so nested
+  worktrees do not make Next.js select a parent checkout's lockfile.

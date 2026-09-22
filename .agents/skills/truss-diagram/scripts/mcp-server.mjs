@@ -67,7 +67,7 @@ server.registerTool(
   {
     title: "List the user's Truss diagrams",
     description:
-      "Returns the signed-in user's diagram projects as { id, name } pairs. Use this to resolve which diagram a create/edit/delete request means — match by name (exact match wins, else a unique substring match, else ask). Authenticates automatically (opening one browser tab) if no credential is cached yet.",
+      "Returns the signed-in user's diagram diagrams as { id, name } pairs. Use this to resolve which diagram a create/edit/delete request means — match by name (exact match wins, else a unique substring match, else ask). Authenticates automatically (opening one browser tab) if no credential is cached yet.",
     inputSchema: { baseUrl: baseUrlShape },
   },
   async ({ baseUrl }) => textResult(await listDiagrams(baseUrl)),
@@ -81,10 +81,10 @@ server.registerTool(
       "Fetches one diagram's current compact graph plus a fingerprint for optimistic-concurrency edits. `opaqueNodeIds` lists canvas items the compact contract cannot express — never assign one of those ids to a node in an edit. Pass the returned `fingerprint` straight into truss_apply_diagram_edit; never invent one.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
     },
   },
-  async ({ baseUrl, projectId }) => textResult(await getDiagram(baseUrl, projectId)),
+  async ({ baseUrl, diagramId }) => textResult(await getDiagram(baseUrl, diagramId)),
 );
 
 server.registerTool(
@@ -95,13 +95,13 @@ server.registerTool(
       "Updates a diagram using the complete desiredGraph. Start with truss_get_diagram, preserve IDs and coordinates for existing nodes, and omit coordinates for new nodes. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
-      fingerprint: z.string().describe("The fingerprint truss_get_diagram returned for this project."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
+      fingerprint: z.string().describe("The fingerprint truss_get_diagram returned for this diagram."),
       desiredGraph: graphShape,
     },
   },
-  async ({ baseUrl, projectId, fingerprint, desiredGraph }) =>
-    textResult(await applyDiagramEdit(baseUrl, projectId, fingerprint, desiredGraph)),
+  async ({ baseUrl, diagramId, fingerprint, desiredGraph }) =>
+    textResult(await applyDiagramEdit(baseUrl, diagramId, fingerprint, desiredGraph)),
 );
 
 server.registerTool(
@@ -109,7 +109,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new project and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels.",
+      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels.",
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),
@@ -124,13 +124,13 @@ server.registerTool(
   {
     title: "Delete a Truss diagram",
     description:
-      "Deletes a diagram owned by the linked user and reports success after deletion completes. Use truss_list_diagrams to resolve the exact project requested by the user. Only call when the user has authorized deleting that diagram; ask for clarification if the target is ambiguous. Uses the cached credential without a browser confirmation.",
+      "Deletes a diagram owned by the linked user and reports success after deletion completes. Use truss_list_diagrams to resolve the exact diagram requested by the user. Only call when the user has authorized deleting that diagram; ask for clarification if the target is ambiguous. Uses the cached credential without a browser confirmation.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
     },
   },
-  async ({ baseUrl, projectId }) => textResult(await deleteDiagram(baseUrl, projectId)),
+  async ({ baseUrl, diagramId }) => textResult(await deleteDiagram(baseUrl, diagramId)),
 );
 
 const transport = new StdioServerTransport();

@@ -1,21 +1,22 @@
 import { currentUser } from "@clerk/nextjs/server";
 
 import { getCursorColor, getLiveblocks } from "@/lib/liveblocks";
-import { authorizeProject } from "@/lib/project-access";
-import { cleanupTombstonedRoom } from "@/lib/project-lifecycle";
-import { jsonError, readJsonBody } from "@/lib/project-requests";
+import { authorizeDiagram } from "@/lib/diagram-access";
+import { cleanupTombstonedRoom } from "@/lib/diagram-lifecycle";
+import { jsonError, readJsonBody } from "@/lib/api-requests";
 
 /**
  * Liveblocks room token endpoint (10-liveblocks-setup).
  *
  * The Liveblocks client POSTs `{ room }` here whenever it joins a room. A
- * project ID *is* its room ID (see `lib/room-id.ts`), so the room name the
- * client asks for is exactly the project whose membership must be checked.
+ * diagram ID *is* its room ID (see `lib/room-id.ts`), so the room name the
+ * client asks for is exactly the diagram whose membership must be checked.
  *
  * Access tokens rather than ID tokens: membership here is dynamic — a
- * collaborator is a `ProjectCollaborator` row matched on email — so permission
- * is computed per request from the database instead of mirrored into the room's
- * `usersAccesses` on every invite and removal.
+ * collaborator is a `StoryboardCollaborator` row on the diagram's parent board,
+ * matched on email — so permission is computed per request from the database
+ * instead of mirrored into the room's `usersAccesses` on every invite and
+ * removal.
  */
 
 /** The room name the Liveblocks client sends, or `null` if the body is junk. */
@@ -38,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // 401 / 404 / 403 before anything else — an outsider must not be able to
   // create a room or spend a Clerk lookup.
-  const authorization = await authorizeProject(request, roomId, { requireOwner: false });
+  const authorization = await authorizeDiagram(request, roomId, { requireOwner: false });
 
   if (!authorization.ok) {
     return authorization.response;
@@ -47,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
   const user = await currentUser();
 
   if (!user) {
-    // authorizeProject already saw a session, so this is a race with sign-out.
+    // authorizeDiagram already saw a session, so this is a race with sign-out.
     return jsonError("Unauthorized", 401);
   }
 
@@ -87,7 +88,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Authorization and room creation cross two external calls. Fence the result
   // against a concurrent deletion before returning a bearer token.
-  const finalAuthorization = await authorizeProject(request, roomId, {
+  const finalAuthorization = await authorizeDiagram(request, roomId, {
     requireOwner: false,
   });
 

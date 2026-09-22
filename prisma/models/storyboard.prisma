@@ -1,0 +1,37 @@
+/// A board of panels expressing one plan, owned by one user and shared with
+/// collaborators. The top-level object in the app (see CONTEXT.md).
+///
+/// Panel content never lands here — it lives in the storyboard's Liveblocks
+/// room, the same split the canvas already uses. This row is metadata,
+/// ownership, and the collaborator list.
+model Storyboard {
+  id          String  @id @default(cuid())
+  ownerId     String
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  collaborators StoryboardCollaborator[]
+  diagrams      Diagram[]
+
+  @@index([ownerId])
+  @@index([createdAt])
+}
+
+/// A user invited to a storyboard by email. There is no local user table, so
+/// the invite is the address itself — names and avatars are read from Clerk at
+/// render time, and an invite may precede the invitee ever signing up.
+model StoryboardCollaborator {
+  id           String   @id @default(cuid())
+  storyboardId String
+  email        String
+  createdAt    DateTime @default(now())
+
+  storyboard Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+
+  @@unique([storyboardId, email])
+  @@index([email])
+  @@index([storyboardId, createdAt])
+}

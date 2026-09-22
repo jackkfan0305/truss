@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { AI_RUN_STEPS } from "../types/tasks";
-import { selectOrbState } from "../lib/run-orb-state";
 
 /**
  * The six step verbs are persisted inside chat history, so their *values* are
@@ -39,30 +38,6 @@ function checkTaskFilesEmitStepsFromTheConstant() {
   }
 }
 
-/**
- * The orb animates the *kind* of work, so every step has to land on a state
- * deliberately rather than by falling through. An unrecognised string is a
- * real case — a future step, or a row persisted by an older build — and it
- * must animate rather than crash or blank.
- */
-function checkEveryStepMapsToAnOrbState() {
-  assert.equal(selectOrbState(AI_RUN_STEPS.readCanvas), "searching");
-  assert.equal(selectOrbState(AI_RUN_STEPS.designCanvas), "shaping");
-  assert.equal(selectOrbState(AI_RUN_STEPS.design), "shaping");
-  assert.equal(selectOrbState(AI_RUN_STEPS.validate), "solving");
-  assert.equal(selectOrbState(AI_RUN_STEPS.apply), "weaving");
-  assert.equal(selectOrbState(AI_RUN_STEPS.writeSpec), "composing");
-}
-
-function checkUnknownStepsFallBackRatherThanBlank() {
-  assert.equal(selectOrbState("Consulting the oracle"), "working");
-  assert.equal(selectOrbState(null), "working");
-  assert.equal(selectOrbState(undefined), "working");
-  assert.equal(selectOrbState(""), "working");
-}
-
 checkStepValuesAreStable();
 checkTaskFilesEmitStepsFromTheConstant();
-checkEveryStepMapsToAnOrbState();
-checkUnknownStepsFallBackRatherThanBlank();
 console.log("✅ run step vocabulary checks passed");

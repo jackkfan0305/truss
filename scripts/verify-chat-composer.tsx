@@ -44,10 +44,27 @@ function composer(props: {
   );
 }
 
+/**
+ * The submit control's opening tag, found by its accessible name.
+ *
+ * The composer renders more than one button, so an assertion against the whole
+ * document cannot tell the submit control from the settings pill. Scanning the
+ * tags and matching on the label is order-independent, unlike a single regex
+ * over the attributes.
+ */
+function submitTag(html: string, label: string): string {
+  const tags = html.match(/<button[^>]*>/g) ?? [];
+  const tag = tags.find((candidate) => candidate.includes(`aria-label="${label}"`));
+
+  assert.ok(tag, `a submit control labelled "${label}" is in the markup`);
+
+  return tag!;
+}
+
 function checkAnEmptyFieldCannotSend() {
   const html = composer({ value: "", status: "ready", isDisabled: false });
 
-  assert.match(html, /disabled=""/, "submit is disabled with no text");
+  assert.match(submitTag(html, "Send message"), /disabled=""/, "submit is disabled with no text");
   assert.ok(html.includes("Send message"), "the control still names itself");
 }
 
@@ -59,7 +76,7 @@ function checkTextMakesItSendable() {
   });
 
   assert.doesNotMatch(
-    html,
+    submitTag(html, "Send message"),
     /disabled=""/,
     "submit is live once there is text",
   );
@@ -73,7 +90,7 @@ function checkTextMakesItSendable() {
 function checkAWorkingRunShowsANonInteractiveIndicator() {
   const html = composer({ value: "text", status: "working", isDisabled: true });
 
-  assert.match(html, /disabled=""/, "the control does not invite a press");
+  assert.match(submitTag(html, "Agent is working"), /disabled=""/, "the control does not invite a press");
   assert.ok(html.includes('aria-busy="true"'), "the busy state is announced");
   assert.ok(html.includes("Agent is working"), "the state reads as words");
   assert.ok(!html.includes("Stop"), "no stop affordance this app cannot honour");

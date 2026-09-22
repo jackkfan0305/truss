@@ -47,7 +47,7 @@ function composer(props: {
 function checkAnEmptyFieldCannotSend() {
   const html = composer({ value: "", status: "ready", isDisabled: false });
 
-  assert.match(html, /<button[^>]*disabled/, "submit is disabled with no text");
+  assert.match(html, /disabled=""/, "submit is disabled with no text");
   assert.ok(html.includes("Send message"), "the control still names itself");
 }
 
@@ -60,7 +60,7 @@ function checkTextMakesItSendable() {
 
   assert.doesNotMatch(
     html,
-    /aria-label="Send message"[^>]*disabled/,
+    /disabled=""/,
     "submit is live once there is text",
   );
 }
@@ -73,7 +73,7 @@ function checkTextMakesItSendable() {
 function checkAWorkingRunShowsANonInteractiveIndicator() {
   const html = composer({ value: "text", status: "working", isDisabled: true });
 
-  assert.match(html, /<button[^>]*disabled/, "the control does not invite a press");
+  assert.match(html, /disabled=""/, "the control does not invite a press");
   assert.ok(html.includes('aria-busy="true"'), "the busy state is announced");
   assert.ok(html.includes("Agent is working"), "the state reads as words");
   assert.ok(!html.includes("Stop"), "no stop affordance this app cannot honour");

@@ -193,23 +193,20 @@ function AiInputSubmit() {
   const canSend = !isDisabled && !isWorking && value.trim().length > 0
 
   return (
-    <button
+    <Button
       type="submit"
+      size="icon-sm"
       disabled={!canSend}
       aria-busy={isWorking}
       aria-label={isWorking ? "Agent is working" : "Send message"}
-      className={cn(
-        "shrink-0 rounded-full bg-copy-primary text-page outline-none transition-colors",
-        "hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30",
-        !canSend && "cursor-not-allowed opacity-50"
-      )}
+      className="shrink-0 rounded-full bg-copy-primary text-page hover:bg-copy-secondary focus-visible:border-copy-primary focus-visible:ring-copy-primary/30"
     >
       {isWorking ? (
         <Loader2 aria-hidden className="size-3.5 motion-safe:animate-spin" />
       ) : (
         <ArrowUp aria-hidden className="size-3.5" />
       )}
-    </button>
+    </Button>
   )
 }
 

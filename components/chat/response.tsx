@@ -36,32 +36,29 @@ import { cn } from "@/lib/utils"
  * the `text-sm` every chat heading uses.
  */
 
-const RESPONSE_TAGS = [
-  "p",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "ul",
-  "ol",
-  "li",
-  "blockquote",
-  "strong",
-  "em",
-  "s",
-  "a",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "th",
-  "td",
-  "hr",
-] as const
-
-export type ResponseTag = (typeof RESPONSE_TAGS)[number]
+export type ResponseTag =
+  | "p"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "ul"
+  | "ol"
+  | "li"
+  | "blockquote"
+  | "strong"
+  | "em"
+  | "s"
+  | "a"
+  | "table"
+  | "thead"
+  | "tbody"
+  | "tr"
+  | "th"
+  | "td"
+  | "hr"
 
 export type ResponseComponents = Partial<
   Record<ResponseTag, ComponentType<{ children?: ReactNode }>>

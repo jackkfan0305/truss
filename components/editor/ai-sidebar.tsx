@@ -4,9 +4,7 @@ import { useState } from "react"
 import { useRoom } from "@liveblocks/react"
 import { CircleAlert, X } from "lucide-react"
 
-import { AiInput } from "@/components/chat/ai-input"
-import { AiInputSettings } from "@/components/chat/ai-input-settings"
-import { ComposerBeam } from "@/components/chat/border-beam"
+import { AiChatComposer } from "@/components/chat/ai-chat-composer"
 import { ThinkingOrb } from "@/components/chat/thinking-orb"
 import { AiChatTranscript } from "@/components/editor/ai-chat-transcript"
 import { Button } from "@/components/ui/button"
@@ -136,42 +134,17 @@ export function AiSidebar({
           </p>
         ) : null}
 
-        <ComposerBeam isActive={isRunning}>
-          <AiInput.Root
-            value={draft}
-            status={isRunning || isSending ? "working" : "ready"}
-            isDisabled={isComposerDisabled}
-            onValueChange={setDraft}
-            onSubmit={() => void submit(draft)}
-          >
-            <AiInput.Field
-              /*
-               * "Working on it", not "Working on the canvas": a turn may be
-               * answering a question or writing a spec, and naming the canvas
-               * would be wrong two times in three.
-               */
-              placeholder={
-                isRunning
-                  ? "Working on it…"
-                  : canSend
-                    ? "Ask about the system, request a change, or ask for a spec…"
-                    : "Connecting to the room…"
-              }
-              aria-label="Ask about the system, request a change, or ask for a spec"
-            />
-            <AiInput.Toolbar>
-              <AiInputSettings
-                modelId={modelId}
-                thinkingLevel={thinkingLevel}
-                onModelChange={setModelId}
-                onThinkingLevelChange={setThinkingLevel}
-                disabled={isRunning}
-              />
-              <AiInput.Spacer />
-              <AiInput.Submit />
-            </AiInput.Toolbar>
-          </AiInput.Root>
-        </ComposerBeam>
+        <AiChatComposer
+          draft={draft}
+          isDisabled={isComposerDisabled}
+          isWorking={isRunning || isSending}
+          modelId={modelId}
+          thinkingLevel={thinkingLevel}
+          onDraftChange={setDraft}
+          onModelChange={setModelId}
+          onThinkingLevelChange={setThinkingLevel}
+          onSubmit={submit}
+        />
       </div>
     </aside>
   )

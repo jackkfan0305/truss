@@ -8,6 +8,36 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- AI Elements migration Task 1 complete in code. `AiChatComposer` composes the
+  registry Prompt Input with the existing Border Beam and drives the existing
+  sidebar submission callback. `AiInputSettings` uses AI Elements Model
+  Selector for the server allowlist and retains the thinking-effort control.
+  The send control stays disabled while working and never offers a fake Stop
+  action. New markup and jsdom keyboard checks pass, and the existing prompt
+  submission verification covers a failed send retaining its draft. Typecheck,
+  lint, unit verification, and production build pass. The model dialog still
+  needs a signed-in browser check because Base UI's dialog trigger did not
+  open in the jsdom test fixture. Later transcript and work-log tasks have not
+  started.
+
+- AI Elements migration preparation in progress. The AI Elements CLI added
+  `prompt-input`, `shimmer`, `reasoning`, `task`, `tool`, `conversation`,
+  `context`, `chain-of-thought`, `model-selector`, and `message` under
+  `components/ai-elements/`, plus their registry dependencies. Existing
+  `components/ui` files were kept; the CLI added only missing shadcn files.
+  Small compatibility fixes in the generated AI Elements files make the
+  installation typecheck against this project's Base UI and AI SDK versions.
+  `npm run typecheck`, `npm run lint`, and `npm run build` pass. Lint reports
+  one nonblocking generated `ModelSelectorLogo` image warning.
+  The live sidebar still uses the existing `components/chat` layer. The revised
+  design is in `docs/superpowers/specs/2026-09-22-ai-elements-chat-migration-design.md`
+  (commit `58b1fb5`); the user approved it. The implementation plan is drafted
+  at `docs/superpowers/plans/2026-09-22-ai-elements-chat-migration.md` and
+  awaits review and an execution-method choice.
+  Keep Border Beam and Thinking
+  Orbs in that design. Never show raw provider chain of thought, and do not
+  invent context usage or tool events that the current run model lacks.
+
 - `agent-chat-panel-overhaul` complete. All thirteen code tasks are done. The
   AI sidebar now streams markdown answers through one sanitizer and one
   renderer, renders runs as stacked collapsible tasks, and has a header and

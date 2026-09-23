@@ -8,6 +8,10 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Sidebar layout follow-up: removed the top bar and its Google/provider and
+  model labels at the user's request. A close control floats at the top left
+  above the transcript; model selection remains in the AI Elements composer.
+
 - AI Elements chat migration complete in code. The live panel uses Prompt
   Input and Model Selector in the composer, Message framing for shared turns,
   and Task, Shimmer, and Reasoning for durable activity. Border Beam and

@@ -14,7 +14,6 @@ import { useCollaborators } from "@/hooks/use-collaborators"
 import { submitAiSidebarPrompt } from "@/lib/ai-sidebar-submission"
 import { cn } from "@/lib/utils"
 import {
-  AI_DESIGN_MODELS,
   DEFAULT_AI_DESIGN_MODEL_ID,
   DEFAULT_AI_THINKING_LEVEL,
   type AiDesignModelId,
@@ -37,9 +36,6 @@ const STARTER_PROMPTS = [
   "Create a chat app architecture",
   "What would you add to this system?",
 ]
-
-/** The provider behind every model in `AI_DESIGN_MODELS`. */
-const AI_PROVIDER_NAME = "Google"
 
 /** Monochrome AI workspace with room chat and run-scoped activity streams. */
 export function AiSidebar({
@@ -92,7 +88,18 @@ export function AiSidebar({
         isOpen ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"
       )}
     >
-      <PanelHeader modelId={modelId} onClose={onClose} />
+      {onClose ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label="Close AI sidebar"
+          className="absolute left-3 top-3 z-10 min-h-11 min-w-11 text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
+        >
+          <X aria-hidden className="size-4" />
+        </Button>
+      ) : null}
 
       {/*
         Must stay a flex column: the transcript sizes itself as a flex item and
@@ -100,7 +107,7 @@ export function AiSidebar({
         indefinite — the viewport grows to fit the run instead of scrolling it,
         and the activity spills over the composer.
       */}
-      <div className="flex min-h-0 flex-1 flex-col px-4">
+      <div className={cn("flex min-h-0 flex-1 flex-col px-4", onClose && "pt-14")}>
         <AiChatTranscript
           messages={messages}
           selfId={selfId}
@@ -147,50 +154,6 @@ export function AiSidebar({
         />
       </div>
     </aside>
-  )
-}
-
-/**
- * The panel's own header, replacing the padding that reserved space for a
- * floating close control.
- *
- * It names the provider and the exact model ID, which `ui-context.md` has
- * always described and which nothing has carried until now: the composer pill
- * shows a friendly label, and a reader debugging an odd answer needs the id.
- */
-function PanelHeader({
-  modelId,
-  onClose,
-}: {
-  modelId: AiDesignModelId
-  onClose?: () => void
-}) {
-  const model = AI_DESIGN_MODELS.find((entry) => entry.id === modelId)
-
-  return (
-    <header className="flex min-h-12 items-center gap-2 border-b border-surface-border px-4">
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-xs font-medium text-copy-secondary">
-          {AI_PROVIDER_NAME}
-        </span>
-        <span className="truncate font-mono text-xs text-copy-muted">
-          {model?.id ?? modelId}
-        </span>
-      </span>
-
-      {onClose ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          aria-label="Close AI sidebar"
-          className="shrink-0 text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
-        >
-          <X aria-hidden className="size-4" />
-        </Button>
-      ) : null}
-    </header>
   )
 }
 

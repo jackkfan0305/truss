@@ -13,10 +13,10 @@ No other sidechat surface uses an accent. State is communicated with
 iconography and text, never colour alone — the beam and the orb annotate a
 state that the working indicator and the running task already state in words.
 
-- The panel has its own header. It names the active provider and the exact
-  model ID on the leading edge and carries the close control on the trailing
-  edge. The navbar's floating toggle opens the panel and is hidden while it is
-  open, so there is one close affordance rather than two.
+- The panel has no header bar. Its close control floats at the top left, with
+  space above the transcript so it does not cover the first message. The model
+  selector lives in the composer. The navbar's floating toggle opens the
+  panel and is hidden while it is open.
 - Messages use one reading edge and minimal neutral surfaces, following modern
   AI chat conventions rather than coloured role bubbles.
 - Each generation renders as one shared, reloadable assistant work turn placed

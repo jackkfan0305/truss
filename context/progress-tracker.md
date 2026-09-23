@@ -8,6 +8,22 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- AI Elements chat migration complete in code. The live panel uses Prompt
+  Input and Model Selector in the composer, Message framing for shared turns,
+  and Task, Shimmer, and Reasoning for durable activity. Border Beam and
+  Thinking Orbs remain. The old custom input and task files and their obsolete
+  composer verification were removed after an import audit. Response and
+  CodeBlock remain because AI Elements MessageResponse failed the safe-link
+  contract; the existing scroll viewport remains because the browser needed
+  to validate Conversation was unavailable. Tool and Context have no persisted
+  event or usage data. Chain of Thought would duplicate the existing task and
+  curated reasoning record. The worker's internal tool calls are not stored in
+  `AiActivityPart`; canvas actions are stored as Task items. A signed-in
+  desktop/mobile, keyboard, reduced-motion, and two-client browser check still
+  needs browser access. `npm run verify:unit`, `npm run typecheck`,
+  `npm run lint`, and `npm run build` all exit 0. Lint retains one warning in
+  the generic registry ModelSelectorLogo image helper.
+
 - AI Elements migration Task 4 kept Truss's Response renderer for assistant
   answers, curated reasoning, and spec previews. A direct MessageResponse
   parity fixture passed raw HTML, unsafe-scheme, table, fence, partial text,

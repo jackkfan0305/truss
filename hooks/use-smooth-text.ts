@@ -13,11 +13,8 @@ import { isFullyRevealed, nextRevealLength } from "@/lib/smooth-text";
  * is backgrounded — an interval would keep advancing text nobody is watching
  * and then dump the catch-up in one frame on return.
  *
- * `settled` forces the full text out. A run that has finished has no more
- * deltas coming, so trickling would leave the last words hidden behind an
- * animation with nothing left to animate toward. It is applied when computing
- * what to return rather than by writing state from an effect, which would cost
- * a second render pass on every finished run.
+ * A newly mounted settled answer appears whole. A renderer that was already
+ * live keeps revealing its last buffered words after the run settles.
  */
 export function useSmoothText(target: string, settled = false): string {
   const [revealed, setRevealed] = useState(0);
@@ -25,6 +22,7 @@ export function useSmoothText(target: string, settled = false): string {
   // The rAF loop's own cursor. State exists to trigger the re-render; this is
   // what the next frame reads, so a burst arriving mid-frame cannot rewind it.
   const revealedRef = useRef(0);
+  const [hasStreamed, setHasStreamed] = useState(!settled);
 
   useEffect(() => {
     /*
@@ -36,8 +34,9 @@ export function useSmoothText(target: string, settled = false): string {
      */
     let frameId = 0;
 
-    // Nothing to animate toward: render already returns the whole string.
-    if (settled) {
+    // Saved answers mount settled and render whole. Only a renderer that was
+    // mounted during the run has a remaining tail to reveal.
+    if (settled && !hasStreamed) {
       return () => cancelAnimationFrame(frameId);
     }
 
@@ -63,6 +62,7 @@ export function useSmoothText(target: string, settled = false): string {
       setRevealed(next);
 
       if (isFullyRevealed(next, target)) {
+        if (settled) setHasStreamed(false);
         frameId = 0;
         return;
       }
@@ -73,11 +73,13 @@ export function useSmoothText(target: string, settled = false): string {
     frameId = requestAnimationFrame(step);
 
     return () => cancelAnimationFrame(frameId);
-  }, [target, settled]);
+  }, [target, settled, hasStreamed]);
 
   // `slice` clamps on its own, so an out-of-range cursor renders the whole
   // string rather than throwing or truncating oddly.
-  return settled ? target : target.slice(0, revealed);
+  return settled && !hasStreamed
+    ? target
+    : target.slice(0, revealed);
 }
 
 function prefersReducedMotion(): boolean {

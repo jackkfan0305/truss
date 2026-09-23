@@ -113,9 +113,8 @@ function ResponseBody({
   showLineNumbers = false,
   className,
 }: ResponseProps) {
-  // `settled` is the negation of `isStreaming`: a finished answer has no more
-  // deltas coming, so trickling would hide its last words behind an animation
-  // with nothing left to animate toward.
+  // Saved answers mount complete. A reply already visible during a run keeps
+  // revealing its buffered tail when the final snapshot arrives.
   const revealed = useSmoothText(children, !isStreaming)
   // Repair applies while deltas are still arriving *and* while the reveal is
   // mid-string, because a revealed prefix has a half-typed tail of its own.

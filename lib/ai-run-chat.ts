@@ -98,6 +98,7 @@ export function createAiRunChatPublisher(
   let content = "";
   let nextSourceIndex = 0;
   let scheduledHandle: unknown;
+  let publishedFirstContent = false;
   let started = false;
   let finished = false;
   let queuedWrite: Promise<void> = Promise.resolve();
@@ -191,6 +192,20 @@ export function createAiRunChatPublisher(
     }
 
     content = next;
+
+    // A short closing answer can finish before the 400ms activity debounce.
+    // Publish its first chunk now so readers see text while the run is live.
+    if (!publishedFirstContent) {
+      publishedFirstContent = true;
+
+      if (scheduledHandle !== undefined) {
+        cancel(scheduledHandle);
+        scheduledHandle = undefined;
+      }
+
+      void enqueueSnapshot();
+      return;
+    }
 
     if (scheduledHandle === undefined) {
       scheduledHandle = schedule(flush, AI_RUN_CHAT_FLUSH_MS);

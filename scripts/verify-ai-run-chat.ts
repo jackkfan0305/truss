@@ -65,6 +65,28 @@ async function checkPublisherCoalescesAReasoningBurst(): Promise<void> {
   console.log("✅ publisher coalesces reasoning bursts");
 }
 
+async function checkFirstAnswerChunkPublishesBeforeTheDebounce(): Promise<void> {
+  const writes: AiChatMessage[] = [];
+  const scheduler = createFakeScheduler();
+  const publisher = createAiRunChatPublisher({
+    roomId: "project-1",
+    runId: "answer-stream",
+    promptMessageId: "chat-prompt",
+    write: async (_roomId, _messageId, message) => {
+      writes.push(structuredClone(message));
+    },
+    schedule: scheduler.schedule,
+    cancel: scheduler.cancel,
+  });
+
+  await publisher.start();
+  publisher.appendContent("Hello");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(writes.at(-1)?.content, "Hello", "the first answer chunk reaches the feed before the timer");
+  assert.equal(writes.at(-1)?.run?.phase, "running");
+}
+
 async function checkPublisherKeepsActivityChronological(): Promise<void> {
   const writes: AiChatMessage[] = [];
   const scheduler = createFakeScheduler();
@@ -497,6 +519,7 @@ function hasStatus(error: unknown, status: number): boolean {
 
 async function main(): Promise<void> {
   await checkPublisherCoalescesAReasoningBurst();
+  await checkFirstAnswerChunkPublishesBeforeTheDebounce();
   await checkPublisherKeepsActivityChronological();
   await checkPublisherBoundsActivityAtTwoHundredParts();
   checkOversizedRunLogsPreserveTheRunAnchor();

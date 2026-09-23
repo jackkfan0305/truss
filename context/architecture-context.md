@@ -320,8 +320,9 @@ wrong nodes, and it must never be skipped.
   same row rather than creating a second assistant message, so every member can
   reload the prompt, activity, and result without the initiator's token.
 - Each durable update is a full immutable snapshot of at most 200 validated
-  activity parts. The publisher coalesces non-terminal activity for 400ms,
-  serializes writes, and sends terminal states immediately; a later successful
+  activity parts. The publisher writes the first answer text delta promptly,
+  coalesces later non-terminal updates for 400ms, serializes writes, and sends
+  terminal states immediately; a later successful
   full snapshot repairs a failed intermediate update. Publishing is cosmetic to
   the canvas task: individual write failures are logged and do not abort a
   generation.

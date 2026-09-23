@@ -19,6 +19,9 @@ state that the working indicator and the running task already state in words.
   panel and is hidden while it is open.
 - Messages use one reading edge and minimal neutral surfaces, following modern
   AI chat conventions rather than coloured role bubbles.
+- A live assistant row mounts its reply renderer before the first word arrives.
+  The first text chunk publishes promptly, and any unrevealed tail continues
+  appearing after the run completes. Saved replies open fully rendered.
 - Each generation renders as one shared, reloadable assistant work turn placed
   directly after its prompt. The turn is a stack of tasks, one per phase of the
   run: the phase names the task, and the canvas operations and curated
@@ -32,6 +35,7 @@ state that the working indicator and the running task already state in words.
   revealed text. The waiting state uses the same orb and label. Canvas edge
   operations remain in the durable record but stay out of the visible work log.
 - Model and thinking-effort controls are compact dropdowns in the composer.
+  Their menus show option names without secondary hint text.
 - Canvas operations remain visually pending until the run's atomic canvas
   write completes. Completion and failure use both an icon and text.
 - The durable `ai-chat` row is updated in place as work arrives and carries the

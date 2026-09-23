@@ -44,9 +44,9 @@ export function ChatEntry({
         <Message from="assistant" className="max-w-full gap-2">
           <MessageContent className="w-full max-w-full gap-2 overflow-visible">
             {activity}
-            {message.content ? (
+            {message.content || isStreaming ? (
               <Response
-                className="text-sm leading-relaxed text-copy-primary"
+                className={message.content ? "text-sm leading-relaxed text-copy-primary" : "hidden"}
                 isStreaming={isStreaming}
               >
                 {message.content}

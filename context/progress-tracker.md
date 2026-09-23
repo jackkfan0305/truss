@@ -8,6 +8,13 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Reply streaming follow-up: the worker now publishes the first answer chunk
+  promptly instead of losing short answers to the 400ms debounce. The live
+  assistant row mounts its reply renderer before text arrives, then reveals
+  any buffered tail after completion. Saved answers still appear in full.
+  Publisher and DOM regressions cover these cases. Model and effort dropdowns
+  now show option names without right-side hints.
+
 - Sidebar streaming and control-density follow-up complete in code. The
   existing answer renderer streams text; curated reasoning now opens and
   reveals text as it arrives with a shimmering "Thinking" label. A thinking

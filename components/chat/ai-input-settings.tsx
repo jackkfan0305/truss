@@ -48,11 +48,10 @@ export function AiInputSettings({
         >
           <span className="truncate">{model?.label ?? modelId}</span>
         </SelectTrigger>
-        <SelectContent align="start" className="w-56 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
+        <SelectContent align="start" className="w-44 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
           {AI_DESIGN_MODELS.map((entry) => (
             <SelectItem key={entry.id} value={entry.id} className="min-h-9 px-2 py-1.5 text-xs text-copy-secondary focus:bg-elevated focus:text-copy-primary">
               <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-              <span className="text-copy-muted">{entry.hint}</span>
             </SelectItem>
           ))}
         </SelectContent>
@@ -73,11 +72,10 @@ export function AiInputSettings({
         >
           <span className="truncate">{effort?.label ?? thinkingLevel}</span>
         </SelectTrigger>
-        <SelectContent align="start" className="w-44 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
+        <SelectContent align="start" className="w-36 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
           {AI_THINKING_LEVELS.map((entry) => (
             <SelectItem key={entry.id} value={entry.id} className="min-h-9 px-2 py-1.5 text-xs text-copy-secondary focus:bg-elevated focus:text-copy-primary">
               <span className="min-w-0 flex-1">{entry.label}</span>
-              <span className="text-copy-muted">{entry.hint}</span>
             </SelectItem>
           ))}
         </SelectContent>

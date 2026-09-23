@@ -48,5 +48,7 @@ assert.match(ready, /data-slot="input-group"/);
 assert.match(connecting, /Connecting to the room/);
 assert.match(ready, /aria-label="Choose model"/);
 assert.match(ready, /aria-label="Choose thinking effort"/);
+assert.equal((ready.match(/data-slot="select-trigger"/g) ?? []).length, 2,
+  "model and effort use compact dropdown triggers");
 
 console.log("AI Elements composer checks passed");

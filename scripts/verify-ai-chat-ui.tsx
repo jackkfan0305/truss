@@ -190,6 +190,8 @@ function checkOnlyTheNewestThoughtIsStillThinking() {
     2,
     "both saved summaries retain their disclosure labels",
   );
+  assert.match(html, /data-open="" data-slot="collapsible" class="not-prose/, "live reasoning opens while text streams");
+  assert.match(html, /text-transparent[^>]*>Thinking/, "the visible Thinking label shimmers");
 
   // A step arriving after a thought settles it, even though the step itself is
   // not rendered — which is why the streaming part is chosen against the
@@ -239,11 +241,29 @@ function checkEachStepBecomesATask() {
   assert.ok(html.includes("Applying to the canvas"), "the second step is a task");
   assert.ok(html.includes("addNode"), "an operation lands under its step");
   assert.match(html, /border-surface-border[^>]*>Queue/, "an action detail remains a file chip");
-  assert.match(html, /aria-expanded="false"[^>]*>Thought process/, "curated reasoning starts closed");
+  assert.match(html, /data-closed="" data-slot="collapsible" class="not-prose/, "settled reasoning starts closed");
   assert.ok(
     !html.includes("design.md"),
     "an artifact is attached to the message, not to a step",
   );
+}
+
+function checkEdgeConstructionStaysOutOfTheVisibleLog() {
+  const html = renderEntry(
+    <AiRunTasks state={{
+      ...TASK_RUN,
+      phase: "complete",
+      activity: [
+        { id: "step", type: "step", text: "Applying to the canvas" },
+        { id: "node", type: "action", text: "addNode", detail: "Queue" },
+        { id: "edge", type: "action", text: "addEdge", detail: "API → Queue" },
+        { id: "removed-edge", type: "action", text: "deleteEdge", detail: "old-edge" },
+      ],
+    }} />,
+  );
+
+  assert.match(html, /addNode/);
+  assert.doesNotMatch(html, /addEdge|deleteEdge|API → Queue|old-edge/);
 }
 
 function checkStaleRunKeepsStoppedWording() {
@@ -530,6 +550,7 @@ checkConversationKeepsSharedMessageCues();
 checkIncompleteRunKeepsItsPartialWork();
 checkOnlyTheNewestThoughtIsStillThinking();
 checkEachStepBecomesATask();
+checkEdgeConstructionStaysOutOfTheVisibleLog();
 checkStaleRunKeepsStoppedWording();
 checkTasksDefaultToOpen();
 checkExactlyOneElementAnnouncesTheStep();

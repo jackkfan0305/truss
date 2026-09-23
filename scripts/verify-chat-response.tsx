@@ -68,7 +68,7 @@ function checkCuratedReasoningKeepsTheSameBoundary() {
 
   assert.match(html, /Thought process/);
   assert.doesNotMatch(html, /href="javascript:/i);
-  assert.match(source, /<Response[\s\S]*?\{text\}/, "curated reasoning uses the safe renderer");
+  assert.match(source, /<Response[\s\S]*?\{part\.text\}/, "curated reasoning uses the safe renderer");
 }
 
 function checkRealLinksLeaveTheAppSafely() {

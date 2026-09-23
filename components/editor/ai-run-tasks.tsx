@@ -1,13 +1,12 @@
 "use client"
 
-import { Check, ChevronDown, CircleStop, CircleX, Loader2, TerminalSquare } from "lucide-react"
+import { BrainCircuit, Check, ChevronDown, CircleStop, CircleX, Loader2, TerminalSquare } from "lucide-react"
 
 import { Response } from "@/components/chat/response"
 import { Reasoning, ReasoningTrigger } from "@/components/ai-elements/reasoning-frame"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Task, TaskContent, TaskItem, TaskItemFile, TaskTrigger } from "@/components/ai-elements/task"
 import { CollapsibleContent } from "@/components/ui/collapsible"
-import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { AiTimelinePart } from "@/lib/ai-timeline"
 import { selectRunTaskGroups, type RunPhase } from "@/lib/run-task-groups"
 
@@ -42,6 +41,15 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
   // A turn that answered in words and did nothing else has no steps. Rendering
   // the stack anyway would be a control that opens onto nothing.
   if (groups.length === 0) {
+    if (isLive) {
+      return (
+        <p role="status" aria-live="polite" className="flex min-h-9 items-center gap-2 px-2 text-xs text-copy-secondary">
+          <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+          <Shimmer as="span" className="motion-reduce:text-copy-secondary">Thinking</Shimmer>
+        </p>
+      )
+    }
+
     return state.phase === "error" || state.phase === "incomplete" ? (
       <RunOutcomeLine phase={state.phase} />
     ) : null
@@ -51,12 +59,16 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
     <div data-run-id={state.runId ?? undefined} className="flex flex-col gap-0.5">
       {groups.map((group, index) => {
         const isLast = index === groups.length - 1
+        const visibleParts = group.parts.filter(
+          (part) => part.type !== "action" ||
+            (part.text !== "addEdge" && part.text !== "deleteEdge")
+        )
 
         return (
           <Task key={group.id} defaultOpen className="group/task">
             <TaskTrigger
               title={group.title}
-              className="flex min-h-8 w-full items-center gap-2 rounded-lg py-1 text-left text-xs text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30"
+              className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-copy-secondary outline-none hover:bg-elevated/40 focus-visible:ring-2 focus-visible:ring-copy-primary/30"
             >
               {group.status === "running" ? <Loader2 aria-hidden className="size-3.5 shrink-0 motion-safe:animate-spin" /> : null}
               {group.status === "complete" ? <Check aria-hidden className="size-3.5 shrink-0" /> : null}
@@ -67,7 +79,7 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
                 className="min-w-0 flex-1"
               >
                 {isLive && isLast ? (
-                  <Shimmer as="span" className="text-copy-secondary motion-reduce:text-copy-secondary">
+                  <Shimmer as="span" className="motion-reduce:text-copy-secondary">
                     {group.title}
                   </Shimmer>
                 ) : group.title}
@@ -77,9 +89,9 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
               ) : null}
               <ChevronDown aria-hidden className="size-3.5 shrink-0 transition-transform group-data-[state=open]/task:rotate-180 motion-reduce:transition-none" />
             </TaskTrigger>
-            {group.parts.length > 0 ? (
+            {visibleParts.length > 0 ? (
               <TaskContent className="motion-reduce:animate-none [&>div]:mt-0 [&>div]:space-y-2 [&>div]:border-surface-border [&>div]:pl-6">
-                {group.parts.map((part) => (
+                {visibleParts.map((part) => (
                   <TaskItem key={part.id} className="min-w-0 text-xs text-copy-secondary">
                     <TaskPart
                       part={part}
@@ -151,10 +163,8 @@ function TaskPart({
 /**
  * The model's own thinking, behind a disclosure inside its task.
  *
- * Collapsed by default and on every run: this is the provider's curated
- * summary, which is worth having but is not what the panel is for. Collapsed
- * is also what keeps `ui-context.md`'s rule true — raw provider chain of
- * thought is never displayed, only curated summaries, and only on request.
+ * Curated summaries open while streaming, then return to a disclosure when
+ * the run settles. Raw provider chain of thought never enters this component.
  *
  * Rendered through `Response` because the provider writes markdown: headings,
  * lists and emphasis arrive in the summaries and would otherwise show as
@@ -167,23 +177,24 @@ function ThinkingDisclosure({
   part: AiTimelinePart
   isStreaming: boolean
 }) {
-  // Deltas only arrive while the run is live *and* this is the part they are
-  // arriving into. A part the model has moved on from is revealed whole.
-  const text = useSmoothText(part.text, !isStreaming)
-
   return (
-    <Reasoning defaultOpen={false} isStreaming={isStreaming} className="mb-0">
-      <ReasoningTrigger className="min-h-8 rounded-lg text-xs font-medium text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30">
-        Thought process
-        {isStreaming ? <span className="sr-only">Thinking</span> : null}
+    <Reasoning defaultOpen={isStreaming} isStreaming={isStreaming} className="mb-0">
+      <ReasoningTrigger className="min-h-8 rounded-lg px-1 text-xs font-medium text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30">
+        <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+        {isStreaming ? (
+          <>
+            <Shimmer as="span" className="motion-reduce:text-copy-secondary">Thinking</Shimmer>
+            <span className="sr-only">Thought process</span>
+          </>
+        ) : "Thought process"}
         <ChevronDown aria-hidden className="size-3.5 shrink-0" />
       </ReasoningTrigger>
       <CollapsibleContent className="motion-reduce:animate-none">
         <Response
           isStreaming={isStreaming}
-          className="pt-1 text-xs leading-relaxed text-copy-muted"
+          className="mt-1 rounded-lg bg-elevated/40 px-2.5 py-2 text-xs leading-relaxed text-copy-secondary"
         >
-          {text}
+          {part.text}
         </Response>
       </CollapsibleContent>
     </Reasoning>

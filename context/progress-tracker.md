@@ -8,6 +8,14 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- AI Elements migration Task 3 uses Task rows for saved run activity, Shimmer
+  for the one active title, and a closed Reasoning disclosure for validated
+  summaries. The reasoning body still uses Truss's safe Response renderer.
+  Stale runs retain their partial work and say "Work stopped before completion";
+  failed runs keep separate wording. Focused task/UI checks, typecheck, lint,
+  and production build pass. The browser remains unavailable for a signed-in
+  keyboard and second-client check. Markdown parity is the next gate.
+
 - AI Elements migration Task 2 uses the registry Message and MessageContent
   framing for shared prompts and answers while preserving identity, ordered
   messages, activity, and attachments. The existing viewport now has a labeled

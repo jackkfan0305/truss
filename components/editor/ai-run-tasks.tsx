@@ -1,9 +1,12 @@
 "use client"
 
-import { BrainCircuit, CircleStop, CircleX, TerminalSquare } from "lucide-react"
+import { Check, ChevronDown, CircleStop, CircleX, Loader2, TerminalSquare } from "lucide-react"
 
 import { Response } from "@/components/chat/response"
-import { Task } from "@/components/chat/task"
+import { Reasoning, ReasoningTrigger } from "@/components/ai-elements/reasoning-frame"
+import { Shimmer } from "@/components/ai-elements/shimmer"
+import { Task, TaskContent, TaskItem, TaskItemFile, TaskTrigger } from "@/components/ai-elements/task"
+import { CollapsibleContent } from "@/components/ui/collapsible"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { AiTimelinePart } from "@/lib/ai-timeline"
 import { selectRunTaskGroups, type RunPhase } from "@/lib/run-task-groups"
@@ -50,30 +53,43 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
         const isLast = index === groups.length - 1
 
         return (
-          <Task.Root key={group.id}>
-            <Task.Trigger
+          <Task key={group.id} defaultOpen className="group/task">
+            <TaskTrigger
               title={group.title}
-              status={group.status}
-              isLive={isLive && isLast}
-              detail={
-                isLast && (state.phase === "error" || state.phase === "incomplete")
-                  ? outcomeWording(state.phase)
-                  : undefined
-              }
-            />
+              className="flex min-h-8 w-full items-center gap-2 rounded-lg py-1 text-left text-xs text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30"
+            >
+              {group.status === "running" ? <Loader2 aria-hidden className="size-3.5 shrink-0 motion-safe:animate-spin" /> : null}
+              {group.status === "complete" ? <Check aria-hidden className="size-3.5 shrink-0" /> : null}
+              {group.status === "error" ? <CircleX aria-hidden className="size-3.5 shrink-0" /> : null}
+              <span
+                role={isLive && isLast ? "status" : undefined}
+                aria-live={isLive && isLast ? "polite" : undefined}
+                className="min-w-0 flex-1"
+              >
+                {isLive && isLast ? (
+                  <Shimmer as="span" className="text-copy-secondary motion-reduce:text-copy-secondary">
+                    {group.title}
+                  </Shimmer>
+                ) : group.title}
+              </span>
+              {isLast && (state.phase === "error" || state.phase === "incomplete") ? (
+                <span className="text-copy-muted">{outcomeWording(state.phase)}</span>
+              ) : null}
+              <ChevronDown aria-hidden className="size-3.5 shrink-0 transition-transform group-data-[state=open]/task:rotate-180 motion-reduce:transition-none" />
+            </TaskTrigger>
             {group.parts.length > 0 ? (
-              <Task.Content>
+              <TaskContent className="motion-reduce:animate-none [&>div]:mt-0 [&>div]:space-y-2 [&>div]:border-surface-border [&>div]:pl-6">
                 {group.parts.map((part) => (
-                  <Task.Item key={part.id}>
+                  <TaskItem key={part.id} className="min-w-0 text-xs text-copy-secondary">
                     <TaskPart
                       part={part}
                       isStreaming={part.id === streamingPartId}
                     />
-                  </Task.Item>
+                  </TaskItem>
                 ))}
-              </Task.Content>
+              </TaskContent>
             ) : null}
-          </Task.Root>
+          </Task>
         )
       })}
     </div>
@@ -122,7 +138,11 @@ function TaskPart({
       />
       <span className="flex min-w-0 flex-col">
         <code className="truncate font-mono text-copy-primary">{part.text}</code>
-        {part.detail ? <Task.File>{part.detail}</Task.File> : null}
+        {part.detail ? (
+          <TaskItemFile className="mt-0.5 w-fit max-w-full border-surface-border bg-page font-mono wrap-anywhere text-copy-secondary">
+            {part.detail}
+          </TaskItemFile>
+        ) : null}
       </span>
     </span>
   )
@@ -152,17 +172,20 @@ function ThinkingDisclosure({
   const text = useSmoothText(part.text, !isStreaming)
 
   return (
-    <details className="group/thought">
-      <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg text-xs font-medium text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30 [&::-webkit-details-marker]:hidden">
-        <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
-        {isStreaming ? "Thinking" : "Thought process"}
-      </summary>
-      <Response
-        isStreaming={isStreaming}
-        className="pt-1 text-xs leading-relaxed text-copy-muted"
-      >
-        {text}
-      </Response>
-    </details>
+    <Reasoning defaultOpen={false} isStreaming={isStreaming} className="mb-0">
+      <ReasoningTrigger className="min-h-8 rounded-lg text-xs font-medium text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30">
+        Thought process
+        {isStreaming ? <span className="sr-only">Thinking</span> : null}
+        <ChevronDown aria-hidden className="size-3.5 shrink-0" />
+      </ReasoningTrigger>
+      <CollapsibleContent className="motion-reduce:animate-none">
+        <Response
+          isStreaming={isStreaming}
+          className="pt-1 text-xs leading-relaxed text-copy-muted"
+        >
+          {text}
+        </Response>
+      </CollapsibleContent>
+    </Reasoning>
   )
 }

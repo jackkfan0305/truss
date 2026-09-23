@@ -16,7 +16,7 @@ import { AiChatTranscript } from "../components/editor/ai-chat-transcript";
 import { ChatEntry } from "../components/editor/chat-entry";
 import { ManualSpecCopyFallback } from "../components/editor/spec-attachment";
 import type { DesignRunObserverProps } from "../components/editor/design-run-observer";
-import type { ChatMessage } from "../lib/ai-chat";
+import { resolveAiChatRunPhase, type ChatMessage } from "../lib/ai-chat";
 
 const collaboratorMessage: ChatMessage = {
   id: "chat-collaborator",
@@ -183,8 +183,8 @@ function checkOnlyTheNewestThoughtIsStillThinking() {
   );
   assert.equal(
     html.match(/Thought process/g)?.length,
-    1,
-    "and the one before it has settled",
+    2,
+    "both saved summaries retain their disclosure labels",
   );
 
   // A step arriving after a thought settles it, even though the step itself is
@@ -230,19 +230,31 @@ const TASK_RUN: AiRunTasksState = {
 function checkEachStepBecomesATask() {
   const html = renderEntry(<AiRunTasks state={TASK_RUN} />);
 
+  assert.match(html, /data-slot="collapsible"/, "AI Elements Task frames the work log");
   assert.ok(html.includes("Reading the canvas"), "the first step is a task");
   assert.ok(html.includes("Applying to the canvas"), "the second step is a task");
   assert.ok(html.includes("addNode"), "an operation lands under its step");
+  assert.match(html, /border-surface-border[^>]*>Queue/, "an action detail remains a file chip");
+  assert.match(html, /aria-expanded="false"[^>]*>Thought process/, "curated reasoning starts closed");
   assert.ok(
     !html.includes("design.md"),
     "an artifact is attached to the message, not to a step",
   );
 }
 
+function checkStaleRunKeepsStoppedWording() {
+  const phase = resolveAiChatRunPhase("running", 1_000, 316_001);
+  const html = renderEntry(<AiRunTasks state={{ ...TASK_RUN, phase }} />);
+
+  assert.match(html, /Work stopped before completion/);
+  assert.doesNotMatch(html, /Generation failed/);
+  assert.doesNotMatch(html, /aria-live="polite"/);
+}
+
 /** Tasks stay open: the steps are the record of what happened to the canvas. */
 function checkTasksDefaultToOpen() {
   const html = renderEntry(<AiRunTasks state={TASK_RUN} />);
-  const open = html.match(/<details open/g) ?? [];
+  const open = html.match(/data-open="" data-slot="collapsible"/g) ?? [];
 
   assert.equal(open.length, 2, "every task starts open");
 }
@@ -514,6 +526,7 @@ checkConversationKeepsSharedMessageCues();
 checkIncompleteRunKeepsItsPartialWork();
 checkOnlyTheNewestThoughtIsStillThinking();
 checkEachStepBecomesATask();
+checkStaleRunKeepsStoppedWording();
 checkTasksDefaultToOpen();
 checkExactlyOneElementAnnouncesTheStep();
 checkAFinishedRunAnnouncesNothing();

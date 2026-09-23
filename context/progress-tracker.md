@@ -23,6 +23,10 @@ Update this file whenever the current phase, active feature, or implementation s
   needs browser access. `npm run verify:unit`, `npm run typecheck`,
   `npm run lint`, and `npm run build` all exit 0. Lint retains one warning in
   the generic registry ModelSelectorLogo image helper.
+  The final review also found and fixed collaborator bubble alignment, a
+  pagination jump when new tokens append during history loading, and automatic
+  follow reclaiming the viewport after PageUp or a scrollbar interaction.
+  Focused markup and scroll regressions cover these cases.
 
 - AI Elements migration Task 4 kept Truss's Response renderer for assistant
   answers, curated reasoning, and spec previews. A direct MessageResponse

@@ -83,6 +83,7 @@ async function main() {
     }));
   });
   assert.deepEqual(submitted, ["Build a queue"], "Enter sends the current text once");
+  assert.equal(textarea.value, "Build a queue", "a failed send can keep the controlled draft visible");
 
   await act(async () => root.unmount());
   dom.window.close();

@@ -67,20 +67,44 @@ async function main() {
   assert.ok(viewport)
   assert.ok(button)
   let height = 600
+  const anchor = container.querySelector<HTMLElement>('[data-chat-message-id="middle"]')
+  assert.ok(anchor)
+  let anchorTop = 100
+  anchor.getBoundingClientRect = () => ({ top: anchorTop }) as DOMRect
   Object.defineProperty(viewport, "scrollHeight", { get: () => height })
   Object.defineProperty(viewport, "clientHeight", { get: () => 200 })
+  viewport.scrollTop = 400
+  await act(async () => viewport.dispatchEvent(new dom.window.Event("scroll", { bubbles: true })))
   viewport.scrollTop = 120
-  await act(async () => viewport.dispatchEvent(new dom.window.WheelEvent("wheel", {
-    bubbles: true,
-    deltaY: -40,
-  })))
 
   await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })))
   assert.equal(fetched, 1)
-  height = 780
+  height = 820 // Older rows add 180px while a streaming answer appends 40px.
+  anchorTop = 280
   messages = [message("oldest", 1), ...messages]
   await act(async () => root.render(render()))
   assert.equal(viewport.scrollTop, 300, "prepending history preserves the visible offset")
+
+  viewport.scrollTop = 620
+  await act(async () => viewport.dispatchEvent(new dom.window.Event("scroll", { bubbles: true })))
+  viewport.scrollTop = 120
+  await act(async () => viewport.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    key: "PageUp",
+  })))
+  height = 900
+  messages = [...messages, message("newer", 4)]
+  await act(async () => root.render(render()))
+  assert.equal(viewport.scrollTop, 120, "PageUp releases automatic follow")
+
+  viewport.scrollTop = 700
+  await act(async () => viewport.dispatchEvent(new dom.window.Event("scroll", { bubbles: true })))
+  viewport.scrollTop = 100
+  await act(async () => viewport.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true })))
+  height = 980
+  messages = [...messages, message("newest", 5)]
+  await act(async () => root.render(render()))
+  assert.equal(viewport.scrollTop, 100, "scrollbar interaction releases automatic follow")
 
   await act(async () => root.unmount())
   dom.window.close()

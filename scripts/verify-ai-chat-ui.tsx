@@ -63,6 +63,10 @@ function checkCollaboratorIdentityIsVisible() {
     "a collaborator uses the quiet left-side author rail",
   );
   assert.ok(html.includes("bg-elevated"), "human content stays on the elevated surface");
+  assert.ok(
+    html.includes("group-[.is-user]:ml-0"),
+    "a collaborator bubble stays aligned with its left identity rail",
+  );
 }
 
 function checkLegacyCollaboratorUsesInitials() {

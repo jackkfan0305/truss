@@ -36,7 +36,7 @@ export function ChatEntry({
 
   if (isAssistant) {
     return (
-      <li className="flex flex-col gap-2">
+      <li data-chat-message-id={message.id} className="flex flex-col gap-2">
         <span className="sr-only">Truss</span>
         <time className="sr-only" dateTime={timestamp}>
           Sent at {timestamp}
@@ -61,19 +61,19 @@ export function ChatEntry({
 
   if (!isOwn) {
     return (
-      <li className="flex items-start gap-2.5">
+      <li data-chat-message-id={message.id} className="flex items-start gap-2.5">
         <ChatAvatar
           name={message.senderName}
           avatar={message.senderAvatar ?? liveAvatar}
         />
-        <Message from="user" className="min-w-0 max-w-full flex-1">
+        <Message from="user" className="ml-0 min-w-0 max-w-full flex-1">
           <span className="mb-1.5 block text-xs font-medium text-copy-secondary">
             {message.senderName}
           </span>
           <time className="sr-only" dateTime={timestamp}>
             Sent at {timestamp}
           </time>
-          <MessageContent className="ml-0 w-fit rounded-2xl bg-elevated px-3 py-2.5 text-copy-primary dark:bg-elevated dark:text-copy-primary">
+          <MessageContent className="group-[.is-user]:ml-0 w-fit rounded-2xl bg-elevated px-3 py-2.5 text-copy-primary dark:bg-elevated dark:text-copy-primary">
             <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">{message.content}</p>
           </MessageContent>
         </Message>
@@ -82,7 +82,7 @@ export function ChatEntry({
   }
 
   return (
-    <li className="ml-6 flex flex-col gap-1.5">
+    <li data-chat-message-id={message.id} className="ml-6 flex flex-col gap-1.5">
       <span className="sr-only">You</span>
       <time className="sr-only" dateTime={timestamp}>
         Sent at {timestamp}

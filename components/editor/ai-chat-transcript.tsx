@@ -88,9 +88,8 @@ export function AiChatTranscript({
 }: AiChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const olderPageAnchor = useRef<{
-    firstMessageId: string | undefined
-    scrollHeight: number
-    scrollTop: number
+    element: HTMLElement
+    top: number
   } | null>(null)
   const shouldFollow = useRef(true)
   const [showJump, setShowJump] = useState(false)
@@ -167,10 +166,9 @@ export function AiChatTranscript({
     const anchor = olderPageAnchor.current
     const viewport = scrollRef.current
 
-    if (!anchor || !viewport || anchor.firstMessageId === firstMessageId) return
+    if (!anchor || !viewport || !anchor.element.isConnected) return
 
-    viewport.scrollTop =
-      anchor.scrollTop + viewport.scrollHeight - anchor.scrollHeight
+    viewport.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top
     olderPageAnchor.current = null
   }, [firstMessageId])
   const turnsByPrompt = useMemo(
@@ -246,11 +244,6 @@ export function AiChatTranscript({
     setShowJump(false)
   }, [isNearBottom])
 
-  const syncFollowToPosition = useCallback(() => {
-    shouldFollow.current = isNearBottom()
-    setShowJump(!shouldFollow.current)
-  }, [isNearBottom])
-
   const jumpToLatest = () => {
     const element = scrollRef.current
 
@@ -276,7 +269,18 @@ export function AiChatTranscript({
         onWheel={(event) => {
           if (event.deltaY < 0) releaseFollow()
         }}
-        onTouchMove={syncFollowToPosition}
+        onTouchMove={releaseFollow}
+        onPointerDown={releaseFollow}
+        onKeyDown={(event) => {
+          if (
+            event.key === "PageUp" ||
+            event.key === "ArrowUp" ||
+            event.key === "Home" ||
+            (event.key === " " && event.shiftKey)
+          ) {
+            releaseFollow()
+          }
+        }}
         onScroll={resumeFollowAtBottom}
         className="h-full overflow-y-auto overscroll-contain pr-1"
       >
@@ -292,13 +296,16 @@ export function AiChatTranscript({
                   size="sm"
                   disabled={isFetchingOlder}
                   onClick={() => {
+                    releaseFollow()
                     const viewport = scrollRef.current
+                    const element = viewport?.querySelector<HTMLElement>(
+                      "[data-chat-message-id]"
+                    )
 
-                    if (viewport) {
+                    if (element) {
                       olderPageAnchor.current = {
-                        firstMessageId,
-                        scrollHeight: viewport.scrollHeight,
-                        scrollTop: viewport.scrollTop,
+                        element,
+                        top: element.getBoundingClientRect().top,
                       }
                     }
 

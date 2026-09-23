@@ -8,6 +8,14 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- AI Elements migration Task 4 kept Truss's Response renderer for assistant
+  answers, curated reasoning, and spec previews. A direct MessageResponse
+  parity fixture passed raw HTML, unsafe-scheme, table, fence, partial text,
+  malformed-link, and long-answer checks, but a valid external link rendered
+  as a JavaScript button rather than an anchor with the required target and
+  rel attributes. The existing renderer and its sanitizer still pass their
+  checks. No partial Markdown migration was made; final integration is next.
+
 - AI Elements migration Task 3 uses Task rows for saved run activity, Shimmer
   for the one active title, and a closed Reasoning disclosure for validated
   summaries. The reasoning body still uses Truss's safe Response renderer.

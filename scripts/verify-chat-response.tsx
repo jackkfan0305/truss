@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { Response } from "../components/chat/response";
+import { AiRunTasks } from "../components/editor/ai-run-tasks";
 
 /**
  * `Response` replaced three `dangerouslySetInnerHTML` call sites, so these
@@ -41,10 +42,33 @@ function checkRawHtmlStaysVisibleText() {
 }
 
 function checkDangerousLinksAreNotAnchors() {
-  const html = render(<Response>{"[click](javascript:alert(1))"}</Response>);
+  const html = render(<Response>{"[click](javascript:alert(1)) [data](data:text/html,evil)"}</Response>);
 
   assert.ok(!html.includes("<a "), "a refused scheme never becomes an anchor");
   assert.ok(html.includes("click"), "its label survives as text");
+  assert.ok(html.includes("data"), "a data-link label survives as text");
+}
+
+function checkCuratedReasoningKeepsTheSameBoundary() {
+  const html = render(
+    <AiRunTasks state={{
+      id: "reasoning-safety",
+      runId: "run-safety",
+      phase: "complete",
+      activity: [
+        { id: "step", type: "step", text: "Reading the canvas" },
+        { id: "thought", type: "reasoning", text: "[unsafe](javascript:alert(1))" },
+      ],
+    }} />,
+  );
+  const source = readFileSync(
+    new URL("../components/editor/ai-run-tasks.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(html, /Thought process/);
+  assert.doesNotMatch(html, /href="javascript:/i);
+  assert.match(source, /<Response[\s\S]*?\{text\}/, "curated reasoning uses the safe renderer");
 }
 
 function checkRealLinksLeaveTheAppSafely() {
@@ -161,6 +185,7 @@ function checkTheChatPathHasNoRawHtmlSink() {
 checkProseRendersAsRealElements();
 checkRawHtmlStaysVisibleText();
 checkDangerousLinksAreNotAnchors();
+checkCuratedReasoningKeepsTheSameBoundary();
 checkRealLinksLeaveTheAppSafely();
 checkFencesBecomeCodeBlocks();
 checkTablesGetEvenColumns();

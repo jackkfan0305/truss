@@ -28,7 +28,8 @@ state that the working indicator and the running task already state in words.
   The initiating client retains a private Trigger subscription only to settle
   its own composer; the transcript does not require that token. Raw provider
   chain of thought is never displayed. Curated reasoning opens while it streams,
-  with a shimmering "Thinking" label and smoothly revealed text. Canvas edge
+  with a 20px thinking orb beside the shimmering "Thinking" label and smoothly
+  revealed text. The waiting state uses the same orb and label. Canvas edge
   operations remain in the durable record but stay out of the visible work log.
 - Model and thinking-effort controls are compact dropdowns in the composer.
 - Canvas operations remain visually pending until the run's atomic canvas

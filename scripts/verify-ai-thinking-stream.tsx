@@ -19,7 +19,12 @@ async function main() {
     configurable: true,
     value: dom.window.navigator,
   })
-  dom.window.matchMedia = () => ({ matches: false }) as MediaQueryList
+  dom.window.matchMedia = () => ({
+    matches: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }) as unknown as MediaQueryList
+  dom.window.HTMLCanvasElement.prototype.getContext = () => null
 
   let nextFrameId = 0
   const frames = new Map<number, FrameRequestCallback>()
@@ -51,9 +56,14 @@ async function main() {
     ],
   })
 
+  await act(async () => root.render(<AiRunTasks state={{ ...state(""), activity: [] }} />))
+  assert.match(container.textContent ?? "", /Thinking/)
+  assert.ok(container.querySelector('canvas[role="img"]'), "the waiting label has a thinking orb")
+
   await act(async () => root.render(<AiRunTasks state={state("I found three services.")} />))
   assert.match(container.innerHTML, /Thinking/)
   assert.match(container.innerHTML, /data-open="" data-slot="collapsible" class="not-prose/)
+  assert.ok(container.querySelector('button canvas[role="img"]'), "live reasoning has a thinking orb beside its label")
   await advanceFrame()
   assert.match(container.textContent ?? "", /I found/, "the first streaming frame reveals text")
 

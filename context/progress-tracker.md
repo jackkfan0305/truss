@@ -11,7 +11,8 @@ Update this file whenever the current phase, active feature, or implementation s
 - Sidebar streaming and control-density follow-up complete in code. The
   existing answer renderer streams text; curated reasoning now opens and
   reveals text as it arrives with a shimmering "Thinking" label. A thinking
-  placeholder appears before task activity begins. Edge add/delete actions
+  orb sits beside that label and the matching placeholder before task activity
+  begins. Edge add/delete actions
   stay in saved activity but are hidden from the visual task log. Model and
   effort use compact dropdowns in the composer. The earlier header removal
   and top-left close control remain. A live signed-in browser review is still

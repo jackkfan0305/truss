@@ -3,6 +3,7 @@
 import { BrainCircuit, Check, ChevronDown, CircleStop, CircleX, Loader2, TerminalSquare } from "lucide-react"
 
 import { Response } from "@/components/chat/response"
+import { ThinkingOrb } from "@/components/chat/thinking-orb"
 import { Reasoning, ReasoningTrigger } from "@/components/ai-elements/reasoning-frame"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Task, TaskContent, TaskItem, TaskItemFile, TaskTrigger } from "@/components/ai-elements/task"
@@ -44,7 +45,7 @@ export function AiRunTasks({ state }: { state: AiRunTasksState }) {
     if (isLive) {
       return (
         <p role="status" aria-live="polite" className="flex min-h-9 items-center gap-2 px-2 text-xs text-copy-secondary">
-          <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+          <ThinkingOrb state="working" size={20} label="" />
           <Shimmer as="span" className="motion-reduce:text-copy-secondary">Thinking</Shimmer>
         </p>
       )
@@ -180,7 +181,11 @@ function ThinkingDisclosure({
   return (
     <Reasoning defaultOpen={isStreaming} isStreaming={isStreaming} className="mb-0">
       <ReasoningTrigger className="min-h-8 rounded-lg px-1 text-xs font-medium text-copy-secondary outline-none focus-visible:ring-2 focus-visible:ring-copy-primary/30">
-        <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+        {isStreaming ? (
+          <ThinkingOrb state="working" size={20} label="" />
+        ) : (
+          <BrainCircuit aria-hidden className="size-3.5 shrink-0" />
+        )}
         {isStreaming ? (
           <>
             <Shimmer as="span" className="motion-reduce:text-copy-secondary">Thinking</Shimmer>

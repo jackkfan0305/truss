@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -86,6 +87,11 @@ export function AiChatTranscript({
   useCollaboratorsSource = useCollaborators,
 }: AiChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const olderPageAnchor = useRef<{
+    firstMessageId: string | undefined
+    scrollHeight: number
+    scrollTop: number
+  } | null>(null)
   const shouldFollow = useRef(true)
   const [showJump, setShowJump] = useState(false)
 
@@ -155,6 +161,18 @@ export function AiChatTranscript({
     []
   )
   const arrangedMessages = useMemo(() => arrangeAiChatMessages(messages), [messages])
+  const firstMessageId = arrangedMessages[0]?.id
+
+  useLayoutEffect(() => {
+    const anchor = olderPageAnchor.current
+    const viewport = scrollRef.current
+
+    if (!anchor || !viewport || anchor.firstMessageId === firstMessageId) return
+
+    viewport.scrollTop =
+      anchor.scrollTop + viewport.scrollHeight - anchor.scrollHeight
+    olderPageAnchor.current = null
+  }, [firstMessageId])
   const turnsByPrompt = useMemo(
     () => new Map(turns.map((turn) => [turn.promptMessageId, turn])),
     [turns]
@@ -252,6 +270,9 @@ export function AiChatTranscript({
     <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
+        role="log"
+        aria-label="AI conversation"
+        tabIndex={0}
         onWheel={(event) => {
           if (event.deltaY < 0) releaseFollow()
         }}
@@ -270,7 +291,19 @@ export function AiChatTranscript({
                   variant="ghost"
                   size="sm"
                   disabled={isFetchingOlder}
-                  onClick={onFetchOlder}
+                  onClick={() => {
+                    const viewport = scrollRef.current
+
+                    if (viewport) {
+                      olderPageAnchor.current = {
+                        firstMessageId,
+                        scrollHeight: viewport.scrollHeight,
+                        scrollTop: viewport.scrollTop,
+                      }
+                    }
+
+                    onFetchOlder()
+                  }}
                   className="min-h-11 text-xs text-copy-muted hover:bg-elevated hover:text-copy-primary"
                 >
                   {isFetchingOlder ? (

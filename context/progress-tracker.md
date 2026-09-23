@@ -8,6 +8,16 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- AI Elements migration Task 2 uses the registry Message and MessageContent
+  framing for shared prompts and answers while preserving identity, ordered
+  messages, activity, and attachments. The existing viewport now has a labeled
+  log role and keyboard focus, and loading an older page restores the reader's
+  scroll offset. The in-app browser reported no available browser, so the
+  planned signed-in scroll test could not run. AI Elements Conversation remains
+  installed but is not active until its scroll behavior can be verified.
+  Markup, a jsdom history-offset check, typecheck, lint, and production build
+  pass. Work-log migration is next.
+
 - AI Elements migration Task 1 complete in code. `AiChatComposer` composes the
   registry Prompt Input with the existing Border Beam and drives the existing
   sidebar submission callback. `AiInputSettings` uses AI Elements Model

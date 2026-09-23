@@ -3,6 +3,7 @@ import Image from "next/image"
 import { getInitials } from "@/lib/presence"
 import type { ChatMessage } from "@/lib/ai-chat"
 import { Response } from "@/components/chat/response"
+import { Message, MessageContent } from "@/components/ai-elements/message-frame"
 
 interface ChatEntryProps {
   message: ChatMessage
@@ -40,15 +41,19 @@ export function ChatEntry({
         <time className="sr-only" dateTime={timestamp}>
           Sent at {timestamp}
         </time>
-        {activity}
-        {message.content ? (
-          <Response
-            className="text-sm leading-relaxed text-copy-primary"
-            isStreaming={isStreaming}
-          >
-            {message.content}
-          </Response>
-        ) : null}
+        <Message from="assistant" className="max-w-full gap-2">
+          <MessageContent className="w-full max-w-full gap-2 overflow-visible">
+            {activity}
+            {message.content ? (
+              <Response
+                className="text-sm leading-relaxed text-copy-primary"
+                isStreaming={isStreaming}
+              >
+                {message.content}
+              </Response>
+            ) : null}
+          </MessageContent>
+        </Message>
         {attachments}
       </li>
     )
@@ -61,17 +66,17 @@ export function ChatEntry({
           name={message.senderName}
           avatar={message.senderAvatar ?? liveAvatar}
         />
-        <div className="min-w-0 flex-1">
+        <Message from="user" className="min-w-0 max-w-full flex-1">
           <span className="mb-1.5 block text-xs font-medium text-copy-secondary">
             {message.senderName}
           </span>
           <time className="sr-only" dateTime={timestamp}>
             Sent at {timestamp}
           </time>
-          <p className="whitespace-pre-wrap wrap-anywhere rounded-2xl bg-elevated px-3 py-2.5 text-sm leading-relaxed text-copy-primary">
-            {message.content}
-          </p>
-        </div>
+          <MessageContent className="ml-0 w-fit rounded-2xl bg-elevated px-3 py-2.5 text-copy-primary dark:bg-elevated dark:text-copy-primary">
+            <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">{message.content}</p>
+          </MessageContent>
+        </Message>
       </li>
     )
   }
@@ -82,9 +87,11 @@ export function ChatEntry({
       <time className="sr-only" dateTime={timestamp}>
         Sent at {timestamp}
       </time>
-      <p className="whitespace-pre-wrap wrap-anywhere rounded-2xl bg-elevated px-3 py-2 text-sm leading-relaxed text-copy-primary">
-        {message.content}
-      </p>
+      <Message from="user" className="max-w-full">
+        <MessageContent className="w-fit rounded-2xl bg-elevated px-3 py-2 text-copy-primary dark:bg-elevated dark:text-copy-primary">
+          <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">{message.content}</p>
+        </MessageContent>
+      </Message>
     </li>
   )
 }

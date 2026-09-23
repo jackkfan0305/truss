@@ -104,6 +104,31 @@ function checkOwnPromptStaysQuiet() {
   );
 }
 
+function checkConversationKeepsSharedMessageCues() {
+  const html = renderEntry(
+    <AiChatTranscript
+      messages={[collaboratorMessage]}
+      selfId="user_ada"
+      turns={[]}
+      status={null}
+      isRoomActive={false}
+      projectId="checkout-flow-a1b2"
+      emptyState={<p>No messages yet</p>}
+      subscription={null}
+      onRunSettled={() => undefined}
+      hasOlderMessages
+      isFetchingOlder={false}
+      onFetchOlder={() => undefined}
+      useCollaboratorsSource={() => []}
+    />,
+  );
+
+  assert.match(html, /role="log"/, "the conversation is a labeled log");
+  assert.match(html, /Grace Hopper/, "the collaborator identity survives");
+  assert.match(html, /Load older messages/, "history remains reachable");
+  assert.match(html, /<ol\b/, "the transcript keeps ordered-list semantics");
+}
+
 /** A stale snapshot must state that work stopped without discarding its ledger. */
 function checkIncompleteRunKeepsItsPartialWork() {
   const incomplete: AiRunTasksState = {
@@ -485,6 +510,7 @@ checkCollaboratorIdentityIsVisible();
 checkLegacyCollaboratorUsesInitials();
 checkLegacyCollaboratorUsesLivePresenceAvatar();
 checkOwnPromptStaysQuiet();
+checkConversationKeepsSharedMessageCues();
 checkIncompleteRunKeepsItsPartialWork();
 checkOnlyTheNewestThoughtIsStillThinking();
 checkEachStepBecomesATask();

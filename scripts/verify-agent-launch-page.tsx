@@ -528,7 +528,7 @@ async function checkHydrationGate(): Promise<void> {
       assert.equal(clerkMounts, 1, `${pathname} mounts Clerk after a storage getter failure`);
       assert.equal(
         storageFailureDom.window.document.body.textContent?.includes(
-          "Preparing your diagram request.",
+          "Preparing your diagram request",
         ) ?? false,
         false,
         `${pathname} cannot remain on the capture status`,

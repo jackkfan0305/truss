@@ -8,6 +8,15 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Editor UI polish merged onto main (2026-09-24). `TrussLoader` replaces
+  the text-only app boot, canvas connect and agent entry states and backs
+  `app/editor/[roomId]/loading.tsx`. The diagrams sidebar and the top chips
+  share a solid `bg-elevated` surface, the sidebar slides on `ease-smooth-out`
+  (400ms open, 350ms close), its toggle is a plain Hugeicons button that rides
+  with the panel, and diagram row actions reveal on hover. Agent pages show a
+  check when done. This branch's AI chat overhaul and its in-route
+  orchestrator were dropped in the merge, per ADR 0001 (#39).
+
 - PR review fixes applied: storyboard owners can read every diagram on their
   storyboard, the editor only exposes Share to storyboard owners, member-list
   fetches cancel stale effect runs without nested state updates, and independent

@@ -93,8 +93,9 @@ shadcn/ui on top of Tailwind. No custom design system. Components live in `compo
 ## Layout Patterns
 
 - Editor workspace: full-viewport canvas or editor-home background with floating control islands and floating sidebar overlays.
-- Floating controls: left diagrams toggle plus diagram title and a minimal utility group. Use existing shadcn primitives and semantic surface tokens.
-- Sidebars: floating overlays below the control row, with dark semi-transparent backgrounds and subtle borders.
+- Floating controls: left diagrams toggle plus diagram title and a minimal utility group. The toggle is a plain ghost icon button (Hugeicons `SidebarLeftIcon`, one glyph for open and closed) that slides with its panel on a transform. The title and utility chips use the sidebar's solid `bg-elevated` surface at 40px tall; thin dividers split the utility chip into save state, actions and people. Use existing shadcn primitives and semantic surface tokens.
+- Sidebars: floating overlays below the control row, on a solid `bg-elevated` surface with a subtle border. They slide on `ease-smooth-out`, 400ms open and 350ms close. Diagram row rename/delete actions appear on hover or focus, and always show on touch screens.
+- Loading: full-screen and canvas loading states use `TrussLoader`, a truss triangle that draws itself edge by edge (keyframes in `app/globals.css`). Under reduced motion it shows the finished triangle and only fades in and out. The agent entry pages (`/agent/new`, `/agent/link`, `/agent/pick`) use it for every working and redirecting state, `AgentDoneStatus` (a check in a ring) when finished, and `components/agent/agent-status.tsx` card and button styles for decisions and failures.
 - On narrow screens, the utility group moves to a second right-aligned floating row so the title and the sidebar toggle remain unobstructed.
 
 ## Icons

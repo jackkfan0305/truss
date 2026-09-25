@@ -5,10 +5,7 @@ import { jsonError } from "@/lib/api-requests";
 import type { DesignContext } from "@/types/canvas";
 
 export interface AgentGraphReadDependencies {
-  authorizeDiagram: (
-    diagramId: string,
-    options: { requireOwner: true },
-  ) => Promise<Authorization>;
+  authorizeDiagram: (diagramId: string) => Promise<Authorization>;
   readCanvas: (roomId: string) => Promise<DesignContext>;
 }
 
@@ -32,9 +29,7 @@ export async function handleAgentGraphGet(
   diagramId: string,
   dependencies: AgentGraphReadDependencies,
 ): Promise<Response> {
-  const access = await dependencies.authorizeDiagram(diagramId, {
-    requireOwner: true,
-  });
+  const access = await dependencies.authorizeDiagram(diagramId);
 
   if (!access.ok) {
     return access.response;

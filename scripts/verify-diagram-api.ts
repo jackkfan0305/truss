@@ -153,9 +153,7 @@ function agentGraphDependencies(
   return {
     authorizeDiagram: async () => ({
       ok: true,
-      role: "owner",
       userId: "user-owner",
-      ownerId: "user-owner",
     }),
     readCanvas: async () => ({ nodes: [agentGraphNode("web")], edges: [] }),
     ...overrides,

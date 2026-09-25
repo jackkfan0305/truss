@@ -148,7 +148,7 @@ export async function handleAgentGraphEditPost(
   diagramId: string,
   dependencies: AgentGraphEditDependencies,
 ): Promise<Response> {
-  const access = await dependencies.authorizeDiagram(diagramId, { requireOwner: true });
+  const access = await dependencies.authorizeDiagram(diagramId);
 
   if (!access.ok) {
     return access.response;

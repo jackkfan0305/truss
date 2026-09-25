@@ -4,18 +4,10 @@
  * `getCurrentIdentity` in `lib/access.ts` and `authorizeDiagram` in
  * `lib/diagram-access.ts` route through this module.
  *
- * Resolution is split into a cheap step (`resolveIdentitySource`, no Clerk API
- * call) and a lazy one (`resolveIdentityEmail`, one Clerk call). This mirrors
- * `authorizeDiagram`'s existing "only now is the email worth a second Clerk
- * call" laziness: the owner path — which `GET agent-graph` and
- * `POST agent-graph-edit` always take, being owner-only — must stay one DB
- * lookup with no Clerk round trip at all, whether the caller authenticated
- * with a cookie or a bearer token. `resolveIdentity` composes both steps for
- * callers (`getCurrentIdentity`, page loads) that need the full identity,
- * email included, immediately.
+ * Resolution never calls the Clerk API beyond `auth()`.
  */
 
-import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 
 import type { Identity } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
@@ -84,35 +76,9 @@ export async function resolveIdentitySource(request?: Request): Promise<Identity
   return userId ? { kind: "session", userId } : null;
 }
 
-/**
- * The Clerk call `authorizeDiagram` defers until a collaborator check is
- * actually reached. A bearer identity has no local email store — `AgentToken`
- * only records `ownerId` — so `DiagramCollaborator`'s email key means this
- * call cannot be skipped once it *is* needed, only deferred.
- */
-export async function resolveIdentityEmail(source: IdentitySource): Promise<string | null> {
-  if (source.kind === "session") {
-    const user = await currentUser();
-    return user?.primaryEmailAddress?.emailAddress ?? null;
-  }
-
-  try {
-    const client = await clerkClient();
-    const user = await client.users.getUser(source.userId);
-    return user.primaryEmailAddress?.emailAddress ?? null;
-  } catch (error) {
-    console.error(`Clerk lookup failed for agent token owner ${source.userId}`, error);
-    return null;
-  }
-}
-
-/** Full identity, email included. `null` when signed out and no valid bearer token is present. */
+/** `null` when signed out and no valid bearer token is present. */
 export async function resolveIdentity(request?: Request): Promise<Identity | null> {
   const source = await resolveIdentitySource(request);
 
-  if (!source) {
-    return null;
-  }
-
-  return { userId: source.userId, email: await resolveIdentityEmail(source) };
+  return source ? { userId: source.userId } : null;
 }

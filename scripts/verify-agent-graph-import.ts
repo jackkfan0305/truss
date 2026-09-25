@@ -73,9 +73,7 @@ function createDependencies(
     dependencies: {
       authorizeDiagram: async () => ({
         ok: true,
-        role: "owner",
         userId: "user-owner",
-        ownerId: "user-owner",
       }),
       mutateFlow: async (_diagramId, callback) => {
         mutationCount += 1;

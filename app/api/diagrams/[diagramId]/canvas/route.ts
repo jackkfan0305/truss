@@ -18,10 +18,6 @@ interface RouteParams {
 /**
  * Canvas persistence (21-canvas-autosave). Prisma keeps the pointer, Vercel Blob
  * keeps the JSON — the storage split in `context/architecture-context.md`.
- *
- * Both handlers are `requireOwner: false`: a collaborator edits the canvas, so a
- * collaborator must be able to save it. Owner-only here would mean their work
- * silently stopped persisting.
  */
 
 /**
@@ -29,8 +25,8 @@ interface RouteParams {
  * access, so every call has to say so — `access: "public"` is rejected outright
  * rather than silently downgraded, and a private blob's URL is not fetchable
  * without the token. That is the right shape for canvas data anyway: a diagram
- * is private to its owner and collaborators, and a public blob URL would be an
- * unauthenticated read of the whole diagram by anyone holding the link.
+ * is private to its owner, and a public blob URL would be an unauthenticated read
+ * of the whole diagram by anyone holding the link.
  */
 const BLOB_ACCESS = "private" as const;
 
@@ -40,7 +36,7 @@ export async function PUT(
 ): Promise<Response> {
   const { diagramId } = await params;
 
-  const access = await authorizeDiagram(request, diagramId, { requireOwner: false });
+  const access = await authorizeDiagram(request, diagramId);
 
   if (!access.ok) {
     return access.response;
@@ -75,7 +71,7 @@ export async function GET(
 ): Promise<Response> {
   const { diagramId } = await params;
 
-  const access = await authorizeDiagram(request, diagramId, { requireOwner: false });
+  const access = await authorizeDiagram(request, diagramId);
 
   if (!access.ok) {
     return access.response;

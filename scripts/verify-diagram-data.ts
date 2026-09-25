@@ -9,7 +9,7 @@ import {
   cleanupTombstonedRoom,
   deleteDiagramResources,
 } from "../lib/diagram-lifecycle";
-import { getOwnedDiagrams, getSharedDiagrams } from "../lib/diagrams";
+import { getOwnedDiagrams } from "../lib/diagrams";
 import { buildRoomId } from "../lib/room-id";
 
 /**
@@ -30,11 +30,8 @@ const UNIQUE_VIOLATION = "P2002";
 
 const OWNER_ID = "verify_owner";
 const OTHER_OWNER_ID = "verify_other_owner";
-const COLLABORATOR_EMAIL = "Collaborator@Example.com";
 
 const OWNER_BOARD_ID = "verify-owner-board";
-const SHARED_BOARD_ID = "verify-shared-board";
-const UNRELATED_BOARD_ID = "verify-unrelated-board";
 
 async function seed() {
   await cleanup();
@@ -44,9 +41,6 @@ async function seed() {
       id: OWNER_BOARD_ID,
       ownerId: OWNER_ID,
       name: "Owner Board",
-      // The owner invited themselves: they must not show up as a collaborator
-      // on their own diagrams, which would list them twice.
-      collaborators: { create: { email: COLLABORATOR_EMAIL } },
       diagrams: {
         create: [
           { id: "verify-owned-one", ownerId: OWNER_ID, name: "Owned One" },
@@ -56,46 +50,20 @@ async function seed() {
     },
   });
 
-  // A diagram with no storyboard at all — the shape every agent-created one
-  // starts in, and the one this split exists to make valid.
+  // A diagram with no storyboard at all: the shape every agent-created one
+  // starts in.
+  await prisma.diagram.create({
+    data: { id: "verify-standalone", ownerId: OWNER_ID, name: "Standalone" },
+  });
+
+  // Owning the board is not owning the diagram. With collaborators gone, the
+  // diagram's own ownerId is the only thing that grants access.
   await prisma.diagram.create({
     data: {
-      id: "verify-standalone",
-      ownerId: OWNER_ID,
-      name: "Standalone",
-    },
-  });
-
-  await prisma.storyboard.create({
-    data: {
-      id: SHARED_BOARD_ID,
+      id: "verify-foreign-on-owner-board",
       ownerId: OTHER_OWNER_ID,
-      name: "Shared Board",
-      // Stored in a different case than Clerk reports it.
-      collaborators: { create: { email: COLLABORATOR_EMAIL.toUpperCase() } },
-      diagrams: {
-        create: {
-          id: "verify-shared",
-          ownerId: OTHER_OWNER_ID,
-          name: "Shared With Me",
-        },
-      },
-    },
-  });
-
-  await prisma.storyboard.create({
-    data: {
-      id: UNRELATED_BOARD_ID,
-      ownerId: OTHER_OWNER_ID,
-      name: "Unrelated Board",
-      collaborators: { create: { email: "someone-else@example.com" } },
-      diagrams: {
-        create: {
-          id: "verify-unrelated",
-          ownerId: OTHER_OWNER_ID,
-          name: "Not Mine",
-        },
-      },
+      name: "Foreign",
+      storyboardId: OWNER_BOARD_ID,
     },
   });
 }
@@ -237,22 +205,9 @@ async function checkCleanupFailureLeavesTombstone() {
   );
 }
 
-async function checkStoryboardKeepsItsCollaborators() {
-  assert.equal(
-    await prisma.storyboardCollaborator.count({
-      where: { storyboardId: OWNER_BOARD_ID },
-    }),
-    1,
-    "deleting one diagram must not strip its board of collaborators",
-  );
-}
-
 async function checkTombstoneIsHiddenAndReserved() {
   assert.equal(
-    await getAccessibleDiagram(CLEANUP_DIAGRAM_ID, {
-      userId: OWNER_ID,
-      email: null,
-    }),
+    await getAccessibleDiagram(CLEANUP_DIAGRAM_ID, { userId: OWNER_ID }),
     null,
     "a deleting diagram must not remain accessible",
   );
@@ -335,197 +290,42 @@ async function checkDiagramResourceDeletion() {
   await checkMissingDiagramPreservesRoom();
   await seedCleanupFailureDiagram();
   await checkCleanupFailureLeavesTombstone();
-  await checkStoryboardKeepsItsCollaborators();
   await checkTombstoneIsHiddenAndReserved();
   await checkAuthFenceCleansTombstone();
   await checkDeletionRetryFinalizesTombstone();
 }
 
-/**
- * The `/editor/[roomId]` gate. Everything that is not owner-or-collaborator must
- * come back `null`, including a diagram that does not exist.
- */
 async function checkDiagramAccess() {
-  const owner = { userId: OWNER_ID, email: "owner@example.com" };
-  const collaborator = {
-    userId: "verify_collaborator",
-    // Clerk reports the address as typed; the row was stored uppercased.
-    email: COLLABORATOR_EMAIL.toLowerCase(),
-  };
-  const stranger = { userId: "verify_stranger", email: "stranger@example.com" };
+  const owner = { userId: OWNER_ID };
+  const stranger = { userId: OTHER_OWNER_ID };
 
   assert.deepEqual(
     await getAccessibleDiagram("verify-owned-one", owner),
-    {
-      id: "verify-owned-one",
-      name: "Owned One",
-      isOwner: true,
-      storyboardId: OWNER_BOARD_ID,
-      ownsStoryboard: true,
-    },
-    "the owner should reach their own diagram, with the board sharing hangs off",
+    { id: "verify-owned-one", name: "Owned One" },
+    "the owner opens their own diagram",
   );
-
   assert.deepEqual(
     await getAccessibleDiagram("verify-standalone", owner),
-    {
-      id: "verify-standalone",
-      name: "Standalone",
-      isOwner: true,
-      storyboardId: null,
-      ownsStoryboard: false,
-    },
-    "a diagram with no parent storyboard is still a valid, readable diagram",
+    { id: "verify-standalone", name: "Standalone" },
+    "a standalone diagram opens for its owner",
   );
-
-  assert.deepEqual(
-    await getAccessibleDiagram("verify-shared", collaborator),
-    {
-      id: "verify-shared",
-      name: "Shared With Me",
-      isOwner: false,
-      storyboardId: SHARED_BOARD_ID,
-      ownsStoryboard: false,
-    },
-    "a collaborator on the parent board reaches the diagram despite email casing",
-  );
-
-  // Owning a diagram is not owning the board it sits on, and only the latter
-  // may invite. The share dialog gates on `ownsStoryboard` for exactly this.
-  await prisma.diagram.update({
-    where: { id: "verify-standalone" },
-    data: { storyboardId: SHARED_BOARD_ID },
-  });
-  assert.deepEqual(
-    await getAccessibleDiagram("verify-standalone", owner),
-    {
-      id: "verify-standalone",
-      name: "Standalone",
-      isOwner: true,
-      storyboardId: SHARED_BOARD_ID,
-      ownsStoryboard: false,
-    },
-    "a diagram you own on a board you do not own must not report storyboard ownership",
-  );
-  assert.deepEqual(
-    await getAccessibleDiagram("verify-standalone", {
-      userId: OTHER_OWNER_ID,
-      email: null,
-    }),
-    {
-      id: "verify-standalone",
-      name: "Standalone",
-      isOwner: false,
-      storyboardId: SHARED_BOARD_ID,
-      ownsStoryboard: true,
-    },
-    "the storyboard owner should reach a diagram owned by another user",
-  );
-  assert.deepEqual(
-    await getSharedDiagrams({ userId: OTHER_OWNER_ID, email: null }),
-    [{ id: "verify-standalone", name: "Standalone" }],
-    "the storyboard owner should see every diagram on their board",
-  );
-  await prisma.diagram.update({
-    where: { id: "verify-standalone" },
-    data: { storyboardId: null },
-  });
-
   assert.equal(
-    await getAccessibleDiagram("verify-standalone", collaborator),
+    await getAccessibleDiagram("verify-owned-one", stranger),
     null,
-    "a standalone diagram has no collaborator list, so it is owner-only",
+    "nobody else opens a diagram, whatever board it sits on",
   );
-
   assert.equal(
-    await getAccessibleDiagram("verify-shared", stranger),
+    await getAccessibleDiagram("verify-foreign-on-owner-board", owner),
     null,
-    "a signed-in stranger must not reach someone else's diagram",
+    "owning the storyboard does not open a diagram someone else owns",
   );
-
-  assert.equal(
-    await getAccessibleDiagram("verify-shared", {
-      userId: collaborator.userId,
-      email: null,
-    }),
-    null,
-    "no primary email means no collaborator access",
-  );
-
   assert.equal(
     await getAccessibleDiagram("verify-does-not-exist", owner),
     null,
-    "an unknown diagram ID is indistinguishable from a forbidden one",
-  );
-
-  assert.equal(
-    await getAccessibleDiagram("verify-unrelated", collaborator),
-    null,
-    "being a collaborator elsewhere grants nothing here",
+    "an unknown diagram answers the same null as a foreign one",
   );
 }
 
-/**
- * The invite/remove writes behind the share dialog. The duplicate rule and the
- * storyboard-scoped delete are enforced by the schema and the query, not by
- * types.
- */
-async function checkCollaboratorMutations() {
-  const invited = await prisma.storyboardCollaborator.create({
-    data: { storyboardId: OWNER_BOARD_ID, email: "teammate@example.com" },
-  });
-
-  await assert.rejects(
-    prisma.storyboardCollaborator.create({
-      data: { storyboardId: OWNER_BOARD_ID, email: "teammate@example.com" },
-    }),
-    (error: unknown) =>
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === UNIQUE_VIOLATION,
-    "inviting the same email twice must raise P2002 so the route answers 409",
-  );
-
-  // Same email, different storyboard: allowed.
-  await prisma.storyboardCollaborator.create({
-    data: { storyboardId: UNRELATED_BOARD_ID, email: "teammate@example.com" },
-  });
-
-  // The DELETE handler scopes by storyboardId as well as id. Without that
-  // scope this call would succeed and let an owner delete another board's row.
-  assert.equal(
-    (
-      await prisma.storyboardCollaborator.deleteMany({
-        where: { id: invited.id, storyboardId: UNRELATED_BOARD_ID },
-      })
-    ).count,
-    0,
-    "a collaborator row must not be deletable through another storyboard's ID",
-  );
-
-  assert.equal(
-    (
-      await prisma.storyboardCollaborator.deleteMany({
-        where: { id: invited.id, storyboardId: OWNER_BOARD_ID },
-      })
-    ).count,
-    1,
-    "the owning storyboard should delete its row",
-  );
-
-  assert.equal(
-    (
-      await prisma.storyboardCollaborator.deleteMany({
-        where: { id: invited.id, storyboardId: OWNER_BOARD_ID },
-      })
-    ).count,
-    0,
-    "a second delete finds nothing, which is the route's 404",
-  );
-
-  await prisma.storyboardCollaborator.deleteMany({
-    where: { storyboardId: UNRELATED_BOARD_ID, email: "teammate@example.com" },
-  });
-}
 
 /**
  * Deleting a storyboard takes its collaborators with it but leaves its diagrams
@@ -533,18 +333,10 @@ async function checkCollaboratorMutations() {
  * for, which is the whole point of the nullable parent.
  */
 async function checkStoryboardDeleteDetachesDiagrams() {
-  await prisma.storyboard.delete({ where: { id: SHARED_BOARD_ID } });
-
-  assert.equal(
-    await prisma.storyboardCollaborator.count({
-      where: { storyboardId: SHARED_BOARD_ID },
-    }),
-    0,
-    "collaborators should cascade on storyboard delete",
-  );
+  await prisma.storyboard.delete({ where: { id: OWNER_BOARD_ID } });
 
   const orphan = await prisma.diagram.findUnique({
-    where: { id: "verify-shared" },
+    where: { id: "verify-owned-one" },
     select: { storyboardId: true },
   });
   assert.deepEqual(
@@ -564,29 +356,12 @@ async function main() {
     "getOwnedDiagrams returned the wrong set",
   );
 
-  const identity = { userId: OWNER_ID, email: COLLABORATOR_EMAIL.toLowerCase() };
-  const shared = await getSharedDiagrams(identity);
-  assert.deepEqual(
-    shared.map((diagram) => diagram.id),
-    ["verify-shared"],
-    "getSharedDiagrams should match email case-insensitively and exclude own diagrams",
-  );
-
-  assert.deepEqual(
-    await getSharedDiagrams({ userId: OWNER_ID, email: null }),
-    [],
-    "no email means nothing shared",
-  );
-
   assert.deepEqual(await getOwnedDiagrams("verify_nobody"), [], "unknown owner");
 
-  // The sidebar only ever needs these two fields.
-  assert.deepEqual(Object.keys(shared[0]).sort(), ["id", "name"]);
-
   await checkDiagramAccess();
-  await checkCollaboratorMutations();
   await checkRoomIdCreate();
   await checkDiagramResourceDeletion();
+  await checkTombstoneIsHiddenAndReserved();
   await checkStoryboardDeleteDetachesDiagrams();
 
   console.log("✅ Diagram data layer verified against the database");

@@ -30,7 +30,6 @@ const diagramSidebarProps = {
   isOpen: true,
   onClose: () => undefined,
   ownedDiagrams: [],
-  sharedDiagrams: [],
   onCreateDiagram: () => undefined,
   onRenameDiagram: () => undefined,
   onDeleteDiagram: () => undefined,

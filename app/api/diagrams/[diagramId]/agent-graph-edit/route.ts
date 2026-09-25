@@ -45,7 +45,7 @@ export async function POST(
   const { diagramId } = await params;
   const dependencies: AgentGraphEditDependencies = {
     ...sharedDependencies,
-    authorizeDiagram: (id, options) => authorizeDiagram(request, id, options),
+    authorizeDiagram: (id) => authorizeDiagram(request, id),
   };
 
   return handleAgentGraphEditPost(request, diagramId, dependencies);

@@ -30,10 +30,7 @@ export interface AgentCanvasFlow {
 }
 
 export interface AgentCanvasWriteDependencies extends CanvasDrawingDependencies {
-  authorizeDiagram: (
-    diagramId: string,
-    options: { requireOwner: true },
-  ) => Promise<Authorization>;
+  authorizeDiagram: (diagramId: string) => Promise<Authorization>;
   mutateFlow: (
     diagramId: string,
     callback: (flow: AgentCanvasFlow) => void | Promise<void>,

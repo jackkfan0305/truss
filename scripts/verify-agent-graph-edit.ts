@@ -55,9 +55,7 @@ function deps(
   return {
     authorizeDiagram: async () => ({
       ok: true as const,
-      role: "owner" as const,
       userId: "u1",
-      ownerId: "u1",
     }),
     mutateFlow: async (
       _diagramId: string,

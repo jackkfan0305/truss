@@ -13,6 +13,13 @@ Update this file whenever the current phase, active feature, or implementation s
   component, use-storyboard-members hook, member API routes, storyboard-access
   and clerk-users modules. Editor shell no longer manages share state.
 
+- Task 2 complete: Make every diagram owner-only. Diagrams are no longer
+  shared with collaborators. Simplified `Identity` to `{ userId: string }`,
+  removed `DiagramAccess` type, deleted `StoryboardRole` and `getSharedDiagrams`.
+  The sidebar's Shared tab is gone. Every diagram is owner-only; `authorizeDiagram`
+  requires ownership, never falls through to collaborator checks. Deleted
+  `types/storyboard.ts`.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

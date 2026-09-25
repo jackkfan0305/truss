@@ -18,16 +18,15 @@ import {
   initialEditorSidebar,
   type EditorSidebar,
 } from "@/lib/editor-sidebar-state"
-import type { DiagramAccess, DiagramSummary } from "@/types/diagram"
+import type { DiagramSummary } from "@/types/diagram"
 
 interface EditorShellProps {
   ownedDiagrams: DiagramSummary[]
-  sharedDiagrams: DiagramSummary[]
   /**
    * Set on `/editor/[roomId]`, absent on the editor home. Its presence is what
    * switches the shell from the create prompt to the workspace layout.
    */
-  activeDiagram?: DiagramAccess
+  activeDiagram?: DiagramSummary
   /** An opaque launch UUID, only accepted for an already-authorized diagram. */
   launchId?: string
 }
@@ -41,7 +40,6 @@ type OpenSidebar = EditorSidebar
  */
 export function EditorShell({
   ownedDiagrams,
-  sharedDiagrams,
   activeDiagram,
   launchId,
 }: EditorShellProps) {
@@ -82,7 +80,6 @@ export function EditorShell({
           <DiagramSidebar
             isOpen={isSidebarOpen}
             ownedDiagrams={ownedDiagrams}
-            sharedDiagrams={sharedDiagrams}
             onCreateDiagram={actions.openCreate}
             onRenameDiagram={actions.openRename}
             onDeleteDiagram={actions.openDelete}

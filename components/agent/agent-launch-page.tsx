@@ -11,8 +11,8 @@ import {
 } from "@/lib/agent-launch";
 import {
   captureAgentLaunch,
-  createAgentLaunchProject,
-  startAgentLaunchProjectOnce,
+  createAgentLaunchDiagram,
+  startAgentLaunchDiagramOnce,
 } from "@/lib/agent-launch-browser";
 import { createRoomIdSuffix } from "@/lib/room-id";
 import {
@@ -31,12 +31,12 @@ interface AgentLaunchStatusProps {
   onRetry: () => void;
 }
 
-function openAgentLaunchProject(
+function openAgentLaunchDiagram(
   router: Pick<ReturnType<typeof useRouter>, "replace">,
   record: AgentLaunchRecord,
 ): void {
-  if (record.projectId) {
-    router.replace(`/editor/${record.projectId}?launch=${record.launchId}`);
+  if (record.diagramId) {
+    router.replace(`/editor/${record.diagramId}?launch=${record.launchId}`);
   }
 }
 
@@ -44,10 +44,10 @@ function statusMessage(record: AgentLaunchRecord): string {
   switch (record.stage) {
     case "captured":
       return "Preparing your diagram request";
-    case "creating-project":
-      return "Creating your project";
-    case "project-created":
-      return "Opening your project";
+    case "creating-diagram":
+      return "Creating your diagram";
+    case "diagram-created":
+      return "Opening your diagram";
     default:
       return "Preparing your diagram request";
   }
@@ -121,17 +121,17 @@ export function AgentLaunchPage({ resumeLaunchId }: AgentLaunchPageProps): React
     }
   }, [resumeLaunchId]);
 
-  const createProject = useCallback((launch: AgentLaunchRecord): void => {
-    startAgentLaunchProjectOnce(launch.launchId, () =>
-      createAgentLaunchProject(launch, {
+  const createDiagram = useCallback((launch: AgentLaunchRecord): void => {
+    startAgentLaunchDiagramOnce(launch.launchId, () =>
+      createAgentLaunchDiagram(launch, {
         fetch: window.fetch.bind(window),
         createSuffix: createRoomIdSuffix,
         storage: window.sessionStorage,
       }),
     ).then((result) => {
       setRecord(result);
-      if (result.stage === "project-created") {
-        openAgentLaunchProject(router, result);
+      if (result.stage === "diagram-created") {
+        openAgentLaunchDiagram(router, result);
       }
     });
   }, [router]);
@@ -151,17 +151,17 @@ export function AgentLaunchPage({ resumeLaunchId }: AgentLaunchPageProps): React
       return;
     }
 
-    if (record.stage === "project-created" && record.projectId) {
+    if (record.stage === "diagram-created" && record.diagramId) {
       // The persisted session record arrives asynchronously and is invisible to
       // the server, so this resume path has no user event or server redirect.
-      openAgentLaunchProject(router, record);
+      openAgentLaunchDiagram(router, record);
       return;
     }
 
-    if (record.stage === "captured" || record.stage === "creating-project") {
-      createProject(record);
+    if (record.stage === "captured" || record.stage === "creating-diagram") {
+      createDiagram(record);
     }
-  }, [clerk, createProject, isLoaded, isSignedIn, record, router]);
+  }, [clerk, createDiagram, isLoaded, isSignedIn, record, router]);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
@@ -169,7 +169,7 @@ export function AgentLaunchPage({ resumeLaunchId }: AgentLaunchPageProps): React
         record={record}
         onRetry={() => {
           if (record?.stage === "failed") {
-            createProject(record);
+            createDiagram(record);
           }
         }}
       />

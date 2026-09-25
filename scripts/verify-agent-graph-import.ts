@@ -45,7 +45,7 @@ const graph: AgentGraph = {
 };
 
 function request(body: unknown): Request {
-  return new Request("http://localhost/api/projects/project-1/agent-launch-import", {
+  return new Request("http://localhost/api/diagrams/diagram-1/agent-launch-import", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -71,13 +71,13 @@ function createDependencies(
 
   return {
     dependencies: {
-      authorizeProject: async () => ({
+      authorizeDiagram: async () => ({
         ok: true,
         role: "owner",
         userId: "user-owner",
         ownerId: "user-owner",
       }),
-      mutateFlow: async (_projectId, callback) => {
+      mutateFlow: async (_diagramId, callback) => {
         mutationCount += 1;
         const flow = {
           nodes: canvas.nodes,
@@ -110,7 +110,7 @@ function createDependencies(
 
         await callback(flow);
       },
-      saveCanvasSnapshot: async (_projectId, snapshot) => {
+      saveCanvasSnapshot: async (_diagramId, snapshot) => {
         persistenceCount += 1;
         savedSnapshots.push(structuredClone(snapshot));
       },
@@ -134,7 +134,7 @@ async function checkAuthorizationPrecedesBodyRead(): Promise<void> {
     const { dependencies, getMutationCount, getPersistenceCount } = createDependencies(
       { nodes: [], edges: [] },
       {
-        authorizeProject: async () => ({
+        authorizeDiagram: async () => ({
           ok: false,
           response: Response.json({ error: "Denied" }, { status }),
         }),
@@ -143,7 +143,7 @@ async function checkAuthorizationPrecedesBodyRead(): Promise<void> {
 
     const response = await handleAgentGraphImportPost(
       protectedRequest,
-      "project-1",
+      "diagram-1",
       dependencies,
     );
 
@@ -172,7 +172,7 @@ async function checkMalformedRequestsAreRejectedSafely(): Promise<void> {
       },
     },
   ]) {
-    const response = await handleAgentGraphImportPost(request(body), "project-1", dependencies);
+    const response = await handleAgentGraphImportPost(request(body), "diagram-1", dependencies);
     assert.equal(response.status, 400);
     const responseBody = await response.json();
     assert.deepEqual(responseBody, { error: "Invalid graph import request" });
@@ -191,7 +191,7 @@ async function checkEmptyCanvasImportsAndPersistsCanonicalSnapshot(): Promise<vo
 
   const response = await handleAgentGraphImportPost(
     request({ launchId, graph }),
-    "project-1",
+    "diagram-1",
     dependencies,
   );
 
@@ -225,7 +225,7 @@ async function checkExactReplayDoesNotWriteFlowAndRetriesPersistence(): Promise<
     },
   });
 
-  const first = await handleAgentGraphImportPost(request({ launchId, graph }), "project-1", dependencies);
+  const first = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
   assert.equal(first.status, 502);
   assert.deepEqual(await first.json(), { error: "Could not save the imported canvas" });
   assert.equal(getMutationCount(), 1, "the first import opens flow once");
@@ -234,7 +234,7 @@ async function checkExactReplayDoesNotWriteFlowAndRetriesPersistence(): Promise<
   assert.equal(getPersistenceCount(), 0, "the injected failed persistence is not counted as success");
   assert.deepEqual(canvas, expected, "failed persistence preserves the imported room for retry");
 
-  const second = await handleAgentGraphImportPost(request({ launchId, graph }), "project-1", dependencies);
+  const second = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
   assert.equal(second.status, 200);
   assert.equal(getMutationCount(), 2, "the retry compares the existing graph in one flow operation");
   assert.equal(getFlowWriteCount(), 3, "an exact retry does not duplicate the already-imported graph");
@@ -252,7 +252,7 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
   const replay = createDependencies(orderedDifferently);
   const replayResponse = await handleAgentGraphImportPost(
     request({ launchId, graph }),
-    "project-1",
+    "diagram-1",
     replay.dependencies,
   );
   assert.equal(replayResponse.status, 200, "canonical snapshots compare independent of storage ordering");
@@ -269,7 +269,7 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
   const conflict = createDependencies(divergent);
   const conflictResponse = await handleAgentGraphImportPost(
     request({ launchId, graph }),
-    "project-1",
+    "diagram-1",
     conflict.dependencies,
   );
   assert.equal(conflictResponse.status, 409);
@@ -296,7 +296,7 @@ async function checkDuplicateLiveFlowIdsConflict(): Promise<void> {
     const duplicate = createDependencies(canvas);
     const response = await handleAgentGraphImportPost(
       request({ launchId, graph }),
-      "project-1",
+      "diagram-1",
       duplicate.dependencies,
     );
 
@@ -329,7 +329,7 @@ async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
   const events: string[] = [];
   const { dependencies, getFlowWrites, getMutationCount, getPersistenceCount } =
     createDependencies(canvas, {
-      setAiPresence: async (_projectId, presence) => {
+      setAiPresence: async (_diagramId, presence) => {
         events.push(
           `cursor:${presence.cursor?.x ?? "none"},${presence.cursor?.y ?? "none"}`,
         );
@@ -344,7 +344,7 @@ async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
 
   const response = await handleAgentGraphImportPost(
     request({ launchId, graph }),
-    "project-1",
+    "diagram-1",
     dependencies,
   );
 

@@ -7,19 +7,31 @@ import { EditorDialog } from "@/components/editor/editor-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { useProjectMembers } from "@/hooks/use-project-members"
+import { useStoryboardMembers } from "@/hooks/use-storyboard-members"
 import { cn } from "@/lib/utils"
-import type { ProjectAccess, ProjectMember } from "@/types/project"
+import type { DiagramAccess } from "@/types/diagram"
+import type { StoryboardMember } from "@/types/storyboard"
 
 const INVITE_FORM_ID = "invite-collaborator-form"
 
 interface ShareDialogProps {
-  project: ProjectAccess
+  diagram: DiagramAccess
+  /**
+   * The storyboard this diagram sits on. Collaborators are invited to a
+   * storyboard, never to a diagram directly (see CONTEXT.md), so the caller
+   * only renders this dialog once there is a parent to invite them to.
+   */
+  storyboardId: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
+export function ShareDialog({
+  diagram,
+  storyboardId,
+  open,
+  onOpenChange,
+}: ShareDialogProps) {
   const {
     members,
     isLoading,
@@ -29,7 +41,7 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
     error,
     invite,
     remove,
-  } = useProjectMembers(project.id, open)
+  } = useStoryboardMembers(storyboardId, open)
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -40,11 +52,11 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
     <EditorDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Share project"
+      title="Share diagram"
       description={
-        project.isOwner
-          ? `Invite people to collaborate on "${project.name}".`
-          : `You have access to "${project.name}" as a collaborator.`
+        diagram.ownsStoryboard
+          ? `Everyone invited to the storyboard that "${diagram.name}" sits on can open it.`
+          : `You have access to "${diagram.name}" as a collaborator.`
       }
       footer={
         <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -53,9 +65,9 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
       }
     >
       <div className="grid gap-4">
-        <CopyLinkRow projectId={project.id} />
+        <CopyLinkRow diagramId={diagram.id} />
 
-        {project.isOwner ? (
+        {diagram.ownsStoryboard ? (
           <form
             id={INVITE_FORM_ID}
             onSubmit={handleSubmit}
@@ -97,7 +109,7 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
             members={members}
             isLoading={isLoading}
             isPending={isPending}
-            canRemove={project.isOwner}
+            canRemove={diagram.ownsStoryboard}
             onRemove={remove}
           />
         </div>
@@ -113,7 +125,7 @@ export function ShareDialog({ project, open, onOpenChange }: ShareDialogProps) {
 }
 
 /** Read-only URL plus a copy button that confirms for two seconds. */
-function CopyLinkRow({ projectId }: { projectId: string }) {
+function CopyLinkRow({ diagramId }: { diagramId: string }) {
   const { status, copy } = useCopyToClipboard()
 
   /*
@@ -125,20 +137,20 @@ function CopyLinkRow({ projectId }: { projectId: string }) {
   const [link] = useState(() =>
     typeof window === "undefined"
       ? ""
-      : `${window.location.origin}/editor/${projectId}`,
+      : `${window.location.origin}/editor/${diagramId}`,
   )
 
   return (
     <div className="grid gap-2">
       <label
-        htmlFor="share-project-link"
+        htmlFor="share-diagram-link"
         className="text-xs font-medium text-copy-secondary"
       >
-        Project link
+        Diagram link
       </label>
       <div className="flex gap-2">
         <Input
-          id="share-project-link"
+          id="share-diagram-link"
           className="flex-1 font-mono text-xs text-copy-primary"
           value={link}
           readOnly
@@ -174,7 +186,7 @@ function MemberList({
   canRemove,
   onRemove,
 }: {
-  members: ProjectMember[]
+  members: StoryboardMember[]
   isLoading: boolean
   isPending: boolean
   canRemove: boolean
@@ -242,7 +254,7 @@ function MemberList({
   )
 }
 
-function RoleBadge({ role }: { role: ProjectMember["role"] }) {
+function RoleBadge({ role }: { role: StoryboardMember["role"] }) {
   const isOwner = role === "owner"
 
   return (
@@ -259,7 +271,7 @@ function RoleBadge({ role }: { role: ProjectMember["role"] }) {
   )
 }
 
-function Avatar({ member }: { member: ProjectMember }) {
+function Avatar({ member }: { member: StoryboardMember }) {
   if (member.imageUrl) {
     return (
       // Plain <img>: Clerk serves already-sized avatars from its own CDN, so

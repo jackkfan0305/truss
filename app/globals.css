@@ -13,7 +13,7 @@
     --font-mono: var(--font-geist-mono);
     --font-heading: var(--font-geist-sans);
 
-    /* Project surfaces */
+    /* Truss surfaces */
     /*
      * Named `page`, not `base`: a `--color-base` entry would register `base` as
      * a color and make Tailwind's built-in `text-base` paint text
@@ -26,23 +26,23 @@
     --color-elevated: var(--bg-elevated);
     --color-subtle: var(--bg-subtle);
 
-    /* Project borders */
+    /* Truss borders */
     --color-surface-border: var(--border-default);
     --color-surface-border-subtle: var(--border-subtle);
 
-    /* Project text */
+    /* Truss text */
     --color-copy-primary: var(--text-primary);
     --color-copy-secondary: var(--text-secondary);
     --color-copy-muted: var(--text-muted);
     --color-copy-faint: var(--text-faint);
 
-    /* Project accents */
+    /* Truss accents */
     --color-brand: var(--accent-primary);
     --color-accent-dim: var(--accent-primary-dim);
     --color-ai: var(--accent-ai);
     --color-ai-text: var(--accent-ai-text);
 
-    /* Project states */
+    /* Truss states */
     --color-state-error: var(--state-error);
     --color-state-success: var(--state-success);
     --color-state-warning: var(--state-warning);
@@ -175,15 +175,6 @@
         transparent 1px
     );
     background-size: 22px 22px;
-}
-
-/* Prompt Input owns an inner InputGroup with its own dark fill and border.
- * Keep the composer's outer form as the only visible container. */
-.ai-chat-composer > [data-slot="input-group"] {
-    background: transparent;
-    border: 0;
-    border-radius: calc(1.625rem - 0.5rem);
-    box-shadow: none;
 }
 
 /*
@@ -346,6 +337,29 @@
  * exactly why this class is not offered for anything larger — a block of text
  * wants the transform-and-mask version instead.
  */
+@keyframes agent-step-sweep {
+    from {
+        background-position: 100% 0;
+    }
+    to {
+        background-position: -100% 0;
+    }
+}
+
+.agent-step-sweep {
+    background-image: linear-gradient(
+        90deg,
+        var(--text-muted) 30%,
+        var(--text-primary) 50%,
+        var(--text-muted) 70%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: agent-step-sweep 1.8s linear infinite;
+}
+
 /*
  * The loading mark: a truss triangle that builds itself the way the AI builds a
  * diagram, edge by edge, each joint lighting as its edge reaches it, then fades
@@ -408,8 +422,7 @@
 
 /*
  * Arrival is decoration: the node and the edge are already in shared state, so
- * skipping the motion loses nothing but the flourish. The loader keeps its
- * finished triangle and only breathes, so it still reads as "working".
+ * skipping the motion loses nothing but the flourish.
  */
 @media (prefers-reduced-motion: reduce) {
     .canvas-node-arrive,
@@ -417,7 +430,11 @@
         animation: none;
     }
 
-    .canvas-edge-draw,
+    .canvas-edge-draw {
+        stroke-dasharray: none;
+    }
+
+    /* The loader keeps its finished triangle and only breathes. */
     .truss-loader-edge {
         stroke-dasharray: none;
     }
@@ -429,6 +446,17 @@
 
     .truss-loader {
         animation: truss-loader-breathe 2.4s ease-in-out infinite;
+    }
+
+    /*
+     * The sweep *is* the liveness cue here, so this cannot just drop the
+     * animation and leave transparent text: the gradient goes too, and the
+     * label falls back to solid secondary copy.
+     */
+    .agent-step-sweep {
+        animation: none;
+        background-image: none;
+        color: var(--text-secondary);
     }
 }
 

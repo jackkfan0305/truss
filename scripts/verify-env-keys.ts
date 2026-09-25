@@ -16,8 +16,8 @@ const values = {
   DATABASE_URL: "postgres://dev",
   LIVEBLOCKS_SECRET_KEY: "sk_dev_1",
   LIVEBLOCKS_SECRET_KEY_PROD: "sk_prod_1",
-  CLERK_SECRET_KEY: "sk_test_1",
-  CLERK_SECRET_KEY_PROD: "sk_live_1",
+  BLOB_READ_WRITE_TOKEN: "blob_dev_1",
+  BLOB_READ_WRITE_TOKEN_PROD: "blob_prod_1",
 };
 
 const development = resolveEnvKeys(values, { production: false });
@@ -26,8 +26,8 @@ const production = resolveEnvKeys(values, { production: true });
 // A key with a twin switches; a key without one is shared by both.
 assert.equal(development.LIVEBLOCKS_SECRET_KEY, "sk_dev_1");
 assert.equal(production.LIVEBLOCKS_SECRET_KEY, "sk_prod_1");
-assert.equal(development.CLERK_SECRET_KEY, "sk_test_1");
-assert.equal(production.CLERK_SECRET_KEY, "sk_live_1");
+assert.equal(development.BLOB_READ_WRITE_TOKEN, "blob_dev_1");
+assert.equal(production.BLOB_READ_WRITE_TOKEN, "blob_prod_1");
 assert.equal(development.DATABASE_URL, "postgres://dev");
 assert.equal(production.DATABASE_URL, "postgres://dev");
 
@@ -41,8 +41,8 @@ for (const resolved of [development, production]) {
 
 // A missing twin must fall back rather than resolve to undefined, or a deploy
 // would push an empty value over a working one.
-assert.deepEqual(resolveEnvKeys({ GEMINI_API_KEY: "k" }, { production: true }), {
-  GEMINI_API_KEY: "k",
+assert.deepEqual(resolveEnvKeys({ CLERK_SECRET_KEY: "k" }, { production: true }), {
+  CLERK_SECRET_KEY: "k",
 });
 
 console.log("✅ env key resolution verified");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   canvasFingerprint,
   parseAgentGraphAllowingEmpty,
-  projectCanvasToAgentGraph,
+  canvasToAgentGraph,
 } from "../lib/agent-graph";
 import {
   CANVAS_EDGE_MARKER,
@@ -39,7 +39,7 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 
 // Representable nodes land in the graph.
 {
-  const view = projectCanvasToAgentGraph({
+  const view = canvasToAgentGraph({
     nodes: [node("web"), node("api", { position: { x: 280, y: 0 } })],
     edges: [edge("web-to-api", "web", "api")],
   });
@@ -54,7 +54,7 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 
 // A non-conforming ID is opaque, never dropped and never representable.
 {
-  const view = projectCanvasToAgentGraph({
+  const view = canvasToAgentGraph({
     nodes: [node("web"), node("Xk_92NOT-kebab")],
     edges: [],
   });
@@ -65,7 +65,7 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 
 // An over-long label is opaque.
 {
-  const view = projectCanvasToAgentGraph({
+  const view = canvasToAgentGraph({
     nodes: [node("web", { data: { label: "x".repeat(81), shape: "rectangle", color: "neutral" } })],
     edges: [],
   });
@@ -76,7 +76,7 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 
 // A non-integer position is opaque.
 {
-  const view = projectCanvasToAgentGraph({
+  const view = canvasToAgentGraph({
     nodes: [node("web", { position: { x: 10.5, y: 0 } })],
     edges: [],
   });
@@ -86,7 +86,7 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 
 // An edge whose endpoint is opaque is itself opaque.
 {
-  const view = projectCanvasToAgentGraph({
+  const view = canvasToAgentGraph({
     nodes: [node("web"), node("BAD_ID")],
     edges: [edge("web-to-bad", "web", "BAD_ID")],
   });

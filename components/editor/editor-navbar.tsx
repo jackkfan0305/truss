@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { SidebarLeftIcon, SidebarRightIcon } from "@hugeicons/core-free-icons"
+import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { LayoutTemplate, Share2 } from "lucide-react"
 
@@ -11,13 +11,11 @@ import { cn } from "@/lib/utils"
 interface EditorNavbarProps {
   isSidebarOpen: boolean
   onToggleSidebar: () => void
-  /** Workspace only — the editor home has no active project. */
-  projectName?: string
+  /** Workspace only — the editor home has no active diagram. */
+  diagramName?: string
   onShare?: () => void
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
-  isAiSidebarOpen?: boolean
-  onToggleAiSidebar?: () => void
   /**
    * Workspace only — the collaborator avatar stack, rendered beside the Clerk
    * UserButton. A slot rather than a component so the navbar stays outside the
@@ -36,23 +34,21 @@ interface EditorNavbarProps {
   className?: string
 }
 
-/** The sidebars' own surface, so the chrome reads as one family. */
+/** The sidebar's own surface, so the chrome reads as one family. */
 const FLOATING_SURFACE =
   "rounded-xl border border-surface-border bg-elevated shadow-lg shadow-page/60"
 /**
- * Plain icon buttons at the canvas corners, one per sidebar. `top-3.5` centres
- * the 36px button on the 40px chips beside it.
+ * A plain icon button at the canvas corner. `top-3.5` centres the 36px button
+ * on the 40px chips beside it.
  */
 const SIDEBAR_TOGGLE = "pointer-events-auto absolute top-3.5 z-10 rounded-lg"
 
 export function EditorNavbar({
   isSidebarOpen,
   onToggleSidebar,
-  projectName,
+  diagramName,
   onShare,
   onOpenTemplates,
-  isAiSidebarOpen = false,
-  onToggleAiSidebar,
   presence,
   saveStatus,
   profile,
@@ -69,10 +65,10 @@ export function EditorNavbar({
         variant="ghost"
         size="icon-lg"
         onClick={onToggleSidebar}
-        aria-controls="projects-sidebar"
+        aria-controls="diagrams-sidebar"
         aria-expanded={isSidebarOpen}
         aria-label={
-          isSidebarOpen ? "Close projects sidebar" : "Open projects sidebar"
+          isSidebarOpen ? "Close diagrams sidebar" : "Open diagrams sidebar"
         }
         // Rides along with the panel on a transform, on the panel's own
         // timing, so it slides instead of jumping to the panel's inner edge.
@@ -91,18 +87,15 @@ export function EditorNavbar({
         />
       </Button>
 
-      {projectName && !isSidebarOpen ? (
+      {diagramName && !isSidebarOpen ? (
         <div
           className={cn(
             FLOATING_SURFACE,
-            "pointer-events-auto absolute flex h-10 min-w-0 items-center px-4",
-            isAiSidebarOpen
-              ? "top-15 left-3 max-w-[calc(100%-14rem)] xl:top-3 xl:left-14 xl:max-w-sm"
-              : "top-3 left-14 max-w-[calc(100%-7rem)] sm:max-w-sm"
+            "pointer-events-auto absolute top-3 left-14 flex h-10 min-w-0 max-w-[calc(100%-7rem)] items-center px-4 sm:max-w-sm"
           )}
         >
           <p className="min-w-0 truncate text-sm font-medium text-copy-primary">
-            {projectName}
+            {diagramName}
           </p>
         </div>
       ) : null}
@@ -110,10 +103,7 @@ export function EditorNavbar({
       <div
         className={cn(
           FLOATING_SURFACE,
-          "pointer-events-auto absolute flex h-10 items-center gap-0.5 px-1.5",
-          isAiSidebarOpen
-            ? "top-15 right-3 xl:top-3 xl:right-[calc(26rem+0.75rem)]"
-            : "top-15 right-3 sm:top-3 sm:right-14"
+          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 sm:top-3"
         )}
       >
         {saveStatus}
@@ -121,25 +111,13 @@ export function EditorNavbar({
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="size-4" />
-            <span
-              className={
-                isAiSidebarOpen ? "hidden xl:inline" : "hidden sm:inline"
-              }
-            >
-              Templates
-            </span>
+            <span className="hidden sm:inline">Templates</span>
           </Button>
         ) : null}
         {onShare ? (
           <Button variant="ghost" size="sm" onClick={onShare}>
             <Share2 className="size-4" />
-            <span
-              className={
-                isAiSidebarOpen ? "hidden xl:inline" : "hidden sm:inline"
-              }
-            >
-              Share
-            </span>
+            <span className="hidden sm:inline">Share</span>
           </Button>
         ) : null}
         {(saveStatus || onOpenTemplates || onShare) && (presence || profile) ? (
@@ -150,24 +128,6 @@ export function EditorNavbar({
           {profile}
         </div>
       </div>
-
-      {onToggleAiSidebar && !isAiSidebarOpen ? (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          onClick={onToggleAiSidebar}
-          aria-controls="ai-sidebar"
-          aria-expanded={isAiSidebarOpen}
-          aria-label="Open AI sidebar"
-          className={cn(SIDEBAR_TOGGLE, "right-3")}
-        >
-          <HugeiconsIcon
-            icon={SidebarRightIcon}
-            aria-hidden
-            className="size-5 text-copy-secondary"
-          />
-        </Button>
-      ) : null}
     </header>
   )
 }

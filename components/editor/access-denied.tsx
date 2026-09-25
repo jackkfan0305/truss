@@ -4,8 +4,8 @@ import { Lock } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 
 /**
- * Shown for both a missing project and one this user may not open — the two are
- * indistinguishable on purpose (see getAccessibleProject).
+ * Shown for both a missing diagram and one this user may not open — the two are
+ * indistinguishable on purpose (see getAccessibleDiagram).
  */
 export function AccessDenied() {
   return (
@@ -17,7 +17,7 @@ export function AccessDenied() {
 
         <div className="flex flex-col gap-2">
           <h1 className="text-xl font-medium tracking-tight text-copy-primary">
-            You don&apos;t have access to this project
+            You don&apos;t have access to this diagram
           </h1>
           <p className="text-sm text-copy-muted">
             It may have been deleted, or the owner hasn&apos;t shared it with
@@ -31,7 +31,7 @@ export function AccessDenied() {
           href="/editor"
           className={buttonVariants({ variant: "outline", className: "mt-2" })}
         >
-          Back to projects
+          Back to diagrams
         </Link>
       </div>
     </main>

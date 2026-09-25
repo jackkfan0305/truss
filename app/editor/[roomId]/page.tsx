@@ -4,15 +4,16 @@ import type { Metadata } from "next";
 import { AccessDenied } from "@/components/editor/access-denied";
 import { EditorShell } from "@/components/editor/editor-shell";
 import { isAgentLaunchId } from "@/lib/agent-launch";
-import { getAccessibleProject, getCurrentIdentity } from "@/lib/project-access";
-import { getOwnedProjects, getSharedProjects } from "@/lib/projects";
+import { getCurrentIdentity } from "@/lib/access";
+import { getAccessibleDiagram } from "@/lib/diagram-access";
+import { getOwnedDiagrams, getSharedDiagrams } from "@/lib/diagrams";
 
 export const metadata: Metadata = {
   title: "Truss Editor",
   description: "Collaborative system design workspace.",
 };
 
-// `roomId` is the project ID and the future Liveblocks room ID — one identifier
+// `roomId` is the diagram ID and the future Liveblocks room ID — one identifier
 // (see the architecture decisions in context/progress-tracker.md).
 interface EditorRoomPageProps {
   params: Promise<{ roomId: string }>;
@@ -39,22 +40,22 @@ export default async function EditorRoomPage({
   // The access check runs alongside the sidebar lists rather than before them:
   // the denied path is the rare one, and serialising would add a round trip to
   // every successful load.
-  const [activeProject, ownedProjects, sharedProjects] = await Promise.all([
-    getAccessibleProject(roomId, identity),
-    getOwnedProjects(identity.userId),
-    getSharedProjects(identity),
+  const [activeDiagram, ownedDiagrams, sharedDiagrams] = await Promise.all([
+    getAccessibleDiagram(roomId, identity),
+    getOwnedDiagrams(identity.userId),
+    getSharedDiagrams(identity),
   ]);
 
-  // Unknown project and inaccessible project are the same answer on purpose.
-  if (!activeProject) {
+  // Unknown diagram and inaccessible diagram are the same answer on purpose.
+  if (!activeDiagram) {
     return <AccessDenied />;
   }
 
   return (
     <EditorShell
-      ownedProjects={ownedProjects}
-      sharedProjects={sharedProjects}
-      activeProject={activeProject}
+      ownedDiagrams={ownedDiagrams}
+      sharedDiagrams={sharedDiagrams}
+      activeDiagram={activeDiagram}
       launchId={launchId}
     />
   );

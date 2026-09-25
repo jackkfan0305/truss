@@ -1,12 +1,12 @@
 /**
  * The single chokepoint for "who is calling": a `trs_agent_...` bearer token
  * when one is present, otherwise the Clerk session cookie. Both
- * `getCurrentIdentity` and `authorizeProject` in `lib/project-access.ts` route
- * through this module.
+ * `getCurrentIdentity` in `lib/access.ts` and `authorizeDiagram` in
+ * `lib/diagram-access.ts` route through this module.
  *
  * Resolution is split into a cheap step (`resolveIdentitySource`, no Clerk API
  * call) and a lazy one (`resolveIdentityEmail`, one Clerk call). This mirrors
- * `authorizeProject`'s existing "only now is the email worth a second Clerk
+ * `authorizeDiagram`'s existing "only now is the email worth a second Clerk
  * call" laziness: the owner path — which `GET agent-graph` and
  * `POST agent-graph-edit` always take, being owner-only — must stay one DB
  * lookup with no Clerk round trip at all, whether the caller authenticated
@@ -17,7 +17,7 @@
 
 import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 
-import type { Identity } from "@/lib/project-access";
+import type { Identity } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { hashAgentToken, isAgentTokenFormat } from "@/lib/agent-token";
 
@@ -85,9 +85,9 @@ export async function resolveIdentitySource(request?: Request): Promise<Identity
 }
 
 /**
- * The Clerk call `authorizeProject` defers until a collaborator check is
+ * The Clerk call `authorizeDiagram` defers until a collaborator check is
  * actually reached. A bearer identity has no local email store — `AgentToken`
- * only records `ownerId` — so `ProjectCollaborator`'s email key means this
+ * only records `ownerId` — so `DiagramCollaborator`'s email key means this
  * call cannot be skipped once it *is* needed, only deferred.
  */
 export async function resolveIdentityEmail(source: IdentitySource): Promise<string | null> {

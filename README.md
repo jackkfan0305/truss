@@ -1,29 +1,30 @@
 # Truss
 
-A real-time collaborative system design workspace. Describe a system in plain
-English, an AI agent draws it onto a shared canvas, your collaborators refine it
-live, and the same agent turns the resulting graph into a Markdown technical
-spec.
+A real-time collaborative system design workspace. Your terminal agent draws a
+system onto a shared canvas through the `truss-diagram` skill, and your
+collaborators refine it live.
+
+Truss runs no model of its own — see
+[ADR 0001](docs/adr/0001-no-server-side-ai.md).
 
 **Live:** <https://truss-jet.vercel.app>
 
 ## What it does
 
-- **Projects** — sign in, create a project, invite collaborators by email. The
-  owner can rename, delete, and manage members; collaborators can open and edit.
+- **Diagrams** — sign in, create a diagram, open it in the editor. The owner can
+  rename and delete it.
+- **Storyboards** — the plan a diagram sits on, and the thing collaborators are
+  invited to by email. A diagram with no parent storyboard is owner-only and
+  shows no Share control. Nothing creates a storyboard yet; the agent-facing
+  create lands with the storyboard tools.
 - **Collaborative canvas** — React Flow over Liveblocks Storage. Live cursors,
   presence avatars, shaped/colored nodes, right-angle labelled edges, and
   snapshots persisted to Vercel Blob.
 - **Starter templates** — prebuilt system designs (monolith, microservices,
   event-driven, serverless…) that import straight into the live room.
-- **AI chat that routes itself** — one composer in the editor sidebar. An
-  `orchestrator` background task reads the canvas and the room's chat history,
-  then decides per message whether to answer in words, edit the canvas, or write
-  a spec. Its work log streams into the transcript and is durable, so every
-  member sees the same one after a reload.
-- **Spec generation** — the current graph becomes a Markdown spec, stored in
-  Vercel Blob with a pointer row in Postgres, attached to the chat turn that
-  asked for it, and downloadable as a `.md` file.
+- **Agent-drawn diagrams** — the `truss-diagram` skill creates, reads, edits and
+  deletes diagrams over MCP. Writes land through a paced draw, so a mounted
+  editor watches the agent's cursor place each node.
 
 ## Stack
 
@@ -34,7 +35,6 @@ spec.
 | Auth             | Clerk                   |
 | Database         | Prisma 7 + PostgreSQL   |
 | Canvas           | Liveblocks + React Flow (`@xyflow/react`) |
-| Model            | Google Gemini via the AI SDK |
 | Artifact storage | Vercel Blob (private access) |
 
 ## Prerequisites
@@ -42,11 +42,10 @@ spec.
 - Node.js 20+ (developed on 26)
 - A PostgreSQL database
 - Accounts for: [Clerk](https://clerk.com),
-  [Liveblocks](https://liveblocks.io),
-  [Vercel Blob](https://vercel.com/docs/storage/vercel-blob), and
-  [Google AI Studio](https://aistudio.google.com) for a Gemini key.
+  [Liveblocks](https://liveblocks.io), and
+  [Vercel Blob](https://vercel.com/docs/storage/vercel-blob).
 
-All four have free tiers that are enough to run this locally.
+All three have free tiers that are enough to run this locally.
 
 ## Setup
 
@@ -85,11 +84,8 @@ LIVEBLOCKS_PUBLIC_KEY=pk_...
 
 # ------------------------------------------------------------ Vercel Blob
 # Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
-# client bundle would let anyone overwrite any project's canvas.
+# client bundle would let anyone overwrite any diagram's canvas.
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
-
-# ------------------------------------------------------------ Google Gemini
-GEMINI_API_KEY=...   # GOOGLE_AI_API_KEY is also accepted
 ```
 
 `proxy.ts` throws at boot if the two Clerk URL vars are missing — with no public
@@ -110,8 +106,8 @@ A plain name holds the development value; an optional `<NAME>_PROD` twin holds
 the production one. Nothing local reads the `_PROD` entries — `npm run dev`
 always gets development keys. The suffix is consumed only at deploy time, by
 `scripts/push-vercel-env.ts`, through `resolveEnvKeys()` in `lib/env-keys.ts`.
-The value lands under the plain name, so application code never branches on
-environment.
+Either way the value lands under the plain name, so application code never
+branches on environment.
 
 `scripts/verify-env-keys.ts` (part of `npm test`) pins that behaviour.
 
@@ -120,7 +116,7 @@ environment.
 ```bash
 npx prisma migrate dev     # apply migrations
 npm run generate           # regenerate the client into generated/prisma
-npx prisma db seed         # optional: three sample projects
+npx prisma db seed         # optional: three sample storyboards + four diagrams
 ```
 
 ## Running it
@@ -130,8 +126,7 @@ npm run dev
 ```
 
 Open <http://localhost:3000>; `/` redirects to `/editor` once you are signed
-in. AI turns run inside `POST /api/ai/orchestrate`, so there is no separate
-worker to start.
+in.
 
 ## Create, edit and delete diagrams from an agent
 
@@ -147,11 +142,11 @@ npx skills add jackkfan0305/truss \
 **Create** turns the supplied description into a compact positioned graph, then
 sends only the title and graph to its launcher over stdin.
 
-**Edit** and **delete** need to read your projects, which the agent cannot do on
+**Edit** and **delete** need to read your diagrams, which the agent cannot do on
 its own — it never authenticates to Truss. The launcher opens `/agent/pick`,
 which uses your existing browser session to fetch the list and, for an edit, the
 live canvas, and hands them back over a one-shot listener bound to `127.0.0.1`.
-The agent asks which project you mean in the terminal. Deletes are confirmed
+The agent asks which diagram you mean in the terminal. Deletes are confirmed
 twice: once by name in the terminal, once in the browser.
 
 An edit is reconciled against the live canvas rather than replacing it, so
@@ -163,8 +158,6 @@ deployment instead, set `TRUSS_APP_URL=https://truss-jet.vercel.app`; it must be
 an HTTP(S) origin without a path.
 
 ## Deploying
-
-The app, AI runs included, deploys to Vercel.
 
 ```bash
 npx vercel link                        # once, to bind this checkout to a project
@@ -180,9 +173,6 @@ npx vercel --prod                      # deploy the app
   is the one that must never be dropped: Vercel refuses to store an uploaded
   `.env`, but the entry survives as a dangling symlink and the Next build then
   dies with `ENOENT: stat '/vercel/path0/.env'`.
-- **AI turns need a long function timeout.** The orchestrate route sets
-  `maxDuration = 600`, which needs Fluid Compute on a Pro plan; Hobby caps it
-  at 300s.
 - **Clerk has no `_PROD` twin yet**, so the deployment authenticates against the
   Clerk *development* instance. It works — sign-in, sessions and the middleware
   all behave — but you get the development banner and development limits. Add
@@ -203,25 +193,44 @@ npx vercel --prod                      # deploy the app
 | `npm run verify:integration` | The checks that do hit the database and APIs |
 | `npm run generate` | Regenerate the Prisma client |
 | `npm run doctor` | React Doctor scan |
+| `npm run skills:link` | Point `.claude/skills/` at the vendored skills |
+
+## Agent skills
+
+The skills live in `.agents/skills/`, one copy, tracked. `skills-lock.json`
+records where the fetched ones came from; `npx skills` refreshes them and the
+diff gets committed like any other dependency.
+
+Per-tool directories are not tracked, because each is a rendering of those
+skills plus that tool's own local config. In a fresh worktree, build the one
+Claude Code reads:
+
+```bash
+npm run skills:link
+```
+
+It writes a relative symlink per skill into `.claude/skills/`, so nothing is
+copied and both paths stay in step. Re-run it after adding a skill.
 
 `scripts/verify-*.ts` are standalone contract checks — no test framework, no
-database, no network. Run one with `npx tsx scripts/verify-orchestrator.ts`;
+database, no network. Run one with `npx tsx scripts/verify-agent-graph.ts`;
 each exits non-zero on failure.
 
 ## Layout
 
 ```
-app/api        Authenticated route handlers: validate → authorize → run → persist
-app/editor     The workspace (project sidebar, canvas, AI panel)
-lib/           Prisma client, access control, Liveblocks helpers, AI agents, prompts
+.agents/skills The agent skills themselves, one copy
+app/api        Authenticated route handlers: validate → authorize → write → persist
+app/editor     The workspace (diagram sidebar, canvas)
+lib/           Prisma client, access control, Liveblocks server helpers
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed
 context/       Product, architecture, UI, and standards docs — read these first
 scripts/       verify-* contract checks
 ```
 
-`context/architecture-context.md` is the source of truth for storage,
-authorization, and the AI generation model. `context/progress-tracker.md` has
+`context/architecture-context.md` is the source of truth for storage and
+authorization. `context/progress-tracker.md` has
 the current state, unit by unit.
 
 ## Notes and gotchas
@@ -231,7 +240,7 @@ the current state, unit by unit.
   `Cannot read properties of undefined (reading 'findFirst')`.
 - **Blob is private.** Every `@vercel/blob` call passes `access: "private"`;
   stored URLs are pointers, never handed to a browser. Reads go through the
-  authorized download route.
-- **A mid-run failure leaves a partial diagram.** The canvas build is paced, not
+  authorized canvas route.
+- **A mid-draw failure leaves a partial diagram.** The canvas build is paced, not
   atomic — on a shared canvas a rollback would either clobber or miss concurrent
   human edits, so the error path reports how many changes landed instead.

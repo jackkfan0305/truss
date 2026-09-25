@@ -27,7 +27,7 @@ interface CanvasAutosave {
  * blob path, so the last one wins and none of them conflict.
  */
 export function useCanvasAutosave(
-  projectId: string,
+  diagramId: string,
   nodes: CanvasNode[],
   edges: CanvasEdge[],
   onStatusChange: (status: SaveStatus) => void,
@@ -58,7 +58,7 @@ export function useCanvasAutosave(
    * The last payload that reached the server. Seeded with the first render's
    * payload so an editor that is merely *opened* never writes: without this,
    * every client that joins a room immediately saves a copy of what it just
-   * loaded, and opening a project would be a write.
+   * loaded, and opening a diagram would be a write.
    */
   const savedPayload = useRef(payload);
   const isSaving = useRef(false);
@@ -94,7 +94,7 @@ export function useCanvasAutosave(
       setStatus.current("saving");
 
       try {
-        const response = await fetch(`/api/projects/${projectId}/canvas`, {
+        const response = await fetch(`/api/diagrams/${diagramId}/canvas`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body,
@@ -126,7 +126,7 @@ export function useCanvasAutosave(
         }
       }
     },
-    [projectId],
+    [diagramId],
   );
 
   useEffect(() => {

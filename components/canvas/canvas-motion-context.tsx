@@ -13,7 +13,7 @@ import {
  * Tells a node or edge whether it arrived while the canvas was already on
  * screen, so only new arrivals animate in (32-live-canvas-building).
  *
- * Without this, opening a project with thirty nodes plays thirty arrival
+ * Without this, opening a diagram with thirty nodes plays thirty arrival
  * animations at once, because every one of them mounts for the first time
  * during hydration. The AI's build is the thing worth animating; loading a
  * saved diagram is not.
@@ -55,7 +55,7 @@ export function CanvasMotionProvider({ children }: { children: ReactNode }) {
 
     return () => {
       clearTimeout(timer);
-      // Remounting the canvas (a different project, a route change) is a fresh
+      // Remounting the canvas (a different diagram, a route change) is a fresh
       // initial load, not a continuation of the last one.
       hasSettledRef.current = false;
     };

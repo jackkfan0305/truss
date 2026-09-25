@@ -67,7 +67,7 @@ server.registerTool(
   {
     title: "List the user's Truss diagrams",
     description:
-      "Returns the signed-in user's diagram projects as { id, name } pairs. Use this to resolve which diagram a create/edit/delete request means — match by name (exact match wins, else a unique substring match, else ask). Authenticates automatically (opening one browser tab) if no credential is cached yet.",
+      "Returns the signed-in user's diagram diagrams as { id, name } pairs. Use this to resolve which diagram a create/edit/delete request means — match by name (exact match wins, else a unique substring match, else ask). Authenticates automatically (opening one browser tab) if no credential is cached yet.",
     inputSchema: { baseUrl: baseUrlShape },
   },
   async ({ baseUrl }) => textResult(await listDiagrams(baseUrl)),
@@ -81,10 +81,10 @@ server.registerTool(
       "Fetches one diagram's current compact graph plus a fingerprint for optimistic-concurrency edits. `opaqueNodeIds` lists canvas items the compact contract cannot express — never assign one of those ids to a node in an edit. Pass the returned `fingerprint` straight into truss_apply_diagram_edit; never invent one.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
     },
   },
-  async ({ baseUrl, projectId }) => textResult(await getDiagram(baseUrl, projectId)),
+  async ({ baseUrl, diagramId }) => textResult(await getDiagram(baseUrl, diagramId)),
 );
 
 server.registerTool(
@@ -92,16 +92,16 @@ server.registerTool(
   {
     title: "Apply a full graph to an existing Truss diagram",
     description:
-      "Replaces a diagram's graph with `desiredGraph`, built by editing the graph truss_get_diagram returned in place: reuse the `id` of every node/edge kept or modified, assign new kebab-case ids only to genuinely new ones, and never reuse an id from `opaqueNodeIds`. `fingerprint` must be the value truss_get_diagram returned for this project — this call retries once on its own if it goes stale, but a fingerprint you made up will fail. If the result removes any node or edge present in the read graph, get an explicit yes from the user first and state exactly what will be removed, by label — this is the only safety net a destructive edit gets, since there is no browser tab in front of the user and Liveblocks undo does not cover a server-side edit.",
+      "Replaces a diagram's graph with `desiredGraph`, built by editing the graph truss_get_diagram returned in place: reuse the `id` of every node/edge kept or modified, assign new kebab-case ids only to genuinely new ones, and never reuse an id from `opaqueNodeIds`. `fingerprint` must be the value truss_get_diagram returned for this diagram — this call retries once on its own if it goes stale, but a fingerprint you made up will fail. If the result removes any node or edge present in the read graph, get an explicit yes from the user first and state exactly what will be removed, by label — this is the only safety net a destructive edit gets, since there is no browser tab in front of the user and Liveblocks undo does not cover a server-side edit.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
-      fingerprint: z.string().describe("The fingerprint truss_get_diagram returned for this project."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
+      fingerprint: z.string().describe("The fingerprint truss_get_diagram returned for this diagram."),
       desiredGraph: graphShape,
     },
   },
-  async ({ baseUrl, projectId, fingerprint, desiredGraph }) =>
-    textResult(await applyDiagramEdit(baseUrl, projectId, fingerprint, desiredGraph)),
+  async ({ baseUrl, diagramId, fingerprint, desiredGraph }) =>
+    textResult(await applyDiagramEdit(baseUrl, diagramId, fingerprint, desiredGraph)),
 );
 
 server.registerTool(
@@ -109,7 +109,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new project and draws `graph` into it in one call, returning its editor URL. Keep the primary request path left to right, node origins at least 240 flow units apart horizontally and 150 vertically, supporting systems on secondary rows, stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors. Do not include secrets in labels.",
+      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Keep the primary request path left to right, node origins at least 240 flow units apart horizontally and 150 vertically, supporting systems on secondary rows, stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors. Do not include secrets in labels.",
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),
@@ -124,13 +124,13 @@ server.registerTool(
   {
     title: "Open Truss to confirm deleting a diagram",
     description:
-      "Opens a browser tab to Truss's own delete-confirm dialog for `projectId` and returns once the choice has been relayed to it — it does not wait for, or report, the human's actual click, and it never deletes anything itself: only that dialog can, using the human's own session. Before calling this, resolve the project with truss_list_diagrams and get an explicit yes from the user, quoting the diagram's full name (never its position in a list) — a mistyped digit must never destroy the wrong project. Tell the user 'opening Truss to confirm the delete' before calling this.",
+      "Opens a browser tab to Truss's own delete-confirm dialog for `diagramId` and returns once the choice has been relayed to it — it does not wait for, or report, the human's actual click, and it never deletes anything itself: only that dialog can, using the human's own session. Before calling this, resolve the diagram with truss_list_diagrams and get an explicit yes from the user, quoting the diagram's full name (never its position in a list) — a mistyped digit must never destroy the wrong diagram. Tell the user 'opening Truss to confirm the delete' before calling this.",
     inputSchema: {
       baseUrl: baseUrlShape,
-      projectId: z.string().describe("A project id returned by truss_list_diagrams."),
+      diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
     },
   },
-  async ({ baseUrl, projectId }) => textResult(await promptDeleteDiagram(baseUrl, projectId)),
+  async ({ baseUrl, diagramId }) => textResult(await promptDeleteDiagram(baseUrl, diagramId)),
 );
 
 const transport = new StdioServerTransport();

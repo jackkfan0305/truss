@@ -2,7 +2,7 @@ import {
   canvasFingerprint,
   materializeAgentGraph,
   parseAgentGraphAllowingEmpty,
-  projectCanvasToAgentGraph,
+  canvasToAgentGraph,
   type AgentGraphView,
 } from "@/lib/agent-graph";
 import {
@@ -16,7 +16,7 @@ import {
   type AgentCanvasWriteDependencies,
 } from "@/lib/agent-canvas-write";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
-import { jsonError, readJsonBody } from "@/lib/project-requests";
+import { jsonError, readJsonBody } from "@/lib/api-requests";
 
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -59,7 +59,7 @@ type EditDecision = "applied" | "stale" | "collision";
  * top of geometry that is about to change.
  */
 function applyDiff(
-  projectId: string,
+  diagramId: string,
   flow: AgentCanvasFlow,
   diff: AgentGraphDiff,
   desired: CanvasSnapshot,
@@ -126,7 +126,7 @@ function applyDiff(
   }
 
   return drawNodesThenEdges(
-    projectId,
+    diagramId,
     flow,
     diff.addedNodes.map((node) => desiredNodes.get(node.id)!),
     diff.addedEdges.map((edge) => desiredEdges.get(edge.id)!),
@@ -145,10 +145,10 @@ function applyDiff(
  */
 export async function handleAgentGraphEditPost(
   request: Request,
-  projectId: string,
+  diagramId: string,
   dependencies: AgentGraphEditDependencies,
 ): Promise<Response> {
-  const access = await dependencies.authorizeProject(projectId, { requireOwner: true });
+  const access = await dependencies.authorizeDiagram(diagramId, { requireOwner: true });
 
   if (!access.ok) {
     return access.response;
@@ -166,7 +166,7 @@ export async function handleAgentGraphEditPost(
   let appliedSnapshot: CanvasSnapshot | null = null;
 
   try {
-    await dependencies.mutateFlow(projectId, async (flow) => {
+    await dependencies.mutateFlow(diagramId, async (flow) => {
       const liveSnapshot: CanvasSnapshot = {
         nodes: [...flow.nodes],
         edges: [...flow.edges],
@@ -177,7 +177,7 @@ export async function handleAgentGraphEditPost(
         return;
       }
 
-      const live = projectCanvasToAgentGraph(liveSnapshot);
+      const live = canvasToAgentGraph(liveSnapshot);
 
       if (collidesWithOpaque(live, parsed.graph)) {
         decision = "collision";
@@ -185,12 +185,12 @@ export async function handleAgentGraphEditPost(
       }
 
       const diff = diffAgentGraph(live, parsed.graph);
-      await applyDiff(projectId, flow, diff, desiredSnapshot, liveSnapshot, dependencies);
+      await applyDiff(diagramId, flow, diff, desiredSnapshot, liveSnapshot, dependencies);
       decision = "applied";
       appliedSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
     });
   } catch (error: unknown) {
-    console.error(`Agent graph edit failed for ${projectId}`, error);
+    console.error(`Agent graph edit failed for ${diagramId}`, error);
     return jsonError("Could not apply the graph edit", 502);
   }
 
@@ -207,9 +207,9 @@ export async function handleAgentGraphEditPost(
   }
 
   try {
-    await dependencies.saveCanvasSnapshot(projectId, appliedSnapshot);
+    await dependencies.saveCanvasSnapshot(diagramId, appliedSnapshot);
   } catch (error: unknown) {
-    console.error(`Canvas persistence failed after edit for ${projectId}`, error);
+    console.error(`Canvas persistence failed after edit for ${diagramId}`, error);
     return jsonError("Could not save the edited canvas", 502);
   }
 

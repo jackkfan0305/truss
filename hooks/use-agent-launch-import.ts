@@ -49,8 +49,8 @@ function scrubLaunchQuery(): void {
 
 function isImportable(record: AgentLaunchRecord | null, roomId: string): boolean {
   return Boolean(
-    record?.projectId === roomId &&
-      (record.stage === "project-created" || record.stage === "importing-graph"),
+    record?.diagramId === roomId &&
+      (record.stage === "diagram-created" || record.stage === "importing-graph"),
   );
 }
 
@@ -68,7 +68,7 @@ export function useAgentLaunchImport({
     try {
       const record = readLaunch(launchId);
       return record?.launchId === launchId &&
-        record.projectId === roomId &&
+        record.diagramId === roomId &&
         record.stage === "failed"
         ? UNKNOWN_IMPORT_FAILURE
         : null;
@@ -97,8 +97,8 @@ export function useAgentLaunchImport({
         remove: () => {
           window.sessionStorage.removeItem(agentLaunchStorageKey(launchId));
         },
-        importGraph: (projectId, record) =>
-          window.fetch(`/api/projects/${projectId}/agent-launch-import`, {
+        importGraph: (diagramId, record) =>
+          window.fetch(`/api/diagrams/${diagramId}/agent-launch-import`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(record),
@@ -129,7 +129,7 @@ export function useAgentLaunchImport({
     if (
       !storedRecord ||
       storedRecord.launchId !== launchId ||
-      storedRecord.projectId !== roomId
+      storedRecord.diagramId !== roomId
     ) {
       return;
     }

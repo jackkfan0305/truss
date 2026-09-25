@@ -8,155 +8,112 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
-- UI polish (2026-09-24): `TrussLoader` replaces the plain "Loading Truss",
-  "Connecting to the canvas" and agent-launch text, and backs a new
-  `app/editor/[roomId]/loading.tsx`. The projects sidebar now matches the AI
-  sidebar surface (solid `bg-elevated`), both panels use 400ms/350ms
-  `ease-smooth-out` motion, both toggles are plain Hugeicons buttons, and
-  project row actions reveal on hover. The root page title is "Truss".
-  Checked signed-in in the browser; the Liveblocks badge still overlaps the
-  composer's right edge.
+- Editor UI polish merged onto main (2026-09-24). `TrussLoader` replaces
+  the text-only app boot, canvas connect and agent entry states and backs
+  `app/editor/[roomId]/loading.tsx`. The diagrams sidebar and the top chips
+  share a solid `bg-elevated` surface, the sidebar slides on `ease-smooth-out`
+  (400ms open, 350ms close), its toggle is a plain Hugeicons button that rides
+  with the panel, and diagram row actions reveal on hover. Agent pages show a
+  check when done. This branch's AI chat overhaul and its in-route
+  orchestrator were dropped in the merge, per ADR 0001 (#39).
 
-- Trigger.dev removed (2026-09-24). `POST /api/ai/orchestrate` now runs the
-  orchestrator in the request (`maxDuration` 600s) and streams activity back
-  as NDJSON; `after()` keeps a run going if the tab closes. `trigger/*` moved to
-  `lib/orchestrator.ts`, `lib/design-agent.ts` and `lib/generate-spec.ts` as
-  plain functions, and the standalone task wrappers are gone. The token route,
-  `lib/run-tokens.ts`, `DesignRunObserver` and `trigger.config.ts` are deleted.
-  `useAgentRun` reads the response stream (`readAiRunStream`) and settles the
-  turn itself. The run ID is a hash of user, room and prompt message, and a
-  replay collides on `TaskRun.runId` and gets a 409, which replaces Trigger's
-  idempotency key. `npm run dev` is `next dev` alone. Unit suite and typecheck
-  pass; a signed-in browser run of a design turn and a spec turn is still
-  needed.
+- PR review fixes applied: storyboard owners can read every diagram on their
+  storyboard, the editor only exposes Share to storyboard owners, member-list
+  fetches cancel stale effect runs without nested state updates, and independent
+  seed writes run concurrently while dependency-ordered cleanup stays serial.
 
-- Reply streaming follow-up: the worker now publishes the first answer chunk
-  promptly instead of losing short answers to the 400ms debounce. The live
-  assistant row mounts its reply renderer before text arrives, then reveals
-  any buffered tail after completion. Saved answers still appear in full.
-  Publisher and DOM regressions cover these cases. Model and effort dropdowns
-  now show option names without right-side hints.
+- Product decision recorded for the next storyboard flow: signed-out users can
+  build a temporary storyboard with every storyboard feature except inviting
+  collaborators. The temporary storyboard lives only in the current tab and
+  disappears on refresh or tab close. A top-right `Sign in to save` action
+  opens an in-page sign-in modal, preserves it through authentication, and
+  saves the complete work as a new storyboard owned by the user's account. A
+  cancelled or failed sign-in returns to the same temporary storyboard. The
+  invite control stays hidden until sign-in succeeds. Terminal-agent work is
+  included, save failures leave the temporary storyboard available for retry,
+  and each browser tab has its own independent temporary storyboard. After a
+  successful save, the sign-in action disappears and collaboration becomes
+  available.
 
-- Sidebar streaming and control-density follow-up complete in code. The
-  existing answer renderer streams text; curated reasoning now opens and
-  reveals text as it arrives with a shimmering "Thinking" label. A thinking
-  orb sits beside that label and the matching placeholder before task activity
-  begins. Edge add/delete actions
-  stay in saved activity but are hidden from the visual task log. Model and
-  effort use compact dropdowns in the composer. The earlier header removal
-  and top-left close control remain. A live signed-in browser review is still
-  needed for the final visual check. Focused streaming and UI checks,
-  `npm run verify:unit`, `npm run typecheck`, `npm run lint`, and `npm run build`
-  pass; lint retains the existing ModelSelectorLogo image warning.
-
-- AI Elements chat migration complete in code. The live panel uses Prompt
-  Input and Model Selector in the composer, Message framing for shared turns,
-  and Task, Shimmer, and Reasoning for durable activity. Border Beam and
-  Thinking Orbs remain. The old custom input and task files and their obsolete
-  composer verification were removed after an import audit. Response and
-  CodeBlock remain because AI Elements MessageResponse failed the safe-link
-  contract; the existing scroll viewport remains because the browser needed
-  to validate Conversation was unavailable. Tool and Context have no persisted
-  event or usage data. Chain of Thought would duplicate the existing task and
-  curated reasoning record. The worker's internal tool calls are not stored in
-  `AiActivityPart`; canvas actions are stored as Task items. A signed-in
-  desktop/mobile, keyboard, reduced-motion, and two-client browser check still
-  needs browser access. `npm run verify:unit`, `npm run typecheck`,
-  `npm run lint`, and `npm run build` all exit 0. Lint retains one warning in
-  the generic registry ModelSelectorLogo image helper.
-  The final review also found and fixed collaborator bubble alignment, a
-  pagination jump when new tokens append during history loading, and automatic
-  follow reclaiming the viewport after PageUp or a scrollbar interaction.
-  Focused markup and scroll regressions cover these cases.
-
-- AI Elements migration Task 4 kept Truss's Response renderer for assistant
-  answers, curated reasoning, and spec previews. A direct MessageResponse
-  parity fixture passed raw HTML, unsafe-scheme, table, fence, partial text,
-  malformed-link, and long-answer checks, but a valid external link rendered
-  as a JavaScript button rather than an anchor with the required target and
-  rel attributes. The existing renderer and its sanitizer still pass their
-  checks. No partial Markdown migration was made; final integration is next.
-
-- AI Elements migration Task 3 uses Task rows for saved run activity, Shimmer
-  for the one active title, and a closed Reasoning disclosure for validated
-  summaries. The reasoning body still uses Truss's safe Response renderer.
-  Stale runs retain their partial work and say "Work stopped before completion";
-  failed runs keep separate wording. Focused task/UI checks, typecheck, lint,
-  and production build pass. The browser remains unavailable for a signed-in
-  keyboard and second-client check. Markdown parity is the next gate.
-
-- AI Elements migration Task 2 uses the registry Message and MessageContent
-  framing for shared prompts and answers while preserving identity, ordered
-  messages, activity, and attachments. The existing viewport now has a labeled
-  log role and keyboard focus, and loading an older page restores the reader's
-  scroll offset. The in-app browser reported no available browser, so the
-  planned signed-in scroll test could not run. AI Elements Conversation remains
-  installed but is not active until its scroll behavior can be verified.
-  Markup, a jsdom history-offset check, typecheck, lint, and production build
-  pass. Work-log migration is next.
-
-- AI Elements migration Task 1 complete in code. `AiChatComposer` composes the
-  registry Prompt Input with the existing Border Beam and drives the existing
-  sidebar submission callback. `AiInputSettings` uses AI Elements Model
-  Selector for the server allowlist and retains the thinking-effort control.
-  The send control stays disabled while working and never offers a fake Stop
-  action. New markup and jsdom keyboard checks pass, and the existing prompt
-  submission verification covers a failed send retaining its draft. Typecheck,
-  lint, unit verification, and production build pass. The model dialog still
-  needs a signed-in browser check because Base UI's dialog trigger did not
-  open in the jsdom test fixture. Later transcript and work-log tasks have not
-  started.
-
-- AI Elements migration preparation in progress. The AI Elements CLI added
-  `prompt-input`, `shimmer`, `reasoning`, `task`, `tool`, `conversation`,
-  `context`, `chain-of-thought`, `model-selector`, and `message` under
-  `components/ai-elements/`, plus their registry dependencies. Existing
-  `components/ui` files were kept; the CLI added only missing shadcn files.
-  Small compatibility fixes in the generated AI Elements files make the
-  installation typecheck against this project's Base UI and AI SDK versions.
-  `npm run typecheck`, `npm run lint`, and `npm run build` pass. Lint reports
-  one nonblocking generated `ModelSelectorLogo` image warning.
-  The live sidebar still uses the existing `components/chat` layer. The revised
-  design is in `docs/superpowers/specs/2026-09-22-ai-elements-chat-migration-design.md`
-  (commit `58b1fb5`); the user approved it. The implementation plan is drafted
-  at `docs/superpowers/plans/2026-09-22-ai-elements-chat-migration.md` and
-  awaits review and an execution-method choice.
-  Keep Border Beam and Thinking
-  Orbs in that design. Never show raw provider chain of thought, and do not
-  invent context usage or tool events that the current run model lacks.
-
-- `agent-chat-panel-overhaul` complete. All thirteen code tasks are done. The
-  AI sidebar now streams markdown answers through one sanitizer and one
-  renderer, renders runs as stacked collapsible tasks, and has a header and
-  composer with a thinking orb and a beam.
-  - `lib/markdown.ts` is deleted. `lib/markdown-tokens.ts` is the one sanitizer
-    (`html: false`, `linkify: true`, `breaks: true`, plus markdown-it's
-    `validateLink`), and `components/chat/response.tsx` is the only renderer.
-    The chat path has zero `dangerouslySetInnerHTML` call sites.
-  - The six step strings live in `AI_RUN_STEPS` in `types/tasks.ts` and are a
-    wire format: persisted chat history carries the values as they were at
-    save time, so renaming one orphans all stored runs containing the old value.
-  - `border-beam` uses `colorVariant="ocean"` with `staticColors`, not the
-    `mono` the spec named, because `mono` is baked grayscale filtered with
-    `hue-rotate` and `saturate` and the package exposes no colour override.
-    Ocean's lead stop is `rgba(100, 80, 220)` against `--accent-ai`'s
-    `rgb(100, 87, 249)` — within a few points without further tuning.
-  - The `role="status"` live region sits on the task title span, not on the
-    `<summary>`, because `role` on a summary overrides its implicit button role
-    and removes the disclosure from the accessibility tree. The title span is
-    inside the trigger and is still exactly one announcing element.
-  - `selectLiveRunStep`, the live step line above the composer, and the
-    `agent-step-sweep` CSS are all deleted. Step verbs are gone from the UI.
-  - New files: `components/chat/{response,code-block,task,ai-input,ai-input-settings,thinking-orb,border-beam}.tsx`,
-    `components/editor/ai-run-tasks.tsx`, `lib/{streaming-markdown,markdown-tokens,run-task-groups}.ts`,
-    `components/ui/popover.tsx` (shadcn CLI). Deleted: `components/editor/ai-run-activity.tsx`.
-    (`lib/run-orb-state.ts` shipped here too but was dead on arrival and was
-    removed in the final-review fix pass below — see that entry.)
-  - Six verify scripts added: `verify-run-steps.ts`, `verify-streaming-markdown.ts`,
-    `verify-markdown-tokens.ts`, `verify-chat-response.tsx`, `verify-run-task-groups.ts`,
-    `verify-chat-composer.tsx`.
+- `rename-project-to-storyboard` complete (issue #27). `Project` is gone. The
+  rows it held are now `Diagram` — the Liveblocks room, the canvas blob, the
+  `/editor/[roomId]` page, and every MCP tool — and `Storyboard` is a new
+  top-level model holding owner, name, description, and the collaborator list.
+  `Diagram.storyboardId` is nullable, so a diagram that belongs to no plan is
+  still a valid diagram. That is the shape every agent-created one starts in.
+  - Old rows are dropped, not migrated. Migration
+    `20260830210000_storyboards_and_diagrams` drops `Project`,
+    `ProjectCollaborator`, and the `ProjectStatus` enum, then creates
+    `Storyboard`, `StoryboardCollaborator`, and `Diagram`. A fresh database
+    from the migrations produces exactly four tables and a working app with no
+    rows; verified by applying the whole history to a throwaway Postgres.
+  - Deletion state is two nullable timestamps rather than a lifecycle enum.
+    `deletingAt` is the durable tombstone, `deletedAt` finalizes it after the
+    Liveblocks room is gone, and either one hides the diagram and reserves its
+    ID forever. They record *when*, which is what a stalled cleanup needs and a
+    `DELETING` state could never say.
+  - Collaborators moved to the storyboard, which is what the glossary says they
+    belong to. A diagram is reachable by its owner or by a collaborator on its
+    parent board, so `getSharedDiagrams` and `authorizeDiagram` both reach
+    through `storyboardId`. A standalone diagram has no list to consult and is
+    owner-only — `authorizeDiagram` refuses it before spending a Clerk call.
+  - The editor hides its Share control for a standalone diagram rather than
+    offering an invite with nowhere to land. Nothing creates a storyboard yet,
+    so today every diagram is standalone and the share path is dormant; #29
+    gives it its first rows.
+  - Deleting a diagram detaches it from its board and scrubs its name. It no
+    longer touches collaborator rows: those belong to the storyboard, and
+    deleting one diagram must not strip a plan of the people invited to it.
+    Deleting a *storyboard* cascades its collaborators but sets its diagrams'
+    `storyboardId` to null — a diagram outlives the plan it was drawn for.
+  - Routes moved: `/api/projects/*` → `/api/diagrams/*` with `[diagramId]`, and
+    the member routes to `/api/storyboards/[storyboardId]/members`. The MCP tool
+    arguments renamed with them (`projectId` → `diagramId`); tool *names* were
+    already diagram-shaped. The skill's credential cache keys renamed too, so an
+    existing `~/.truss/credentials.json` keeps its token and refills its list on
+    the next call.
+  - `lib/access.ts` is new and holds `Identity`, `getCurrentIdentity`, and
+    `Authorization`, so `lib/diagram-access.ts` and `lib/storyboard-access.ts`
+    need not depend on each other. `lib/project-requests.ts` became
+    `lib/api-requests.ts`, since both surfaces parse through it.
   - Gates: `npm run typecheck`, `npm run lint`, `npm run verify:unit`, and
-    `npm run build` all exit 0.
+    `npm run build` all exit 0. `verify:integration` was run against a
+    throwaway Postgres rather than the live database, since the migration drops
+    tables. `context/feature-specs/` was deliberately left alone: it is a record
+    of past increments, and renaming it would have it claim identifiers that
+    never existed.
+  - Not done: no live authenticated end-to-end MCP run against a dev server.
+    The dev Clerk instance's interactive sign-in still blocks automation, the
+    same limitation recorded for earlier tasks.
+
+- `remove-server-side-ai` complete (issue #26). Truss now runs no model of its
+  own — see `docs/adr/0001-no-server-side-ai.md`. Deleted: the AI sidebar with
+  its transcript and composer, `/api/ai/chat`, `/api/ai/orchestrate` and its
+  token route, the orchestrator loop, run tokens, the activity stream, the
+  design run observer, spec generation and download, and all three Trigger.dev
+  tasks with `trigger.config.ts`. `TaskRun`, `ProjectSpec`, and
+  `AiRequestRateLimit` are dropped by migration
+  `20260830120000_drop_server_side_ai`. `ai`, `@ai-sdk/google`, and the three
+  `@trigger.dev/*` packages are out of `package.json`.
+  - What survives is everything the terminal agent uses. `lib/ai-activity.ts`
+    keeps `setAiPresence`/`clearAiPresence` for the paced draw and lost
+    `publishAiStatus`; `lib/canvas-read.ts` keeps only `readCanvas` and no
+    longer imports a Trigger logger; `types/tasks.ts` is down to the agent
+    identity and the pacing constants.
+  - `isThinking` is gone from the global `Liveblocks` presence interface, so the
+    cursor badge no longer renders a spinner.
+  - `lib/design-plan.ts` went too: 805 lines of plan parsing, action application
+    and cursor targeting that only the removed tier called. Its one live
+    export, `DesignContext`, moved to `types/canvas.ts` beside the node and edge
+    shapes it is made of.
+  - `TRIGGER_SECRET_KEY` and its `_PROD` twin are out of the env-key verifier,
+    which now pins the rule with `BLOB_READ_WRITE_TOKEN`. `push-vercel-env.ts`
+    is the only caller of `resolveEnvKeys` left.
+  - Ten verify scripts covering the removed surfaces are deleted;
+    `verify-editor-controls.tsx` lost its AI-sidebar and right-toggle
+    assertions and gained one that no right toggle renders at all.
+  - Gates: `typecheck`, `lint`, `verify:unit`, and `build` all exit 0. The build
+    lists no `/api/ai` route.
 
 - `unified-agent-operations` complete. Create now runs headless like edit: it
   POSTs `/api/projects` (bearer) with the same readable `<slug>-<suffix>` room
@@ -1618,115 +1575,11 @@ result is observed.
   with an empty canvas, and vice versa. Splitting the database is the fix if
   that becomes confusing.
 
-## Final whole-branch review fix pass
+## CI quality fix — 2026-08-30
 
-- Three findings from a final review of the whole `agent-chat-overhaul`
-  branch, all fixed:
-  1. `components/editor/chat-entry.tsx` rendered the assistant answer through
-     `Response` without `isStreaming`, so `lib/streaming-markdown.ts`'s tail
-     repair never ran on the one text stream it exists for. Fixed by deriving
-     `isStreaming` from `message.run?.phase === "running"` — confirmed against
-     `lib/ai-run-chat.ts`, where `appendContent` streams deltas into `content`
-     while `phase` stays `"running"`, and only `finish()` flips it alongside
-     the final content — and forwarding it to `Response`. Regression test:
-     `checkChatEntryDerivesStreamingStateForResponse` in
-     `scripts/verify-ai-chat-ui.tsx`, asserting on the component's source
-     rather than rendered markup, because `useSmoothText` reveals from zero on
-     first render and a static render of a streaming vs. non-streaming
-     `Response` looks the same either way.
-  2. `AiInputPill` (`components/chat/ai-input.tsx`) only destructured
-     `{ label, detail, onClick, disabled, render }`, so wrapping it in a
-     `PopoverTrigger`'s `render` prop (`ai-input-settings.tsx`) silently
-     dropped the ref and ARIA props Base UI clones onto it (`ref`,
-     `aria-haspopup`, `aria-expanded`, `aria-controls`, `id`). Fixed by
-     accepting `ref` plus `...rest` and forwarding both to `Button`, and by
-     giving `Button` (`components/ui/button.tsx`) a `ref` parameter it
-     forwards to the underlying `@base-ui/react/button` primitive.
-  3. `lib/run-orb-state.ts`'s `selectOrbState` was dead: nothing called it.
-     The natural caller, the remote-run row in
-     `components/editor/ai-chat-transcript.tsx`, has `status?.text` available,
-     but that text (`trigger/design-agent.ts`: `"Reading the canvas…"`,
-     `"Designing…"`, free-form summaries) never matches an `AI_RUN_STEPS`
-     value — those are ellipsis-free step verbs written to the *chat run's*
-     activity log, not to the status feed. Wiring `selectOrbState(status?.text)`
-     would only ever return its `"working"` fallback, i.e. the literal already
-     hardcoded there. Deleted `lib/run-orb-state.ts` and its two orb-mapping
-     checks in `scripts/verify-run-steps.ts` instead of wiring a call that
-     could never do anything.
-- Gates: typecheck, lint, `verify:unit`, and `build` all exit 0.
-
-## Reference composer and Metal FX
-
-- Installed `metal-fx@2.0.11` and reshaped the AI Elements composer to the
-  supplied dark, rounded reference. The plus glyph is visual only. Model and
-  effort stay functional dropdowns; the model trigger reads "Agent" and exposes
-  its current model on hover, while effort displays the actual chosen level
-  because no automatic effort mode exists.
-- The send arrow now uses a chromatic Metal FX circle. The ring pauses for
-  reduced motion and the existing border beam remains the working indicator.
-  The prompt and Enter-to-send path remain on AI Elements Prompt Input.
-- Focused composer markup and interaction checks, typecheck, full lint (one
-  existing AI Elements image warning), `verify:unit`, and the production build
-  pass. The unit command needed
-  access to `tsx`'s local IPC pipe, and Next's font fetch needed network access.
-
-## Composer visual correction
-
-- Removed Prompt Input's inner InputGroup border and dark fill in this composer.
-  That layer sat over the rounded outer form and made its corners and surface
-  look doubled. The outer form now owns the visible background and edge.
-- Forced the model and effort triggers to a full pill radius because the
-  library's small-trigger radius selector overrode the earlier `rounded-full`
-  utility. Raised their fills, the decorative plus, and the plain send button
-  so each control remains legible without WebGL. The sidebar uses an elevated
-  charcoal background, with subtle message and composer surfaces.
-- A headless Chromium static render confirmed a 32px composer radius, a
-  transparent borderless inner InputGroup, and 9999px trigger radii. This
-  render does not hydrate Metal FX or exercise the signed-in sidebar.
-- After the final surface adjustment, a second Chromium render confirmed the
-  pills' raised fill and a visible plain send edge. Typecheck, lint, full unit
-  verification, production build, and `git diff --check` pass. Lint retains
-  the existing AI Elements image warning.
-
-## Compact composer follow-up
-
-- Reduced the composer radius and height, along with the plus and send circles.
-  Removed the sidebar's footer wrapper so the rounded beam/form is the only
-  bottom chat element; the composer itself owns its outer margin. The working
-  beam remains aligned to its radius. A local Chromium render measured the
-  beam and form at the same 392x118px box with a 28px radius and a transparent,
-  borderless inner group. Typecheck, lint, unit verification, production build,
-  and `git diff --check` pass. Lint retains the existing AI Elements image
-  warning.
-
-## Composer focus and size follow-up
-
-- A Chromium focus inspection found the apparent rectangular layer: AI
-  Elements' inner InputGroup drew a 3px focus ring inside the outer form's
-  focus border. The composer now suppresses that inner ring while retaining
-  one subtle border on the rounded form. Its minimum height drops another
-  12px, with the beam and inner clipping radii aligned to the new 26px edge.
-- A second focused Chromium render measured the form and beam at the same
-  392x106px box and confirmed that the inner group has no background, border,
-  or box shadow. Typecheck, lint, full unit verification, production build,
-  and `git diff --check` pass. Lint retains the existing AI Elements image
-  warning.
-
-## Composer wrapper correction
-
-- An attempt to remove the extra rectangle by making the sidebar transparent
-  was rejected: the user wants the normal dark chat background. The full-height
-  elevated sidebar background, left border, shadow, and normal pointer behavior
-  are restored.
-- The idle Border Beam wrapper is now absent from the DOM. The rounded Prompt
-  Input form renders directly with the same outer margin; Border Beam wraps it
-  only while work is active. This removes the extra idle container while keeping
-  the requested working effect. A markup regression checks both states. The
-  direct form overrides Prompt Input's default `w-full`: otherwise its side
-  margins overflow the sidebar and clip the right rounded corner.
-- Focused markup and keyboard submission checks and typecheck pass. Production
-  build, full unit verification, lint, and `git diff --check` pass. A Chromium
-  preview confirmed the idle form is a direct child of the dark sidebar, has
-  no Border Beam wrapper, and fits from x=13 to x=404 inside the 416px sidebar
-  with a 26px rounded edge. In the working render, the beam and form share those
-  same bounds. Lint retains the existing AI Elements image warning.
+- Restored only the vendored `.agents/skills/truss-diagram` sources required by
+  the unit verifiers and ignored unrelated local skills. A clean CI checkout
+  now includes the Truss loopback, core, and MCP implementations without
+  pulling in unrelated agent skills.
+- Configured `turbopack.root` to the current application directory so nested
+  worktrees do not make Next.js select a parent checkout's lockfile.

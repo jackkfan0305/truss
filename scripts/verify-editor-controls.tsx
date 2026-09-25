@@ -1,38 +1,23 @@
 import assert from "node:assert/strict"
-import { LiveblocksProvider, RoomProvider } from "@liveblocks/react/suspense"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { AiSidebar } from "../components/editor/ai-sidebar"
 import { EditorNavbar } from "../components/editor/editor-navbar"
-import { ProjectSidebar } from "../components/editor/project-sidebar"
+import { DiagramSidebar } from "../components/editor/diagram-sidebar"
 
 const baseNavbarProps = {
   isSidebarOpen: false,
   onToggleSidebar: () => undefined,
-  projectName: "Checkout API",
+  diagramName: "Checkout API",
   onShare: () => undefined,
   onOpenTemplates: () => undefined,
-  onToggleAiSidebar: () => undefined,
   saveStatus: <span>Saved</span>,
   presence: <span>Collaborators</span>,
   profile: <span>Profile</span>,
 }
 
-const closedHtml = renderToStaticMarkup(
-  <EditorNavbar {...baseNavbarProps} isAiSidebarOpen={false} />
-)
-const projectsOpenHtml = renderToStaticMarkup(
-  <EditorNavbar
-    {...baseNavbarProps}
-    isSidebarOpen
-    isAiSidebarOpen={false}
-  />
-)
-const aiOpenHtml = renderToStaticMarkup(
-  <EditorNavbar {...baseNavbarProps} isAiSidebarOpen />
-)
-const bothOpenHtml = renderToStaticMarkup(
-  <EditorNavbar {...baseNavbarProps} isSidebarOpen isAiSidebarOpen />
+const closedHtml = renderToStaticMarkup(<EditorNavbar {...baseNavbarProps} />)
+const diagramsOpenHtml = renderToStaticMarkup(
+  <EditorNavbar {...baseNavbarProps} isSidebarOpen />
 )
 const homeHtml = renderToStaticMarkup(
   <EditorNavbar
@@ -42,37 +27,32 @@ const homeHtml = renderToStaticMarkup(
   />
 )
 
-const projectSidebarProps = {
+/*
+ * A diagram with no parent storyboard has nobody to invite — collaborators are
+ * invited to a storyboard, never to a diagram — so the shell passes no
+ * `onShare` and the navbar must render no Share control at all. Offering one
+ * would open a dialog whose invite POST the server answers 404.
+ */
+const standaloneHtml = renderToStaticMarkup(
+  <EditorNavbar {...baseNavbarProps} onShare={undefined} />
+)
+
+const diagramSidebarProps = {
   isOpen: true,
   onClose: () => undefined,
-  ownedProjects: [],
-  sharedProjects: [],
-  onCreateProject: () => undefined,
-  onRenameProject: () => undefined,
-  onDeleteProject: () => undefined,
+  ownedDiagrams: [],
+  sharedDiagrams: [],
+  onCreateDiagram: () => undefined,
+  onRenameDiagram: () => undefined,
+  onDeleteDiagram: () => undefined,
 }
-const openProjectSidebarHtml = renderToStaticMarkup(
-  <ProjectSidebar {...projectSidebarProps} />
+const openDiagramSidebarHtml = renderToStaticMarkup(
+  <DiagramSidebar {...diagramSidebarProps} />
 )
-const closedProjectSidebarHtml = renderToStaticMarkup(
-  <ProjectSidebar {...projectSidebarProps} isOpen={false} />
+const closedDiagramSidebarHtml = renderToStaticMarkup(
+  <DiagramSidebar {...diagramSidebarProps} isOpen={false} />
 )
 
-function renderAiSidebar(isOpen: boolean): string {
-  return renderToStaticMarkup(
-    <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
-      <RoomProvider
-        id="verify-editor-controls"
-        initialPresence={{ cursor: null, isThinking: false }}
-      >
-        <AiSidebar isOpen={isOpen} useCollaboratorsSource={() => []} />
-      </RoomProvider>
-    </LiveblocksProvider>
-  )
-}
-
-const openAiSidebarHtml = renderAiSidebar(true)
-const closedAiSidebarHtml = renderAiSidebar(false)
 
 function controlledButton(html: string, controls: string): string {
   const tag = html.match(
@@ -102,112 +82,80 @@ function parentDivContaining(html: string, text: string): string {
   return html.slice(tagStart, tagEnd + 1)
 }
 
-const closedProjectsToggle = controlledButton(closedHtml, "projects-sidebar")
-const openProjectsToggle = controlledButton(
-  projectsOpenHtml,
-  "projects-sidebar"
+const closedDiagramsToggle = controlledButton(closedHtml, "diagrams-sidebar")
+const openDiagramsToggle = controlledButton(
+  diagramsOpenHtml,
+  "diagrams-sidebar"
 )
-const closedAiToggle = controlledButton(closedHtml, "ai-sidebar")
-const openProjectSidebar = controlledRegion(
-  openProjectSidebarHtml,
-  "projects-sidebar"
+const openDiagramSidebar = controlledRegion(
+  openDiagramSidebarHtml,
+  "diagrams-sidebar"
 )
-const closedProjectSidebar = controlledRegion(
-  closedProjectSidebarHtml,
-  "projects-sidebar"
+const closedDiagramSidebar = controlledRegion(
+  closedDiagramSidebarHtml,
+  "diagrams-sidebar"
 )
-const openAiSidebar = controlledRegion(openAiSidebarHtml, "ai-sidebar")
-const closedAiSidebar = controlledRegion(closedAiSidebarHtml, "ai-sidebar")
-const closedProjectTitle = parentDivContaining(closedHtml, "Checkout API")
-const aiOpenProjectTitle = parentDivContaining(aiOpenHtml, "Checkout API")
-const aiOpenUtilities = parentDivContaining(aiOpenHtml, "Saved")
+const closedDiagramTitle = parentDivContaining(closedHtml, "Checkout API")
 
-// Both sidebar toggles are plain icon buttons, not floating chips.
-assert.doesNotMatch(closedProjectsToggle, /border-surface-border|backdrop-blur-xl/)
-assert.doesNotMatch(closedAiToggle, /border-surface-border|backdrop-blur-xl/)
+// The sidebar toggle is a plain icon button, not a floating chip.
+assert.doesNotMatch(closedDiagramsToggle, /border-surface-border|backdrop-blur-xl/)
 assert.doesNotMatch(
   closedHtml,
-  /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="(?:projects-sidebar|ai-sidebar)"/
+  /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="diagrams-sidebar"/
 )
-assert.match(closedProjectsToggle, /top-3/)
-assert.match(closedProjectsToggle, /left-3/)
+assert.match(closedDiagramsToggle, /top-3/)
+assert.match(closedDiagramsToggle, /left-3/)
 assert.ok(
-  openProjectsToggle.includes(
+  openDiagramsToggle.includes(
     "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)]"
   ),
   "the open toggle slides to the panel's inner edge on a transform"
 )
-assert.match(closedAiToggle, /top-3/)
-assert.match(closedAiToggle, /right-3/)
-
-assert.match(closedProjectsToggle, /aria-expanded="false"/)
-assert.match(closedProjectsToggle, /aria-label="Open projects sidebar"/)
-assert.match(openProjectsToggle, /aria-expanded="true"/)
-assert.match(openProjectsToggle, /aria-label="Close projects sidebar"/)
+assert.match(closedDiagramsToggle, /aria-expanded="false"/)
+assert.match(closedDiagramsToggle, /aria-label="Open diagrams sidebar"/)
+assert.match(openDiagramsToggle, /aria-expanded="true"/)
+assert.match(openDiagramsToggle, /aria-label="Close diagrams sidebar"/)
 // Hugeicons SidebarLeftIcon, the same glyph open or closed (shadcn's pattern).
 assert.match(closedHtml, /d="M9\.5 3L9\.5 21"/)
-assert.match(projectsOpenHtml, /d="M9\.5 3L9\.5 21"/)
+assert.match(diagramsOpenHtml, /d="M9\.5 3L9\.5 21"/)
 
-assert.match(closedAiToggle, /aria-expanded="false"/)
-assert.match(closedAiToggle, /aria-label="Open AI sidebar"/)
-assert.match(closedHtml, /d="M14\.5 3\.00003L14\.5 21"/)
-
-// One close affordance, not two: the panel header carries the close control
-// while the panel is open, so the navbar's floating toggle must not render
-// there as well.
-assert.doesNotMatch(
-  aiOpenHtml,
-  /aria-controls="ai-sidebar"/,
-  "the navbar toggle does not duplicate the panel header's close control"
-)
+// No right-hand toggle survives the AI removal (ADR 0001).
+assert.doesNotMatch(closedHtml, /lucide-panel-right-open|lucide-panel-right-close/)
 
 assert.match(closedHtml, /Checkout API/)
-assert.doesNotMatch(projectsOpenHtml, /Checkout API/)
-assert.match(aiOpenHtml, /Checkout API/)
-assert.doesNotMatch(bothOpenHtml, /Checkout API/)
-assert.match(closedProjectTitle, /top-3/)
-assert.match(closedProjectTitle, /left-14/)
-assert.match(aiOpenProjectTitle, /top-15/)
-assert.match(aiOpenProjectTitle, /max-w-\[calc\(100%-14rem\)\]/)
-assert.match(aiOpenProjectTitle, /xl:top-3/)
-assert.match(aiOpenUtilities, /top-15/)
-assert.match(aiOpenUtilities, /xl:top-3/)
-assert.match(aiOpenUtilities, /xl:right-\[calc\(26rem\+0\.75rem\)\]/)
+assert.doesNotMatch(diagramsOpenHtml, /Checkout API/)
+assert.match(closedDiagramTitle, /top-3/)
+assert.match(closedDiagramTitle, /left-14/)
 
 assert.match(closedHtml, /Saved/)
 assert.match(closedHtml, /Templates/)
 assert.match(closedHtml, /Share/)
 assert.match(closedHtml, /Collaborators/)
 assert.match(closedHtml, /Profile/)
-assert.doesNotMatch(closedHtml, /lucide-sparkles/)
 assert.match(closedHtml, /pointer-events-none absolute/)
 assert.doesNotMatch(closedHtml, /border-b/)
-assert.doesNotMatch(homeHtml, /AI sidebar/)
 assert.match(homeHtml, /Profile/)
 
-assert.match(openProjectSidebar, /inset-y-0/)
-assert.match(openProjectSidebar, /left-0/)
-assert.match(openProjectSidebar, /w-72/)
-assert.match(openProjectSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
-assert.match(openProjectSidebar, /translate-x-0/)
-assert.match(openProjectSidebarHtml, /max-sm:pt-8/)
-assert.doesNotMatch(openProjectSidebarHtml, /Close projects sidebar/)
-assert.doesNotMatch(openProjectSidebarHtml, /lucide-x/)
-assert.match(closedProjectSidebar, /inert=""/)
+assert.doesNotMatch(standaloneHtml, /Share/)
+// The rest of the workspace chrome is untouched by the missing parent: only
+// Share goes, so a failure here is a gate that took too much with it.
+assert.match(standaloneHtml, /Templates/)
+assert.match(standaloneHtml, /Saved/)
+assert.match(standaloneHtml, /Checkout API/)
+
+assert.match(openDiagramSidebar, /inset-y-0/)
+assert.match(openDiagramSidebar, /left-0/)
+assert.match(openDiagramSidebar, /w-72/)
+assert.match(openDiagramSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
+assert.match(openDiagramSidebar, /translate-x-0/)
+assert.match(openDiagramSidebarHtml, /max-sm:pt-8/)
+assert.doesNotMatch(openDiagramSidebarHtml, /Close diagrams sidebar/)
+assert.doesNotMatch(openDiagramSidebarHtml, /lucide-x/)
+assert.match(closedDiagramSidebar, /inert=""/)
 assert.match(
-  closedProjectSidebar,
+  closedDiagramSidebar,
   /-translate-x-\[calc\(100%\+2rem\)\]/
 )
 
-assert.match(openAiSidebar, /inset-y-0/)
-assert.match(openAiSidebar, /right-0/)
-assert.match(openAiSidebar, /w-\[26rem\]/)
-assert.match(openAiSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
-assert.match(openAiSidebar, /translate-x-0/)
-assert.match(closedAiSidebar, /inert=""/)
-assert.match(
-  closedAiSidebar,
-  /translate-x-\[calc\(100%\+2rem\)\]/
-)
 
 console.info("Editor floating-control checks passed")

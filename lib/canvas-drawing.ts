@@ -1,34 +1,26 @@
 import type { XYPosition } from "@xyflow/react";
 
-import {
-  AI_CURSOR_ARRIVAL_PAD_MS,
-  AI_CURSOR_SWEEP_MS,
-  getBuildStepMs,
-} from "@/types/tasks";
+import { AI_CURSOR_ARRIVAL_PAD_MS, AI_CURSOR_SWEEP_MS, getBuildStepMs } from "@/types/tasks";
 
-export interface PacedCanvasAction<Flow> {
+export interface PacedCanvasAction<Target> {
   target: () => XYPosition | null;
-  apply: (flow: Flow) => void;
+  apply: (target: Target) => void;
 }
 
 export interface CanvasDrawingDependencies {
-  setAiPresence: (
-    roomId: string,
-    presence: { cursor: XYPosition | null },
-  ) => Promise<void>;
-  clearAiPresence: (roomId: string) => Promise<void>;
+  moveCursor: (cursor: XYPosition) => void;
+  clearCursor: () => void;
   sleep: (milliseconds: number) => Promise<void>;
 }
 
 /**
- * The native server drawing loop used by both AI plans and caller-supplied
- * graph imports. Call this inside one `mutateCanvas` callback: each wait lets
- * the operation flush incremental operations without another storage fetch.
+ * Applies actions at a watchable pace, with the agent cursor arriving before
+ * each one lands (32-live-canvas-building). Runs in the browser now: the
+ * server writes an agent's change at once, and the open editor replays it.
  */
-export async function drawPacedCanvasActions<Flow>(
-  roomId: string,
-  flow: Flow,
-  actions: readonly PacedCanvasAction<Flow>[],
+export async function drawPacedCanvasActions<Target>(
+  target: Target,
+  actions: readonly PacedCanvasAction<Target>[],
   dependencies: CanvasDrawingDependencies,
 ): Promise<number> {
   const stepMs = getBuildStepMs(actions.length);
@@ -36,27 +28,19 @@ export async function drawPacedCanvasActions<Flow>(
 
   try {
     for (const action of actions) {
-      const target = action.target();
+      const cursor = action.target();
 
-      if (target) {
-        // Presence is cosmetic: it must not delay a canvas write beyond the
-        // actual cursor travel time below.
-        void dependencies
-          .setAiPresence(roomId, { cursor: target })
-          .catch(() => undefined);
+      if (cursor) {
+        dependencies.moveCursor(cursor);
         await dependencies.sleep(AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS);
       }
 
-      action.apply(flow);
+      action.apply(target);
       applied += 1;
       await dependencies.sleep(stepMs);
     }
   } finally {
-    try {
-      await dependencies.clearAiPresence(roomId);
-    } catch {
-      // A presence clear is cosmetic and cannot invalidate the persisted graph.
-    }
+    dependencies.clearCursor();
   }
 
   return applied;

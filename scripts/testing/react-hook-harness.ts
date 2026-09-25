@@ -61,6 +61,11 @@ export function createReactHookHarness<Input, Output>(
       callbacks[index] = { dependencies, value: callback };
       return callback;
     },
+    useContext<T>(/* _context: React.Context<T | null> */): T | null {
+      cursor++;
+      // No provider in the test harness; return null so optional chaining works
+      return null;
+    },
     useEffect(create: () => EffectCleanup, dependencies: DependencyList): void {
       const index = cursor++;
       const previous = effects[index];

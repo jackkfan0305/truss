@@ -34,15 +34,18 @@ import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
+import { useSetAgentPresence } from "@/components/canvas/agent-presence";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
 import { useCanvasSave } from "@/components/canvas/canvas-save-context";
 import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
 import { useCanvasHistory } from "@/hooks/use-canvas-history";
+import { useCanvasRemoteSync } from "@/hooks/use-canvas-remote-sync";
 import { isCanvasHistoryCommit } from "@/lib/canvas-history";
 import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { RemoteCanvas } from "@/lib/canvas-client";
+import { drawNodesThenEdges, planCanvasReplay } from "@/lib/canvas-replay";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -140,7 +143,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
    * prop: the indicator lives outside `ReactFlowProvider` and cannot read the
    * flow state that drives it (21-canvas-autosave).
    */
-  const { setStatus: setSaveStatus, registerSaveNow } = useCanvasSave();
+  const { setStatus: setSaveStatus, registerSaveNow, registerSyncNow } = useCanvasSave();
   const [nodes, setNodes, applyNodeChanges] = useNodesState<CanvasNode>(initial.snapshot.nodes);
   const [edges, setEdges, applyEdgeChanges] = useEdgesState<CanvasEdge>(initial.snapshot.edges);
   const { fitView, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
@@ -246,6 +249,55 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
     // home would call into an unmounted canvas.
     return () => registerSaveNow(null);
   }, [autosave.saveNow, registerSaveNow]);
+
+  const setAgentPresence = useSetAgentPresence();
+
+  // Read from an async callback that outlives the render that created it.
+  const latest = useRef(current);
+
+  useEffect(() => {
+    latest.current = current;
+  }, [current]);
+
+  const applyRemoteCanvas = useCallback(
+    async (remote: RemoteCanvas) => {
+      autosave.adopt(canonicalCanvasPayload(remote.snapshot), remote.version);
+      // Undo must never reach back across a change this tab did not make.
+      history.reset();
+
+      if (!remote.isAgentWrite) {
+        restore(remote.snapshot);
+        return;
+      }
+
+      const plan = planCanvasReplay(latest.current, remote.snapshot);
+
+      restore(plan.base);
+      await autosave.whilePaused(() =>
+        drawNodesThenEdges(
+          plan,
+          {
+            addNodes: (added) => setNodes((existing) => [...existing, ...added]),
+            addEdges: (added) => setEdges((existing) => [...existing, ...added]),
+          },
+          {
+            moveCursor: (cursor) => setAgentPresence({ cursor }),
+            clearCursor: () => setAgentPresence(null),
+            sleep: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
+          },
+        ),
+      );
+    },
+    [autosave, history, restore, setAgentPresence, setEdges, setNodes],
+  );
+
+  const { syncNow } = useCanvasRemoteSync(diagramId, autosave, applyRemoteCanvas);
+
+  useEffect(() => {
+    registerSyncNow(syncNow);
+
+    return () => registerSyncNow(null);
+  }, [registerSyncNow, syncNow]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {

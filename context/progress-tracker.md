@@ -1637,3 +1637,20 @@ result is observed.
   worktrees do not make Next.js select a parent checkout's lockfile.
 
 [Task 8 complete: The canvas runs on local React Flow state.]
+
+[Task 9 complete: Idle sync and the agent replay.]
+- The canvas polls for remote changes on a 4-second idle interval and replays
+  agent writes through the browser-local pacing loop (cursor + delay). Remote
+  writes update the canvas immediately; removals and updates land at once while
+  new nodes and edges arrive paced behind the moving cursor. Unsaved edits block
+  polling. Launch imports trigger an immediate sync after the import completes,
+  so the user sees the graph draw at once instead of waiting for the next poll.
+- Refactored `lib/canvas-drawing.ts` to accept browser dependencies
+  (`moveCursor`, `clearCursor`, `sleep`) instead of server-side Liveblocks ones.
+  Created `lib/canvas-replay.ts` with `planCanvasReplay` and `drawNodesThenEdges`
+  to split remote snapshots into immediate updates and paced additions.
+- Implemented `useCanvasRemoteSync` hook for polling and `useCanvasSyncNow` to
+  expose syncNow to contexts without a provider (launch import status). Added
+  `registerSyncNow` to `CanvasSaveContext` alongside `registerSaveNow`.
+- Fixed react-hook-harness to support `useContext` for test compatibility.
+- All gates pass: `typecheck`, `lint`, `verify:unit`.

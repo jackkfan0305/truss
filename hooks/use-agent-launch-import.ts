@@ -21,6 +21,7 @@ export interface UseAgentLaunchImportInput {
   launchId?: string;
   roomId: string;
   canStart: boolean;
+  onImported?: () => void;
 }
 
 export interface AgentLaunchImportState {
@@ -59,6 +60,7 @@ export function useAgentLaunchImport({
   launchId,
   roomId,
   canStart,
+  onImported,
 }: UseAgentLaunchImportInput): AgentLaunchImportState {
   const [error, setError] = useState<string | null>(() => {
     if (!launchId || !canStart) {
@@ -108,10 +110,19 @@ export function useAgentLaunchImport({
     });
   }, [canStart, launchId, roomId]);
 
-  const settle = useCallback((result: AgentLaunchImportResult) => {
-    setIsImporting(false);
-    setError(result.status === "failed" ? result.message : null);
-  }, []);
+  const settle = useCallback(
+    (result: AgentLaunchImportResult) => {
+      setIsImporting(false);
+      setError(result.status === "failed" ? result.message : null);
+
+      if (result.status === "imported") {
+        // The server wrote the graph at once; the editor replays it now
+        // instead of waiting for the next idle poll.
+        onImported?.();
+      }
+    },
+    [onImported],
+  );
 
   useEffect(() => {
     if (!launchId || !canStart) {

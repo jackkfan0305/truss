@@ -26,7 +26,7 @@ export function SaveStatusButton() {
     <Button
       variant="ghost"
       size="sm"
-      onClick={saveNow}
+      onClick={status === "conflict" ? () => window.location.reload() : saveNow}
       // Not `disabled`: a disabled control loses focus and stops being
       // announced mid-save. `aria-busy` says the same thing without that.
       aria-busy={status === "saving"}
@@ -58,4 +58,7 @@ const DISPLAY: Record<
   },
   saved: { Icon: Check, label: "Saved", tone: "text-state-success" },
   error: { Icon: AlertCircle, label: "Save failed", tone: "text-state-error" },
+  // Someone else wrote first (see useCanvasAutosave). Saving over them would
+  // discard their work, so the only way forward is a reload.
+  conflict: { Icon: AlertCircle, label: "Changed elsewhere, reload", tone: "text-state-error" },
 };

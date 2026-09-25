@@ -1,0 +1,58 @@
+"use client";
+
+import type { ReactNode } from "react";
+
+import { Canvas } from "@/components/canvas/canvas";
+import { useStoredCanvas } from "@/hooks/use-stored-canvas";
+
+interface CanvasSurfaceProps {
+  diagramId: string;
+  /** Owned by the editor shell, since the navbar is what opens the picker. */
+  isTemplatesOpen: boolean;
+  onTemplatesOpenChange: (open: boolean) => void;
+  /** Mounted only once the stored canvas has loaded. */
+  children?: ReactNode;
+}
+
+/** The canvas, with its loading and failure states around it. */
+export function CanvasSurface({
+  diagramId,
+  isTemplatesOpen,
+  onTemplatesOpenChange,
+  children,
+}: CanvasSurfaceProps) {
+  const stored = useStoredCanvas(diagramId);
+
+  if (stored.status === "loading") {
+    return <CanvasStatus>Connecting to the canvas…</CanvasStatus>;
+  }
+
+  if (stored.status === "error") {
+    // An editor that failed to load must not open empty: its first autosave
+    // would overwrite the diagram it could not read.
+    return <CanvasStatus>Could not load the canvas. Try reloading the page.</CanvasStatus>;
+  }
+
+  return (
+    <>
+      <Canvas
+        diagramId={diagramId}
+        initial={stored.canvas}
+        isTemplatesOpen={isTemplatesOpen}
+        onTemplatesOpenChange={onTemplatesOpenChange}
+      />
+      {children}
+    </>
+  );
+}
+
+function CanvasStatus({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="status"
+      className="flex h-full w-full items-center justify-center px-6 text-center text-sm text-copy-muted"
+    >
+      {children}
+    </div>
+  );
+}

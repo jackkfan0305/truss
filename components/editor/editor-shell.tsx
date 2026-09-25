@@ -4,7 +4,8 @@ import { useState } from "react"
 import { UserButton } from "@clerk/nextjs"
 import { Plus } from "lucide-react"
 
-import { CanvasRoom, CanvasSurface } from "@/components/canvas/canvas-room"
+import { CanvasSurface } from "@/components/canvas/canvas-surface"
+import { AgentPresenceProvider } from "@/components/canvas/agent-presence"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
@@ -51,8 +52,7 @@ export function EditorShell({
   const isSidebarOpen = openSidebar === "diagrams"
 
   return (
-    // No-op without an active diagram, so the editor home never joins a room.
-    <CanvasRoom roomId={activeDiagram?.id}>
+    <AgentPresenceProvider>
       {/*
         Wraps the navbar as well as the canvas: the save indicator sits in the
         navbar but is driven from inside the canvas (21-canvas-autosave).
@@ -70,8 +70,7 @@ export function EditorShell({
             onOpenTemplates={
               activeDiagram ? () => setIsTemplatesOpen(true) : undefined
             }
-            // Room-scoped, so it is only mounted where a room exists — the editor
-            // home renders the navbar without it, exactly as before.
+            // Only the workspace shows the agent avatar; the home page has no canvas for it to draw on.
             presence={activeDiagram ? <PresenceAvatars /> : undefined}
             saveStatus={activeDiagram ? <SaveStatusButton /> : undefined}
             profile={<UserButton />}
@@ -102,6 +101,7 @@ export function EditorShell({
             /* React Flow needs a sized parent, so the canvas fills `main`. */
             <main aria-label="Canvas" className="relative flex-1 bg-page">
               <CanvasSurface
+                key={activeDiagram.id}
                 diagramId={activeDiagram.id}
                 isTemplatesOpen={isTemplatesOpen}
                 onTemplatesOpenChange={setIsTemplatesOpen}
@@ -132,6 +132,6 @@ export function EditorShell({
           <DiagramDialogs actions={actions} />
         </div>
       </CanvasSaveProvider>
-    </CanvasRoom>
+    </AgentPresenceProvider>
   )
 }

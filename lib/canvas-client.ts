@@ -38,3 +38,58 @@ export function parseCanvasReadResponse(body: unknown): RemoteCanvas | "unchange
 
   return { snapshot, version: parsedVersion, isAgentWrite: isAgentWrite === true };
 }
+
+/**
+ * Loads the stored canvas. With `since`, answers `null` when the version still
+ * matches, which is the idle editor's poll.
+ */
+export async function fetchCanvas(
+  diagramId: string,
+  since?: number,
+  signal?: AbortSignal,
+): Promise<RemoteCanvas | null> {
+  const query = since === undefined ? "" : `?since=${since}`;
+  const response = await fetch(`/api/diagrams/${diagramId}/canvas${query}`, { signal });
+
+  if (!response.ok) {
+    throw new Error(`Canvas load responded ${response.status}`);
+  }
+
+  const parsed = parseCanvasReadResponse(await response.json());
+
+  if (parsed === null) {
+    throw new Error("Canvas load returned an unreadable body");
+  }
+
+  return parsed === "unchanged" ? null : parsed;
+}
+
+/** One compare-and-swap save. `payload` is already the canonical snapshot JSON. */
+export async function putCanvas(
+  diagramId: string,
+  payload: string,
+  version: number,
+): Promise<{ status: "saved"; version: number } | { status: "conflict" }> {
+  const response = await fetch(`/api/diagrams/${diagramId}/canvas`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    // Spliced rather than re-stringified: `payload` is valid JSON already.
+    body: `{"version":${version},"canvas":${payload}}`,
+  });
+
+  if (response.status === 409) {
+    return { status: "conflict" };
+  }
+
+  if (!response.ok) {
+    throw new Error(`Canvas save responded ${response.status}`);
+  }
+
+  const next = parseCanvasVersion(((await response.json()) as { version?: unknown }).version);
+
+  if (next === null) {
+    throw new Error("Canvas save response carried no version");
+  }
+
+  return { status: "saved", version: next };
+}

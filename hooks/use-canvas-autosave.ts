@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { serializeCanvasSnapshot } from "@/lib/canvas-snapshot";
-import type { CanvasEdge, CanvasNode } from "@/types/canvas";
+import { putCanvas } from "@/lib/canvas-client";
 
-export type SaveStatus = "idle" | "saving" | "saved" | "error";
+export type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
 /**
  * Long enough that dragging a node is one save rather than sixty, short enough
@@ -13,31 +12,32 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error";
  */
 const AUTOSAVE_DEBOUNCE_MS = 1500;
 
-interface CanvasAutosave {
+export interface CanvasAutosave {
   /** Flushes immediately, ignoring the debounce. Backs the navbar Save button. */
   saveNow: () => void;
+  /** Every local edit has reached the server and nothing is in flight. */
+  isClean: () => boolean;
+  /** The version this tab last read or wrote. */
+  getVersion: () => number;
+  /** Takes a server canvas as the saved baseline, so applying it is not an edit. */
+  adopt: (payload: string, version: number) => void;
+  /** Holds saves while `run` applies a remote canvas, then flushes any local edit. */
+  whilePaused: (run: () => Promise<void>) => Promise<void>;
 }
 
 /**
- * Debounced canvas persistence (21-canvas-autosave).
+ * Debounced canvas persistence against a versioned store (ADR 0005).
  *
- * Liveblocks already syncs the room between clients; this is the separate,
- * slower job of getting that state into durable storage. Every client in the
- * room runs its own copy — the writes are idempotent overwrites of the same
- * blob path, so the last one wins and none of them conflict.
+ * Every save sends the version it is based on. A `409` means someone else
+ * wrote first: the tab stops saving and the navbar asks for a reload, because
+ * saving over that write would silently discard it.
  */
 export function useCanvasAutosave(
   diagramId: string,
-  nodes: CanvasNode[],
-  edges: CanvasEdge[],
+  payload: string,
+  initialVersion: number,
   onStatusChange: (status: SaveStatus) => void,
 ): CanvasAutosave {
-  /**
-   * Status is reported, not stored. Each transition is an event in the save
-   * lifecycle, so it is emitted where it happens rather than mirrored into
-   * local state and pushed outward from an effect — which would cost a second
-   * render of the whole workspace on every save.
-   */
   const setStatus = useRef(onStatusChange);
 
   useEffect(() => {
@@ -45,46 +45,29 @@ export function useCanvasAutosave(
   }, [onStatusChange]);
 
   /**
-   * Serializing is what detects a change, so it runs on every flow update — but
-   * keyed on the arrays rather than on render, or dragging a node would
-   * re-stringify the whole diagram on every animation frame.
-   */
-  const payload = useMemo(
-    () => serializeCanvasSnapshot({ nodes, edges }),
-    [nodes, edges],
-  );
-
-  /**
-   * The last payload that reached the server. Seeded with the first render's
-   * payload so an editor that is merely *opened* never writes: without this,
-   * every client that joins a room immediately saves a copy of what it just
-   * loaded, and opening a diagram would be a write.
+   * Seeded with the payload the editor opened on, so merely opening a diagram
+   * never writes. The payload is canonical (Task 4), so React Flow measuring
+   * nodes does not count as a change either.
    */
   const savedPayload = useRef(payload);
-  const isSaving = useRef(false);
-  /** Set when an edit lands mid-flight, so the newer state is not lost. */
-  const isPendingResave = useRef(false);
-
-  /**
-   * The newest payload, readable from outside the render that produced it —
-   * by a Save click and by the mid-flight flush below. Assigned in an effect
-   * rather than during render, which `react-hooks/refs` rejects; both readers
-   * run after commit, so the timing is equivalent.
-   */
   const latestPayload = useRef(payload);
+  const version = useRef(initialVersion);
+  const isSaving = useRef(false);
+  const isPendingResave = useRef(false);
+  const isPaused = useRef(false);
+  const hasConflict = useRef(false);
+  const saveRef = useRef<((body: string) => Promise<void>) | null>(null);
 
   useEffect(() => {
     latestPayload.current = payload;
   }, [payload]);
 
-  /**
-   * Self-referential so the flush below can re-enter it. Held in a ref rather
-   * than passed around, because a `useCallback` cannot name itself.
-   */
-  const saveRef = useRef<((body: string) => Promise<void>) | null>(null);
-
   const save = useCallback(
     async (body: string) => {
+      if (isPaused.current || hasConflict.current) {
+        return;
+      }
+
       if (isSaving.current) {
         isPendingResave.current = true;
         return;
@@ -94,16 +77,15 @@ export function useCanvasAutosave(
       setStatus.current("saving");
 
       try {
-        const response = await fetch(`/api/diagrams/${diagramId}/canvas`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
+        const result = await putCanvas(diagramId, body, version.current);
 
-        if (!response.ok) {
-          throw new Error(`Canvas save responded ${response.status}`);
+        if (result.status === "conflict") {
+          hasConflict.current = true;
+          setStatus.current("conflict");
+          return;
         }
 
+        version.current = result.version;
         savedPayload.current = body;
         setStatus.current("saved");
       } catch (error: unknown) {
@@ -114,9 +96,6 @@ export function useCanvasAutosave(
       } finally {
         isSaving.current = false;
 
-        // An edit that landed mid-flight has no timer left to fire — its
-        // debounce was cancelled while this request was in the air — so the
-        // flush happens here or not at all.
         if (isPendingResave.current) {
           isPendingResave.current = false;
 
@@ -134,11 +113,9 @@ export function useCanvasAutosave(
   }, [save]);
 
   const saveNow = useCallback(() => {
-    if (latestPayload.current === savedPayload.current) {
-      return;
+    if (latestPayload.current !== savedPayload.current) {
+      void save(latestPayload.current);
     }
-
-    void save(latestPayload.current);
   }, [save]);
 
   useEffect(() => {
@@ -148,10 +125,30 @@ export function useCanvasAutosave(
 
     const timer = setTimeout(() => void save(payload), AUTOSAVE_DEBOUNCE_MS);
 
-    // Each new edit cancels the previous timer, which is what makes this a
-    // debounce rather than one save per change.
     return () => clearTimeout(timer);
   }, [payload, save]);
 
-  return { saveNow };
+  return useMemo(
+    () => ({
+      saveNow,
+      isClean: () =>
+        !isSaving.current && !hasConflict.current && latestPayload.current === savedPayload.current,
+      getVersion: () => version.current,
+      adopt: (nextPayload: string, nextVersion: number) => {
+        savedPayload.current = nextPayload;
+        version.current = nextVersion;
+      },
+      whilePaused: async (run: () => Promise<void>) => {
+        isPaused.current = true;
+
+        try {
+          await run();
+        } finally {
+          isPaused.current = false;
+          saveNow();
+        }
+      },
+    }),
+    [saveNow],
+  );
 }

@@ -29,6 +29,9 @@ interface CanvasSaveValue {
   /** The canvas hands up its flush; the navbar button calls it. */
   registerSaveNow: (saveNow: (() => void) | null) => void;
   saveNow: () => void;
+  /** The canvas hands up its sync; the launch importer calls it. */
+  registerSyncNow: (syncNow: (() => void) | null) => void;
+  syncNow: () => void;
 }
 
 const CanvasSaveContext = createContext<CanvasSaveValue | null>(null);
@@ -39,6 +42,7 @@ export function CanvasSaveProvider({ children }: { children: ReactNode }) {
   // A ref, not state: swapping the flush handle must not re-render the tree,
   // and nothing renders differently because of it.
   const saveNowRef = useRef<(() => void) | null>(null);
+  const syncNowRef = useRef<(() => void) | null>(null);
 
   const registerSaveNow = useCallback((saveNow: (() => void) | null) => {
     saveNowRef.current = saveNow;
@@ -46,9 +50,15 @@ export function CanvasSaveProvider({ children }: { children: ReactNode }) {
 
   const saveNow = useCallback(() => saveNowRef.current?.(), []);
 
+  const registerSyncNow = useCallback((syncNow: (() => void) | null) => {
+    syncNowRef.current = syncNow;
+  }, []);
+
+  const syncNow = useCallback(() => syncNowRef.current?.(), []);
+
   const value = useMemo(
-    () => ({ status, setStatus, registerSaveNow, saveNow }),
-    [status, registerSaveNow, saveNow],
+    () => ({ status, setStatus, registerSaveNow, saveNow, registerSyncNow, syncNow }),
+    [status, registerSaveNow, saveNow, registerSyncNow, syncNow],
   );
 
   return <CanvasSaveContext value={value}>{children}</CanvasSaveContext>;
@@ -63,3 +73,10 @@ export function useCanvasSave(): CanvasSaveValue {
 
   return value;
 }
+
+/** `syncNow`, or a no-op outside a `CanvasSaveProvider`. */
+export function useCanvasSyncNow(): () => void {
+  return useContext(CanvasSaveContext)?.syncNow ?? NOOP;
+}
+
+const NOOP = () => undefined;

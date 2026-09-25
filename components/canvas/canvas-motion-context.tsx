@@ -33,9 +33,8 @@ const CanvasMotionContext = createContext<CanvasMotionValue | null>(null);
 
 /**
  * How long after mount the canvas stops treating new elements as part of the
- * initial load. Long enough to cover Liveblocks Storage resolving and React
- * Flow's first render, short enough that a generated node arriving straight
- * after open still animates.
+ * initial load. The canvas mounts with its stored nodes already in hand
+ * (`CanvasSurface`), so this only has to cover React Flow's first render.
  */
 const SETTLE_MS = 800;
 

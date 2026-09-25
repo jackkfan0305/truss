@@ -35,6 +35,19 @@ Update this file whenever the current phase, active feature, or implementation s
   in `lib/agent-canvas-write.ts`. Verifier `scripts/verify-canvas-version.ts` added
   and registered in `package.json`. Phase 2 foundation complete.
 
+- Task 5 complete: Versioned Blob store and the canvas route. Implemented canvas
+  persistence as versioned snapshots: `readStoredCanvas`, `readStoredCanvasSince`,
+  `writeStoredCanvas`, `mutateStoredCanvas` in `lib/canvas-persistence.ts` handle
+  compare-and-swap on `canvasVersion` with automatic cleanup of orphaned blobs.
+  `CanvasBlobClient` interface abstracts Blob I/O for testability. `GET /api/diagrams/:id/canvas`
+  supports `?since=N` polling returning `{ changed: false }` without touching Blob.
+  `PUT` is compare-and-swap returning `{ version, savedAt }` or `409`. Updated
+  `lib/canvas-read.ts` and `app/api/diagrams/[diagramId]/canvas/route.ts` to use
+  new persistence layer. Temporary `saveCanvasSnapshot` re-export kept for agent routes
+  (removed in Task 6). Verifier `scripts/verify-canvas-store.ts` added covering
+  fresh writes, stale writes, lost swaps, read retries, polling, and mutations.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

@@ -61,6 +61,19 @@ Update this file whenever the current phase, active feature, or implementation s
   import tests that exact replays and partial resumes write nothing and something respectively.
   All gates pass: `typecheck`, `lint`, `verify:unit`.
 
+- Task 7 complete: Local undo history for the canvas. Added pure module
+  `lib/canvas-history.ts` with `pushCanvasHistory`, `undoCanvasHistory`, and
+  `redoCanvasHistory` functions managing per-tab undo/redo stacks capped at
+  `MAX_CANVAS_HISTORY=100`. `isCanvasHistoryCommit` detects whether a React Flow
+  change (drag, resize, add, remove, replace) starts an undoable edit, ignoring
+  intermediate drag frames and resize measurements. React hook `useCanvasHistory`
+  in `hooks/use-canvas-history.ts` manages checkpoint timing with
+  `CANVAS_HISTORY_COALESCE_MS=500` so rapid edits share one undo step. Exports
+  `CanvasHistoryControls` interface with `undo`, `redo`, `canUndo`, `canRedo`,
+  `checkpoint`, and `reset` methods for Task 8 to wire. Verifier
+  `scripts/verify-canvas-history.ts` added and registered in `package.json`.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

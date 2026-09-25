@@ -8,19 +8,16 @@ const storyboards = [
   {
     name: "Event-Driven Order Pipeline",
     description: "Queue-backed order intake with retries and a dead letter path.",
-    collaborators: ["ada@example.com", "grace@example.com"],
     diagrams: ["Order Intake Topology"],
   },
   {
     name: "Serverless Image Processing",
     description: "On-demand resize and transcode behind object storage.",
-    collaborators: ["linus@example.com"],
     diagrams: ["Transcode Fan-Out"],
   },
   {
     name: "Modular Monolith Starter",
     description: null,
-    collaborators: [],
     diagrams: [],
   },
 ];
@@ -48,13 +45,12 @@ async function main() {
   }
 
   const seededStoryboards = await Promise.all(
-    storyboards.map(async ({ name, description, collaborators, diagrams }) => {
+    storyboards.map(async ({ name, description, diagrams }) => {
       const storyboard = await prisma.storyboard.create({
         data: {
           name,
           description,
           ownerId: SEED_OWNER_ID,
-          collaborators: { create: collaborators.map((email) => ({ email })) },
           diagrams: {
             create: diagrams.map((diagramName) => ({
               name: diagramName,
@@ -64,13 +60,13 @@ async function main() {
         },
       });
 
-      return { storyboard, collaborators, diagrams };
+      return { storyboard, diagrams };
     }),
   );
 
-  for (const { storyboard, collaborators, diagrams } of seededStoryboards) {
+  for (const { storyboard, diagrams } of seededStoryboards) {
     console.log(
-      `Seeded storyboard ${storyboard.name} (${collaborators.length} collaborators, ${diagrams.length} diagrams)`,
+      `Seeded storyboard ${storyboard.name} (${diagrams.length} diagrams)`,
     );
   }
 

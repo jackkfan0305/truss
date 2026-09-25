@@ -32,7 +32,7 @@ export function AiInputSettings({
   const effort = AI_THINKING_LEVELS.find((entry) => entry.id === thinkingLevel)
 
   return (
-    <div className="flex min-w-0 items-center gap-0.5">
+    <div className="ml-auto flex min-w-0 items-center gap-1.5">
       <Select
         value={modelId}
         onValueChange={(value) => {
@@ -44,9 +44,11 @@ export function AiInputSettings({
           size="sm"
           disabled={disabled}
           aria-label="Choose model"
-          className="max-w-43 min-w-0 gap-1 border-0 bg-transparent px-1.5 py-0 text-xs text-copy-secondary shadow-none hover:bg-elevated hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-transparent dark:hover:bg-elevated [&_svg]:size-3"
+          title={model?.label ?? modelId}
+          style={{ borderRadius: 9999 }}
+          className="h-9 min-w-0 gap-1.5 rounded-full border border-surface-border bg-surface-border/70 px-3 text-xs text-copy-secondary shadow-none hover:bg-surface-border hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-surface-border/70 dark:hover:bg-surface-border [&_svg]:size-3"
         >
-          <span className="truncate">{model?.label ?? modelId}</span>
+          <span className="truncate">Agent</span>
         </SelectTrigger>
         <SelectContent align="start" className="w-44 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
           {AI_DESIGN_MODELS.map((entry) => (
@@ -68,9 +70,10 @@ export function AiInputSettings({
           size="sm"
           disabled={disabled}
           aria-label="Choose thinking effort"
-          className="gap-1 border-0 bg-transparent px-1.5 py-0 text-xs text-copy-secondary shadow-none hover:bg-elevated hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-transparent dark:hover:bg-elevated [&_svg]:size-3"
+          style={{ borderRadius: 9999 }}
+          className="h-9 gap-1.5 rounded-full border border-surface-border bg-surface-border/70 px-3 text-xs text-copy-secondary shadow-none hover:bg-surface-border hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-surface-border/70 dark:hover:bg-surface-border [&_svg]:size-3"
         >
-          <span className="truncate">{effort?.label ?? thinkingLevel}</span>
+          <span className="truncate">{effort?.label.split(" ")[0] ?? thinkingLevel}</span>
         </SelectTrigger>
         <SelectContent align="start" className="w-36 min-w-0 rounded-xl border border-surface-border bg-surface p-1 text-copy-primary shadow-xl motion-reduce:animate-none">
           {AI_THINKING_LEVELS.map((entry) => (

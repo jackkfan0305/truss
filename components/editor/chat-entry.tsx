@@ -73,7 +73,7 @@ export function ChatEntry({
           <time className="sr-only" dateTime={timestamp}>
             Sent at {timestamp}
           </time>
-          <MessageContent className="group-[.is-user]:ml-0 w-fit rounded-2xl bg-elevated px-3 py-2.5 text-copy-primary dark:bg-elevated dark:text-copy-primary">
+          <MessageContent className="group-[.is-user]:ml-0 w-fit rounded-2xl bg-subtle px-3 py-2.5 text-copy-primary dark:bg-subtle dark:text-copy-primary">
             <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">{message.content}</p>
           </MessageContent>
         </Message>
@@ -88,7 +88,7 @@ export function ChatEntry({
         Sent at {timestamp}
       </time>
       <Message from="user" className="max-w-full">
-        <MessageContent className="w-fit rounded-2xl bg-elevated px-3 py-2 text-copy-primary dark:bg-elevated dark:text-copy-primary">
+        <MessageContent className="w-fit rounded-2xl bg-subtle px-3 py-2 text-copy-primary dark:bg-subtle dark:text-copy-primary">
           <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed">{message.content}</p>
         </MessageContent>
       </Message>

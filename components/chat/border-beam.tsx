@@ -25,15 +25,19 @@ import { useReducedMotion } from "@/hooks/use-reduced-motion"
 export function ComposerBeam({
   isActive,
   children,
+  className,
 }: {
   isActive: boolean
   children: ReactNode
+  className?: string
 }) {
   const prefersReducedMotion = useReducedMotion()
 
   return (
     <BorderBeam
       size="md"
+      borderRadius={26}
+      className={className}
       colorVariant="ocean"
       theme="dark"
       staticColors

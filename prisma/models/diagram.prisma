@@ -10,10 +10,6 @@ model Diagram {
   name           String
   canvasJsonPath String?
 
-  /// The stable prefix for a diagram's snapshots. Each write adds a random
-  /// suffix, so a pointer never names a file that a later write overwrote.
-  canvasBlobPath String?
-
   /// Bumped on every canvas write. A writer sends the version it read, and a
   /// write against a version that has moved is refused with 409.
   canvasVersion Int @default(0)

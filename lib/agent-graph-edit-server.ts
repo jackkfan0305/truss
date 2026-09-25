@@ -10,12 +10,8 @@ import {
   diffAgentGraph,
   type AgentGraphDiff,
 } from "@/lib/agent-graph-diff";
-import {
-  drawNodesThenEdges,
-  type AgentCanvasFlow,
-  type AgentCanvasWriteDependencies,
-} from "@/lib/agent-canvas-write";
-import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
+import { CanvasVersionConflictError, type CanvasSnapshot } from "@/lib/canvas-snapshot";
+import type { AgentCanvasFlow, AgentCanvasWriteDependencies } from "@/lib/agent-canvas-write";
 import { jsonError, readJsonBody } from "@/lib/api-requests";
 
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
@@ -52,32 +48,30 @@ function parseEditRequest(value: unknown): EditRequest | null {
 type EditDecision = "applied" | "stale" | "collision";
 
 /**
- * Applies removals and updates as one batch, then draws additions paced.
+ * Applies removals and updates as one batch, then adds the new nodes and edges.
  *
  * Order is deliberate: the diagram makes room before it is drawn into, so a
  * reader sees an intentional rearrangement rather than new nodes appearing on
  * top of geometry that is about to change.
  */
 function applyDiff(
-  diagramId: string,
   flow: AgentCanvasFlow,
   diff: AgentGraphDiff,
   desired: CanvasSnapshot,
   live: CanvasSnapshot,
-  dependencies: AgentCanvasWriteDependencies,
-): Promise<void> {
+): void {
   const desiredNodes = new Map(desired.nodes.map((node) => [node.id, node]));
   const desiredEdges = new Map(desired.edges.map((edge) => [edge.id, edge]));
 
   /*
    * Edges anchored to a removed node go with it, opaque ones included.
    *
-   * `removeNodes` is a plain per-ID map delete in @liveblocks/react-flow — it
-   * does not cascade — and `diff.removedEdgeIds` only ever names edges the
-   * agent could see. An opaque edge touching a removed node would therefore
-   * survive pointing at a node that no longer exists, and because opaque items
-   * are invisible to every future diff, nothing could ever clean it up. That is
-   * permanent corruption of the room.
+   * `removeNodes` does not cascade (see `createSnapshotFlow`) and
+   * `diff.removedEdgeIds` only ever names edges the agent could see. An opaque
+   * edge touching a removed node would therefore survive pointing at a node
+   * that no longer exists, and because opaque items are invisible to every
+   * future diff, nothing could ever clean it up. That is permanent corruption
+   * of the room.
    *
    * This does not weaken the never-remove-what-you-did-not-see rule. An edge is
    * not independent of its endpoints: deleting the node is what deletes it, the
@@ -125,23 +119,16 @@ function applyDiff(
     }
   }
 
-  return drawNodesThenEdges(
-    diagramId,
-    flow,
-    diff.addedNodes.map((node) => desiredNodes.get(node.id)!),
-    diff.addedEdges.map((edge) => desiredEdges.get(edge.id)!),
-    new Map(desired.nodes.map((node) => [node.id, node.position])),
-    dependencies,
-  );
+  flow.addNodes(diff.addedNodes.map((node) => desiredNodes.get(node.id)!));
+  flow.addEdges(diff.addedEdges.map((edge) => desiredEdges.get(edge.id)!));
 }
 
 /**
  * Injectable owner-only edit workflow. Authorization precedes body parsing, so
  * an unauthorised caller cannot probe graph validation.
  *
- * The fingerprint is recomputed *inside* the mutate callback rather than before
- * it: checking outside would reintroduce exactly the read-then-write race the
- * fingerprint exists to close.
+ * The fingerprint is recomputed inside `mutateCanvas`, and the version swap
+ * closes the window between that check and the write.
  */
 export async function handleAgentGraphEditPost(
   request: Request,
@@ -163,14 +150,10 @@ export async function handleAgentGraphEditPost(
   const desiredSnapshot = materializeAgentGraph(parsed.graph);
 
   let decision: EditDecision = "stale";
-  let appliedSnapshot: CanvasSnapshot | null = null;
 
   try {
-    await dependencies.mutateFlow(diagramId, async (flow) => {
-      const liveSnapshot: CanvasSnapshot = {
-        nodes: [...flow.nodes],
-        edges: [...flow.edges],
-      };
+    await dependencies.mutateCanvas(diagramId, (flow) => {
+      const liveSnapshot: CanvasSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
 
       if (canvasFingerprint(liveSnapshot) !== parsed.fingerprint) {
         decision = "stale";
@@ -184,12 +167,14 @@ export async function handleAgentGraphEditPost(
         return;
       }
 
-      const diff = diffAgentGraph(live, parsed.graph);
-      await applyDiff(diagramId, flow, diff, desiredSnapshot, liveSnapshot, dependencies);
+      applyDiff(flow, diffAgentGraph(live, parsed.graph), desiredSnapshot, liveSnapshot);
       decision = "applied";
-      appliedSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
     });
   } catch (error: unknown) {
+    if (error instanceof CanvasVersionConflictError) {
+      return jsonError("The canvas changed since it was read", 409);
+    }
+
     console.error(`Agent graph edit failed for ${diagramId}`, error);
     return jsonError("Could not apply the graph edit", 502);
   }
@@ -200,17 +185,6 @@ export async function handleAgentGraphEditPost(
 
   if (decision === "collision") {
     return jsonError("The edit reuses an ID that is already in use", 409);
-  }
-
-  if (!appliedSnapshot) {
-    return jsonError("Could not apply the graph edit", 502);
-  }
-
-  try {
-    await dependencies.saveCanvasSnapshot(diagramId, appliedSnapshot);
-  } catch (error: unknown) {
-    console.error(`Canvas persistence failed after edit for ${diagramId}`, error);
-    return jsonError("Could not save the edited canvas", 502);
   }
 
   return Response.json({ applied: true });

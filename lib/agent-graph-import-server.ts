@@ -3,12 +3,9 @@ import {
   materializeAgentGraph,
   parseAgentGraph,
 } from "@/lib/agent-graph";
-import {
-  drawNodesThenEdges,
-  type AgentCanvasWriteDependencies,
-} from "@/lib/agent-canvas-write";
+import { CanvasVersionConflictError, type CanvasSnapshot } from "@/lib/canvas-snapshot";
+import type { AgentCanvasWriteDependencies } from "@/lib/agent-canvas-write";
 import { isAgentLaunchId } from "@/lib/agent-launch";
-import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import { jsonError, readJsonBody } from "@/lib/api-requests";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
@@ -125,17 +122,11 @@ export async function handleAgentGraphImportPost(
   }
 
   let decision: ImportDecision = "conflict";
-  try {
-    await dependencies.mutateFlow(diagramId, async (flow) => {
-      const existingSnapshot: CanvasSnapshot = {
-        nodes: [...flow.nodes],
-        edges: [...flow.edges],
-      };
 
-      const missingItems = findMissingCanonicalItems(
-        existingSnapshot,
-        requestedSnapshot,
-      );
+  try {
+    await dependencies.mutateCanvas(diagramId, (flow) => {
+      const existingSnapshot: CanvasSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
+      const missingItems = findMissingCanonicalItems(existingSnapshot, requestedSnapshot);
 
       if (!missingItems) {
         decision = "conflict";
@@ -151,33 +142,25 @@ export async function handleAgentGraphImportPost(
         existingSnapshot.nodes.length === 0 && existingSnapshot.edges.length === 0
           ? "empty"
           : "resume";
-      const requestedPositions = new Map(
-        requestedSnapshot.nodes.map((node) => [node.id, node.position]),
-      );
 
-      await drawNodesThenEdges(
-        diagramId,
-        flow,
-        missingItems.nodes,
-        missingItems.edges,
-        requestedPositions,
-        dependencies,
-      );
+      if (missingItems.nodes.length > 0) {
+        flow.addNodes(missingItems.nodes);
+      }
+
+      if (missingItems.edges.length > 0) {
+        flow.addEdges(missingItems.edges);
+      }
     });
-  } catch {
+  } catch (error: unknown) {
+    if (error instanceof CanvasVersionConflictError) {
+      return jsonError("The canvas changed since it was read", 409);
+    }
+
     return jsonError("Could not import the graph", 502);
   }
 
   if (decision === "conflict") {
     return jsonError("Canvas already contains a different graph", 409);
-  }
-
-  try {
-    await dependencies.saveCanvasSnapshot(diagramId, requestedSnapshot);
-  } catch {
-    // A Liveblocks write may already have landed. An exact replay will skip the
-    // flow write above and retry this persistence boundary.
-    return jsonError("Could not save the imported canvas", 502);
   }
 
   return Response.json({ imported: decision === "empty" || decision === "resume" });

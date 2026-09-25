@@ -48,6 +48,19 @@ Update this file whenever the current phase, active feature, or implementation s
   fresh writes, stale writes, lost swaps, read retries, polling, and mutations.
   All gates pass: `typecheck`, `lint`, `verify:unit`.
 
+- Task 6 complete: Agent writes go through the store. Rewired both agent routes
+  (`agent-graph-edit`, `agent-launch-import`) to call `mutateStoredCanvas` instead
+  of Liveblocks `mutateFlow`. Agent writes are now immediate (no server pacing);
+  a version conflict inside `mutateCanvas` throws `CanvasVersionConflictError` and
+  the route answers `409`. Deleted `lib/ai-activity.ts`, `lib/agent-graph-import-config.ts`,
+  and the temporary `saveCanvasSnapshot` from `lib/canvas-persistence.ts`. Removed
+  `drawNodesThenEdges`, `AgentCanvasAddFlow`, and Liveblocks' `CanvasDrawingDependencies`
+  from `lib/agent-canvas-write.ts`; kept the native drawing loop in `lib/canvas-drawing.ts`
+  for Task 9. Updated doc comments to reference `mutateCanvas` instead of `mutateFlow`.
+  Verifiers updated for new dependency shape: edit tests version conflict with `409`,
+  import tests that exact replays and partial resumes write nothing and something respectively.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

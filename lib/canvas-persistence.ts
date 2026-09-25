@@ -214,7 +214,7 @@ export async function writeStoredCanvas(
 
 /**
  * Read, modify and write under one version, for the agent-token routes. The
- * callback sees the same `AgentCanvasFlow` surface `mutateFlow` gave it. A
+ * callback sees the same `AgentCanvasFlow` surface `mutateCanvas` passes to it. A
  * callback that changes nothing writes nothing.
  */
 export async function mutateStoredCanvas(
@@ -239,8 +239,3 @@ export async function mutateStoredCanvas(
   );
 }
 
-/** Removed in Task 6 with its last two callers. */
-export async function saveCanvasSnapshot(diagramId: string, snapshot: CanvasSnapshot): Promise<void> {
-  const { version } = await readStoredCanvas(diagramId);
-  await writeStoredCanvas(diagramId, snapshot, { expectedVersion: version, isAgentWrite: true });
-}

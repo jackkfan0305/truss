@@ -332,7 +332,7 @@ export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
  * A stable hash of the whole live room, opaque items included.
  *
  * Optimistic concurrency for edits: the read hands this out, the apply hands it
- * back, and the server recomputes it under the same `mutateFlow` callback that
+ * back, and the server recomputes it under the same `mutateCanvas` callback that
  * performs the write. Covering opaque items matters — a collaborator editing a
  * node the agent cannot see still invalidates the basis the agent reasoned from.
  */

@@ -20,10 +20,9 @@ export interface AgentGraphReadDependencies {
  * verification script with no database, while the route binds the real
  * `authorizeDiagram` statically.
  *
- * The compact view an agent edits against comes from the live Liveblocks room,
- * never `GET /api/diagrams/:id/canvas`. That route serves the autosaved Vercel
- * Blob snapshot, which lags the room — an edit diffed against it would compute
- * its delta from a canvas that no longer exists.
+ * The compact view comes from the stored snapshot, the same one `agent-graph-edit`
+ * diffs and writes against, so the fingerprint it returns is the one an edit is
+ * checked against.
  */
 export async function handleAgentGraphGet(
   diagramId: string,

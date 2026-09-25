@@ -5,13 +5,8 @@ import {
   type AgentGraphImportDependencies,
 } from "../lib/agent-graph-import-server";
 import { materializeAgentGraph, type AgentGraph } from "../lib/agent-graph";
+import { CanvasVersionConflictError } from "../lib/canvas-snapshot";
 import type { CanvasSnapshot } from "../lib/canvas-snapshot";
-import {
-  AI_CURSOR_ARRIVAL_PAD_MS,
-  AI_CURSOR_SWEEP_MS,
-  getBuildStepMs,
-} from "../types/tasks";
-import { AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS } from "../lib/agent-graph-import-config";
 
 const launchId = "7a4b4d2e-2f28-4f91-8fbc-5622ee2b9451";
 const graph: AgentGraph = {
@@ -57,17 +52,13 @@ function createDependencies(
   overrides: Partial<AgentGraphImportDependencies> = {},
 ): {
   dependencies: AgentGraphImportDependencies;
-  getMutationCount: () => number;
   getFlowWriteCount: () => number;
   getFlowWrites: () => readonly string[];
   getPersistenceCount: () => number;
-  getSavedSnapshots: () => readonly CanvasSnapshot[];
 } {
-  let mutationCount = 0;
   let flowWriteCount = 0;
   const flowWrites: string[] = [];
   let persistenceCount = 0;
-  const savedSnapshots: CanvasSnapshot[] = [];
 
   return {
     dependencies: {
@@ -75,8 +66,7 @@ function createDependencies(
         ok: true,
         userId: "user-owner",
       }),
-      mutateFlow: async (_diagramId, callback) => {
-        mutationCount += 1;
+      mutateCanvas: async (_diagramId, callback) => {
         const flow = {
           nodes: canvas.nodes,
           edges: canvas.edges,
@@ -106,22 +96,17 @@ function createDependencies(
           },
         };
 
+        const writesBefore = flowWriteCount;
         await callback(flow);
+        if (flowWriteCount > writesBefore) {
+          persistenceCount += 1;
+        }
       },
-      saveCanvasSnapshot: async (_diagramId, snapshot) => {
-        persistenceCount += 1;
-        savedSnapshots.push(structuredClone(snapshot));
-      },
-      setAiPresence: async () => undefined,
-      clearAiPresence: async () => undefined,
-      sleep: async () => undefined,
       ...overrides,
     },
-    getMutationCount: () => mutationCount,
     getFlowWriteCount: () => flowWriteCount,
     getFlowWrites: () => flowWrites,
     getPersistenceCount: () => persistenceCount,
-    getSavedSnapshots: () => savedSnapshots,
   };
 }
 
@@ -129,7 +114,7 @@ function createDependencies(
 async function checkAuthorizationPrecedesBodyRead(): Promise<void> {
   for (const status of [401, 403]) {
     const protectedRequest = request({ launchId: "not-a-uuid", graph: null });
-    const { dependencies, getMutationCount, getPersistenceCount } = createDependencies(
+    const { dependencies, getPersistenceCount } = createDependencies(
       { nodes: [], edges: [] },
       {
         authorizeDiagram: async () => ({
@@ -147,14 +132,13 @@ async function checkAuthorizationPrecedesBodyRead(): Promise<void> {
 
     assert.equal(response.status, status);
     assert.equal(protectedRequest.bodyUsed, false, `${status} returns before reading JSON`);
-    assert.equal(getMutationCount(), 0);
     assert.equal(getPersistenceCount(), 0);
   }
 }
 
 /** The endpoint is an all-or-nothing graph boundary, including its opaque ID. */
 async function checkMalformedRequestsAreRejectedSafely(): Promise<void> {
-  const { dependencies, getMutationCount, getPersistenceCount } = createDependencies({
+  const { dependencies, getPersistenceCount } = createDependencies({
     nodes: [],
     edges: [],
   });
@@ -177,14 +161,13 @@ async function checkMalformedRequestsAreRejectedSafely(): Promise<void> {
     assert.doesNotMatch(JSON.stringify(responseBody), /7a4b4d2e|Never expose/);
   }
 
-  assert.equal(getMutationCount(), 0);
   assert.equal(getPersistenceCount(), 0);
 }
 
 /** A new room receives the full canonical snapshot in one flow transaction. */
 async function checkEmptyCanvasImportsAndPersistsCanonicalSnapshot(): Promise<void> {
   const canvas: CanvasSnapshot = { nodes: [], edges: [] };
-  const { dependencies, getMutationCount, getFlowWriteCount, getFlowWrites, getPersistenceCount, getSavedSnapshots } =
+  const { dependencies, getFlowWriteCount, getFlowWrites, getPersistenceCount } =
     createDependencies(canvas);
 
   const response = await handleAgentGraphImportPost(
@@ -196,47 +179,25 @@ async function checkEmptyCanvasImportsAndPersistsCanonicalSnapshot(): Promise<vo
   const expected = materializeAgentGraph(graph);
   assert.equal(response.status, 200);
   assert.deepEqual(canvas, expected, "the entire requested graph reaches the empty canvas");
-  assert.equal(getMutationCount(), 1, "one mutateFlow transaction imports both nodes and edges");
-  assert.equal(getFlowWriteCount(), 3, "each canonical item is added inside that one transaction");
+  assert.equal(getFlowWriteCount(), 2, "one node write and one edge write in that one transaction");
   assert.deepEqual(getFlowWrites(), [
     "node:client",
     "node:orders-api",
     "edge:client-to-orders",
   ]);
-  assert.equal(getPersistenceCount(), 1);
-  assert.deepEqual(getSavedSnapshots(), [expected], "only canonical materialized fields persist");
+  assert.equal(getPersistenceCount(), 1, "the flow writes trigger one persistence");
 }
 
-/** Replays must not duplicate shared canvas data, but must repair failed persistence. */
-async function checkExactReplayDoesNotWriteFlowAndRetriesPersistence(): Promise<void> {
-  const expected = materializeAgentGraph(graph);
-  const canvas: CanvasSnapshot = { nodes: [], edges: [] };
-  let shouldFailPersistence = true;
-  let persistenceAttempts = 0;
-  const { dependencies, getMutationCount, getFlowWriteCount, getPersistenceCount } = createDependencies(canvas, {
-    saveCanvasSnapshot: async () => {
-      persistenceAttempts += 1;
-      if (shouldFailPersistence) {
-        shouldFailPersistence = false;
-        throw new Error("persistence unavailable");
-      }
-    },
-  });
+/** A replay of an import that already landed writes nothing and still answers 200. */
+async function checkExactReplayWritesNothing(): Promise<void> {
+  const canvas = materializeAgentGraph(graph);
+  const { dependencies, getFlowWriteCount, getPersistenceCount } = createDependencies(canvas);
 
-  const first = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
-  assert.equal(first.status, 502);
-  assert.deepEqual(await first.json(), { error: "Could not save the imported canvas" });
-  assert.equal(getMutationCount(), 1, "the first import opens flow once");
-  assert.equal(getFlowWriteCount(), 3, "Liveblocks receives the full graph before persistence fails");
-  assert.equal(persistenceAttempts, 1);
-  assert.equal(getPersistenceCount(), 0, "the injected failed persistence is not counted as success");
-  assert.deepEqual(canvas, expected, "failed persistence preserves the imported room for retry");
+  const response = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
 
-  const second = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
-  assert.equal(second.status, 200);
-  assert.equal(getMutationCount(), 2, "the retry compares the existing graph in one flow operation");
-  assert.equal(getFlowWriteCount(), 3, "an exact retry does not duplicate the already-imported graph");
-  assert.equal(persistenceAttempts, 2, "an exact retry retries persistence after a prior failure");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { imported: false });
+  assert.equal(getFlowWriteCount(), 0);
   assert.equal(getPersistenceCount(), 0);
 }
 
@@ -254,8 +215,7 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
     replay.dependencies,
   );
   assert.equal(replayResponse.status, 200, "canonical snapshots compare independent of storage ordering");
-  assert.equal(replay.getMutationCount(), 1);
-  assert.equal(replay.getPersistenceCount(), 1);
+  assert.equal(replay.getPersistenceCount(), 0, "an exact replay writes nothing");
 
   const divergent: CanvasSnapshot = {
     ...canonical,
@@ -272,7 +232,6 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
   );
   assert.equal(conflictResponse.status, 409);
   assert.deepEqual(await conflictResponse.json(), { error: "Canvas already contains a different graph" });
-  assert.equal(conflict.getMutationCount(), 1, "a conflict reads through the single flow operation");
   assert.equal(conflict.getPersistenceCount(), 0);
   assert.equal(divergent.nodes[0].data.label, "Human edit", "a divergent room is never overwritten");
 }
@@ -299,80 +258,46 @@ async function checkDuplicateLiveFlowIdsConflict(): Promise<void> {
     );
 
     assert.equal(response.status, 409, "duplicate live IDs are never accepted as an exact replay");
-    assert.equal(duplicate.getFlowWriteCount(), 0, "corrupt state is never reconciled");
     assert.equal(duplicate.getPersistenceCount(), 0);
   }
 }
 
-/** A paced import needs enough route runtime to complete its native drawing loop. */
-function checkRouteDurationCoversMaximumNativeImport(): void {
-  const maximumItems = 40 + 60;
-  const maximumDrawingMilliseconds = maximumItems * (
-    AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS + getBuildStepMs(maximumItems)
-  );
+/** An interrupted import resumes by adding only what is missing. */
+async function checkPartialResumeAddsOnlyMissingItems(): Promise<void> {
+  const canvas: CanvasSnapshot = { nodes: [materializeAgentGraph(graph).nodes[0]], edges: [] };
+  const { dependencies, getFlowWrites, getPersistenceCount } = createDependencies(canvas);
 
-  assert.equal(AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS, 120);
-  assert.ok(
-    AGENT_GRAPH_IMPORT_MAX_DURATION_SECONDS * 1_000 > maximumDrawingMilliseconds,
-    "route duration leaves headroom above the maximum native drawing cadence",
-  );
-}
-
-/** Server-side pacing makes the mounted room observe an intentional drawing sequence. */
-async function checkPacedCursorDrawingAndPartialResume(): Promise<void> {
-  const canvas: CanvasSnapshot = {
-    nodes: [materializeAgentGraph(graph).nodes[0]],
-    edges: [],
-  };
-  const events: string[] = [];
-  const { dependencies, getFlowWrites, getMutationCount, getPersistenceCount } =
-    createDependencies(canvas, {
-      setAiPresence: async (_diagramId, presence) => {
-        events.push(
-          `cursor:${presence.cursor?.x ?? "none"},${presence.cursor?.y ?? "none"}`,
-        );
-      },
-      clearAiPresence: async () => {
-        events.push("clear");
-      },
-      sleep: async (milliseconds) => {
-        events.push(`delay:${milliseconds}`);
-      },
-    });
-
-  const response = await handleAgentGraphImportPost(
-    request({ launchId, graph }),
-    "diagram-1",
-    dependencies,
-  );
+  const response = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
 
   assert.equal(response.status, 200);
-  assert.equal(getMutationCount(), 1, "a resumed import uses one mutateFlow transaction");
-  assert.deepEqual(getFlowWrites(), [
-    "node:orders-api",
-    "edge:client-to-orders",
-  ], "only canonical items missing from an interrupted import are added");
-  assert.deepEqual(events, [
-    "cursor:280,0",
-    `delay:${AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS}`,
-    `delay:${getBuildStepMs(2)}`,
-    "cursor:280,0",
-    `delay:${AI_CURSOR_SWEEP_MS + AI_CURSOR_ARRIVAL_PAD_MS}`,
-    `delay:${getBuildStepMs(2)}`,
-    "clear",
-  ], "each missing item waits for its target cursor before landing, then clears presence");
+  assert.deepEqual(getFlowWrites(), ["node:orders-api", "edge:client-to-orders"]);
   assert.equal(getPersistenceCount(), 1);
+}
+
+/** A version conflict on mutate is answered with 409. */
+async function checkVersionConflictIs409(): Promise<void> {
+  const canvas: CanvasSnapshot = { nodes: [], edges: [] };
+  const { dependencies } = createDependencies(canvas, {
+    mutateCanvas: async () => {
+      throw new CanvasVersionConflictError("diagram-1");
+    },
+  });
+
+  const response = await handleAgentGraphImportPost(request({ launchId, graph }), "diagram-1", dependencies);
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "The canvas changed since it was read" });
 }
 
 async function main(): Promise<void> {
   await checkAuthorizationPrecedesBodyRead();
   await checkMalformedRequestsAreRejectedSafely();
   await checkEmptyCanvasImportsAndPersistsCanonicalSnapshot();
-  await checkExactReplayDoesNotWriteFlowAndRetriesPersistence();
+  await checkExactReplayWritesNothing();
   await checkSemanticReplayAndDivergentConflict();
   await checkDuplicateLiveFlowIdsConflict();
-  await checkPacedCursorDrawingAndPartialResume();
-  checkRouteDurationCoversMaximumNativeImport();
+  await checkPartialResumeAddsOnlyMissingItems();
+  await checkVersionConflictIs409();
 
   console.log("✅ Agent graph import endpoint verified");
 }

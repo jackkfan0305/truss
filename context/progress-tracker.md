@@ -26,6 +26,15 @@ Update this file whenever the current phase, active feature, or implementation s
   drops the table. Updated `prisma/seed.ts` and `scripts/verify-prisma.ts`
   to remove collaborator handling.
 
+- Task 4 complete: Canvas version columns and wire helpers. Added `canvasVersion`
+  and `canvasWrittenByAgent` columns to `Diagram` model for compare-and-swap
+  writes. Migration `20260925130000_diagram_canvas_version` applied. Added pure
+  helpers: `CanvasVersionConflictError`, `parseCanvasVersion`, `parseCanvasWrite`,
+  `canonicalCanvasPayload` in `lib/canvas-snapshot.ts`; `parseCanvasReadResponse`
+  and `RemoteCanvas` in `lib/canvas-client.ts`; `SnapshotFlow` and `createSnapshotFlow`
+  in `lib/agent-canvas-write.ts`. Verifier `scripts/verify-canvas-version.ts` added
+  and registered in `package.json`. Phase 2 foundation complete.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

@@ -13,17 +13,12 @@ import { getOwnedDiagrams } from "../lib/diagrams";
 import { buildRoomId } from "../lib/room-id";
 
 /**
- * Exercises the editor home's data layer against the live database: the Prisma
- * relation filter and case-insensitive email match in getSharedDiagrams, plus
- * the room-ID-as-primary-key create that POST /api/diagrams performs. Neither
- * can be checked by types alone.
+ * Exercises the editor home's data layer against the live database: the
+ * room-ID-as-primary-key create that POST /api/diagrams performs, and owner-only
+ * access checks where only the diagram owner can open it. Neither can be checked
+ * by types alone.
  *
- * The filter is now a *two-hop* one — a diagram is shared when the storyboard
- * it sits on is — so it is worth more here than it was when collaborators hung
- * off the diagram itself.
- *
- * Also covers getAccessibleDiagram, which is what stands between a signed-in
- * stranger and someone else's workspace.
+ * Covers getAccessibleDiagram, which enforces that only the diagram owner can open it.
  */
 
 const UNIQUE_VIOLATION = "P2002";

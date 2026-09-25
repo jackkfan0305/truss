@@ -20,6 +20,12 @@ Update this file whenever the current phase, active feature, or implementation s
   requires ownership, never falls through to collaborator checks. Deleted
   `types/storyboard.ts`.
 
+- Task 3 complete: Drop the storyboard collaborator table. Removed the
+  `StoryboardCollaborator` model from the schema and the `collaborators`
+  relation from `Storyboard`. Migration `20260925120000_drop_storyboard_collaborators`
+  drops the table. Updated `prisma/seed.ts` and `scripts/verify-prisma.ts`
+  to remove collaborator handling.
+
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
   collaborators. The temporary storyboard lives only in the current tab and

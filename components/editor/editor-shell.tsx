@@ -12,7 +12,6 @@ import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { DiagramDialogs } from "@/components/editor/diagram-dialogs"
 import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
 import { SaveStatusButton } from "@/components/editor/save-status-button"
-import { ShareDialog } from "@/components/editor/share-dialog"
 import { Button } from "@/components/ui/button"
 import { useDiagramActions } from "@/hooks/use-diagram-actions"
 import {
@@ -49,15 +48,6 @@ export function EditorShell({
   const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
     () => initialEditorSidebar()
   )
-  const [isShareOpen, setIsShareOpen] = useState(false)
-  /*
-   * Sharing hangs off the storyboard, so a standalone diagram — every
-   * agent-created one, until it is placed on a board — has nobody to invite
-   * and no Share button. See CONTEXT.md on Collaborator.
-   */
-  const shareStoryboardId = activeDiagram?.ownsStoryboard
-    ? activeDiagram.storyboardId
-    : null
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
   const actions = useDiagramActions()
   const isSidebarOpen = openSidebar === "diagrams"
@@ -79,7 +69,6 @@ export function EditorShell({
               )
             }
             diagramName={activeDiagram?.name}
-            onShare={shareStoryboardId ? () => setIsShareOpen(true) : undefined}
             onOpenTemplates={
               activeDiagram ? () => setIsTemplatesOpen(true) : undefined
             }
@@ -144,15 +133,6 @@ export function EditorShell({
             </main>
           )}
           <DiagramDialogs actions={actions} />
-
-          {activeDiagram && shareStoryboardId ? (
-            <ShareDialog
-              diagram={activeDiagram}
-              storyboardId={shareStoryboardId}
-              open={isShareOpen}
-              onOpenChange={setIsShareOpen}
-            />
-          ) : null}
         </div>
       </CanvasSaveProvider>
     </CanvasRoom>

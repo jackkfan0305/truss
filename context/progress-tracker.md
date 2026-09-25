@@ -4,14 +4,14 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
-- Phase 1 — Foundation: design system and UI primitives
+- canvas-without-liveblocks: removing Liveblocks collaborator surface
 
 ## Current Goal
 
-- PR review fixes applied: storyboard owners can read every diagram on their
-  storyboard, the editor only exposes Share to storyboard owners, member-list
-  fetches cancel stale effect runs without nested state updates, and independent
-  seed writes run concurrently while dependency-ordered cleanup stays serial.
+- Task 1 complete: Remove the Share dialog and the storyboard member routes.
+  The Share button no longer appears in the navbar. Deleted: share-dialog
+  component, use-storyboard-members hook, member API routes, storyboard-access
+  and clerk-users modules. Editor shell no longer manages share state.
 
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting

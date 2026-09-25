@@ -9,15 +9,6 @@ export const DEFAULT_DIAGRAM_NAME = "Untitled Diagram";
 
 export const MAX_DIAGRAM_NAME_LENGTH = 120;
 
-/**
- * Deliberately loose: one `@`, no whitespace, a dot in the domain. Full RFC 5322
- * validation rejects addresses that really do deliver, and Clerk is the actual
- * authority on whether an address exists. This only has to keep obvious junk out
- * of the collaborator table.
- */
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
-const MAX_EMAIL_LENGTH = 254;
-
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
@@ -103,32 +94,4 @@ export function parseDiagramId(body: unknown): DiagramIdResult {
   }
 
   return isDiagramId(raw) ? { ok: true, id: raw } : { ok: false };
-}
-
-/**
- * Validates the `email` field of an invite body. Returns the address lowercased,
- * or `null` when the caller should answer 400.
- *
- * Lowercasing is not cosmetic: `@@unique([storyboardId, email])` is case-sensitive,
- * so storing mixed case would let the same person be invited twice, while every
- * read matches case-insensitively.
- */
-export function parseCollaboratorEmail(body: unknown): string | null {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return null;
-  }
-
-  const raw = (body as { email?: unknown }).email;
-
-  if (typeof raw !== "string") {
-    return null;
-  }
-
-  const email = raw.trim().toLowerCase();
-
-  if (email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) {
-    return null;
-  }
-
-  return email;
 }

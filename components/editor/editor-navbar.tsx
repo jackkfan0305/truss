@@ -5,7 +5,6 @@ import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
-  Share2,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -16,7 +15,6 @@ interface EditorNavbarProps {
   onToggleSidebar: () => void
   /** Workspace only — the editor home has no active diagram. */
   diagramName?: string
-  onShare?: () => void
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
   /**
@@ -46,7 +44,6 @@ export function EditorNavbar({
   isSidebarOpen,
   onToggleSidebar,
   diagramName,
-  onShare,
   onOpenTemplates,
   presence,
   saveStatus,
@@ -105,12 +102,6 @@ export function EditorNavbar({
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="size-4" />
             <span className="hidden sm:inline">Templates</span>
-          </Button>
-        ) : null}
-        {onShare ? (
-          <Button variant="ghost" size="sm" onClick={onShare}>
-            <Share2 className="size-4" />
-            <span className="hidden sm:inline">Share</span>
           </Button>
         ) : null}
         {presence}

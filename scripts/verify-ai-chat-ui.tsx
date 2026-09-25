@@ -15,7 +15,6 @@ import {
 import { AiChatTranscript } from "../components/editor/ai-chat-transcript";
 import { ChatEntry } from "../components/editor/chat-entry";
 import { ManualSpecCopyFallback } from "../components/editor/spec-attachment";
-import type { DesignRunObserverProps } from "../components/editor/design-run-observer";
 import { resolveAiChatRunPhase, type ChatMessage } from "../lib/ai-chat";
 
 const collaboratorMessage: ChatMessage = {
@@ -62,7 +61,7 @@ function checkCollaboratorIdentityIsVisible() {
     html.includes("flex items-start gap-2.5"),
     "a collaborator uses the quiet left-side author rail",
   );
-  assert.ok(html.includes("bg-elevated"), "human content stays on the elevated surface");
+  assert.ok(html.includes("bg-subtle"), "human content remains distinct from the chat background");
   assert.ok(
     html.includes("group-[.is-user]:ml-0"),
     "a collaborator bubble stays aligned with its left identity rail",
@@ -118,8 +117,6 @@ function checkConversationKeepsSharedMessageCues() {
       isRoomActive={false}
       projectId="checkout-flow-a1b2"
       emptyState={<p>No messages yet</p>}
-      subscription={null}
-      onRunSettled={() => undefined}
       hasOlderMessages
       isFetchingOlder={false}
       onFetchOlder={() => undefined}
@@ -330,48 +327,6 @@ function checkACompletedTurnWithNoStepsRendersNothing() {
 }
 
 /**
- * A successful REST prompt write can be delayed in the Liveblocks feed. The
- * private Trigger subscription must still mount exactly once so it can settle
- * and unlock the initiating composer, even with no prompt row to map over.
- */
-function checkRunObserverDoesNotDependOnVisibleMessages() {
-  function ObserverProbe({ subscription }: DesignRunObserverProps) {
-    return <span data-observed-run={subscription.runId}>observer mounted</span>;
-  }
-
-  const renderTranscript = (messages: ChatMessage[]) =>
-    renderEntry(
-      <AiChatTranscript
-        messages={messages}
-        selfId="user_ada"
-        turns={[]}
-        status={null}
-        isRoomActive={false}
-        projectId="checkout-flow-a1b2"
-        emptyState={<p>No messages yet</p>}
-        subscription={{ runId: "run-delayed-feed", token: "token" }}
-        onRunSettled={() => undefined}
-        hasOlderMessages={false}
-        isFetchingOlder={false}
-        onFetchOlder={() => undefined}
-        ObserverComponent={ObserverProbe}
-        useCollaboratorsSource={() => []}
-      />,
-    );
-
-  for (const messages of [[], [collaboratorMessage]]) {
-    const html = renderTranscript(messages);
-    const mounts = html.match(/data-observed-run="run-delayed-feed"/g) ?? [];
-
-    assert.equal(
-      mounts.length,
-      1,
-      "the subscription observer mounts once without its prompt in the transcript",
-    );
-  }
-}
-
-/**
  * The spec preview's copy button.
  *
  * Asserted against the source, not a render: the preview only exists inside an
@@ -557,7 +512,6 @@ checkExactlyOneElementAnnouncesTheStep();
 checkAFinishedRunAnnouncesNothing();
 checkAStoppedRunSaysItStoppedRatherThanFailed();
 checkACompletedTurnWithNoStepsRendersNothing();
-checkRunObserverDoesNotDependOnVisibleMessages();
 checkSpecPreviewCopiesMarkdownSource();
 checkSpecCopyFailureExposesSelectableMarkdown();
 checkClipboardFeedbackLivesInOneHook();

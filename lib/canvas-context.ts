@@ -10,7 +10,7 @@ import { AI_USER_NAME, type AiChatMessage } from "@/types/tasks";
  * router, the design agent and the spec writer — and a second rendering of the
  * same diagram is a second thing to keep in step.
  *
- * Pure string building with no Liveblocks client and no Trigger.dev runtime, so
+ * Pure string building with no Liveblocks client, so
  * the verify scripts can assert on what each model is actually shown. A prompt
  * regression is invisible in review and costs a whole run to notice.
  */

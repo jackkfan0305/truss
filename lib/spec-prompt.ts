@@ -5,9 +5,9 @@ import type { AiChatMessage } from "@/types/tasks";
 /**
  * Everything the spec writer tells the model (35-orchestrator-backend).
  *
- * Moved out of `trigger/generate-spec.ts` for the reason every other prompt in
+ * Kept out of `lib/generate-spec.ts` for the reason every other prompt in
  * this project lives in `lib/`: pure string building, so `scripts/verify-spec-prompt.ts`
- * can assert on what the model is actually shown without a Trigger runtime.
+ * can assert on what the model is actually shown without a Liveblocks client.
  */
 
 export const SPEC_SYSTEM_PROMPT = [

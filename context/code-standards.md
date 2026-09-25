@@ -39,12 +39,12 @@
 - Project metadata and relationships belong in PostgreSQL via Prisma.
 - Canvas snapshots and generated specs belong in Vercel Blob; Prisma stores only the blob URL reference.
 - Do not store large generated content directly in the database.
-- Task run records are first-class relational data — treat ownership and run IDs as verified before any token issuance.
+- Task run records are first-class relational data — a run ID is derived from the verified prompt and recorded before the run starts.
 
 ## File Organization
 
 - `lib/` — shared infrastructure: Prisma client, auth helpers, utilities.
-- `trigger/` — all durable background tasks and AI workflows.
+- `lib/orchestrator.ts`, `lib/design-agent.ts`, `lib/generate-spec.ts` — the AI workflows, run inside `/api/ai/orchestrate`.
 - `components/` — UI composition only; no business logic.
-- `app/api/` — route handlers for auth, triggering, and persistence.
+- `app/api/` — route handlers for auth, AI runs, and persistence.
 - Name files after the responsibility they contain, not the technology.

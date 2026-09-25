@@ -144,7 +144,7 @@ export function shouldShowRemoteRunStatus({
 
 /**
  * A client-chosen feed message ID doubles as the stable anchor for the local
- * Trigger.dev activity turn that follows that prompt.
+ * activity turn that follows that prompt.
  */
 export function createAiChatMessageId(
   randomUuid: () => string = () => crypto.randomUUID()

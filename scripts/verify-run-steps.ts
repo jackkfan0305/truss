@@ -22,7 +22,7 @@ function checkStepValuesAreStable() {
 
 /** A literal left behind in a task file is a seventh vocabulary nobody maps. */
 function checkTaskFilesEmitStepsFromTheConstant() {
-  for (const path of ["../trigger/orchestrator.ts", "../trigger/design-agent.ts"]) {
+  for (const path of ["../lib/orchestrator.ts", "../lib/design-agent.ts"]) {
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const emissions = source.match(/type:\s*"step",\s*text:\s*[^}]+/g) ?? [];
 

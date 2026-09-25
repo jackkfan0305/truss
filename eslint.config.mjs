@@ -11,8 +11,6 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
-    // Trigger.dev build artifacts bundle third-party code and are not source.
-    ".trigger/**",
     // Local git worktrees contain independent installs and build artifacts.
     ".worktrees/**",
     "next-env.d.ts",

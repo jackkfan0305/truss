@@ -2,7 +2,9 @@
 
 import { useState } from "react"
 import { useRoom } from "@liveblocks/react"
-import { CircleAlert, X } from "lucide-react"
+import { SidebarRightIcon } from "@hugeicons/core-free-icons"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { CircleAlert } from "lucide-react"
 
 import { AiChatComposer } from "@/components/chat/ai-chat-composer"
 import { ThinkingOrb } from "@/components/chat/thinking-orb"
@@ -37,7 +39,7 @@ const STARTER_PROMPTS = [
   "What would you add to this system?",
 ]
 
-/** Monochrome AI workspace with room chat and run-scoped activity streams. */
+/** Monochrome AI workspace with room chat and live run activity. */
 export function AiSidebar({
   isOpen,
   onClose,
@@ -63,7 +65,7 @@ export function AiSidebar({
       isFetchingOlder,
       fetchOlderMessages,
     },
-    run: { isRunning, turns, subscription, settle },
+    run: { isRunning, turns },
     submit: submitPrompt,
   } = useAiPromptSubmission(roomId)
   const isComposerDisabled = !canSend || isSending || isRunning
@@ -84,20 +86,20 @@ export function AiSidebar({
       aria-label="AI assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-surface shadow-2xl shadow-page/80 transition-transform duration-200 ease-out motion-reduce:transition-none",
-        isOpen ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"
+        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        isOpen ? "translate-x-0 duration-400" : "translate-x-[calc(100%+2rem)] duration-350"
       )}
     >
       {onClose ? (
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size="icon-lg"
           onClick={onClose}
           aria-label="Close AI sidebar"
-          className="absolute left-3 top-3 z-10 min-h-11 min-w-11 text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
+          className="absolute left-3 top-3.5 z-10 rounded-lg text-copy-secondary hover:bg-elevated hover:text-copy-primary focus-visible:border-copy-primary focus-visible:ring-copy-primary/20"
         >
-          <X aria-hidden className="size-4" />
+          <HugeiconsIcon icon={SidebarRightIcon} aria-hidden className="size-5" />
         </Button>
       ) : null}
 
@@ -116,8 +118,6 @@ export function AiSidebar({
           isRoomActive={isGenerating}
           // A room ID *is* its project ID — lib/room-id.ts.
           projectId={roomId}
-          subscription={subscription}
-          onRunSettled={settle}
           hasOlderMessages={hasOlderMessages}
           isFetchingOlder={isFetchingOlder}
           onFetchOlder={fetchOlderMessages}
@@ -128,31 +128,28 @@ export function AiSidebar({
         />
       </div>
 
-      {/* No bar behind the composer: no top border, no fill. The box hangs on
-          the panel and the transcript scrolls up to meet it. */}
-      <div className="p-3">
-        {error ? (
-          <p
-            role="alert"
-            className="mb-2 flex items-center gap-2 text-xs text-copy-primary"
-          >
-            <CircleAlert aria-hidden className="size-3.5" />
-            {error}
-          </p>
-        ) : null}
+      {error ? (
+        <p
+          role="alert"
+          className="mx-3 mb-2 flex items-center gap-2 text-xs text-copy-primary"
+        >
+          <CircleAlert aria-hidden className="size-3.5" />
+          {error}
+        </p>
+      ) : null}
 
-        <AiChatComposer
-          draft={draft}
-          isDisabled={isComposerDisabled}
-          isWorking={isRunning || isSending}
-          modelId={modelId}
-          thinkingLevel={thinkingLevel}
-          onDraftChange={setDraft}
-          onModelChange={setModelId}
-          onThinkingLevelChange={setThinkingLevel}
-          onSubmit={submit}
-        />
-      </div>
+      <AiChatComposer
+        className="mx-3 mb-3 shrink-0"
+        draft={draft}
+        isDisabled={isComposerDisabled}
+        isWorking={isRunning || isSending}
+        modelId={modelId}
+        thinkingLevel={thinkingLevel}
+        onDraftChange={setDraft}
+        onModelChange={setModelId}
+        onThinkingLevelChange={setThinkingLevel}
+        onSubmit={submit}
+      />
     </aside>
   )
 }
@@ -189,7 +186,7 @@ function EmptyChat({
               type="button"
               onClick={() => onPick(prompt)}
               disabled={isDisabled}
-              className="flex min-h-11 w-full items-center rounded-xl bg-elevated px-3 text-left text-xs text-copy-secondary outline-none hover:bg-subtle hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-11 w-full items-center rounded-xl bg-subtle px-3 text-left text-xs text-copy-secondary outline-none hover:bg-surface-border hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {prompt}
             </button>

@@ -34,7 +34,6 @@ spec.
 | Auth             | Clerk                   |
 | Database         | Prisma 7 + PostgreSQL   |
 | Canvas           | Liveblocks + React Flow (`@xyflow/react`) |
-| Background tasks | Trigger.dev v4          |
 | Model            | Google Gemini via the AI SDK |
 | Artifact storage | Vercel Blob (private access) |
 
@@ -43,11 +42,11 @@ spec.
 - Node.js 20+ (developed on 26)
 - A PostgreSQL database
 - Accounts for: [Clerk](https://clerk.com),
-  [Liveblocks](https://liveblocks.io), [Trigger.dev](https://trigger.dev),
+  [Liveblocks](https://liveblocks.io),
   [Vercel Blob](https://vercel.com/docs/storage/vercel-blob), and
   [Google AI Studio](https://aistudio.google.com) for a Gemini key.
 
-All five have free tiers that are enough to run this locally.
+All four have free tiers that are enough to run this locally.
 
 ## Setup
 
@@ -89,11 +88,6 @@ LIVEBLOCKS_PUBLIC_KEY=pk_...
 # client bundle would let anyone overwrite any project's canvas.
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 
-# ------------------------------------------------------------- Trigger.dev
-# API Keys page. Used by tasks.trigger() in route handlers; the CLI dev worker
-# does not read it (it authenticates via `trigger.dev login`).
-TRIGGER_SECRET_KEY=tr_dev_...
-
 # ------------------------------------------------------------ Google Gemini
 GEMINI_API_KEY=...   # GOOGLE_AI_API_KEY is also accepted
 ```
@@ -115,11 +109,9 @@ is invisible to migrations and the seed.
 A plain name holds the development value; an optional `<NAME>_PROD` twin holds
 the production one. Nothing local reads the `_PROD` entries — `npm run dev`
 always gets development keys. The suffix is consumed only at deploy time, by
-`scripts/push-vercel-env.ts` and by the `syncEnvVars` extension in
-`trigger.config.ts`, which both resolve it through the same
-`resolveEnvKeys()` in `lib/env-keys.ts` so a new key cannot follow the rule in
-one and not the other. Either way the value lands under the plain name, so
-application code never branches on environment.
+`scripts/push-vercel-env.ts`, through `resolveEnvKeys()` in `lib/env-keys.ts`.
+The value lands under the plain name, so application code never branches on
+environment.
 
 `scripts/verify-env-keys.ts` (part of `npm test`) pins that behaviour.
 
@@ -131,28 +123,15 @@ npm run generate           # regenerate the client into generated/prisma
 npx prisma db seed         # optional: three sample projects
 ```
 
-### Trigger.dev
-
-The AI runs in Trigger.dev tasks. Log the CLI in once — it authenticates
-separately from `TRIGGER_SECRET_KEY`:
-
-```bash
-npx trigger.dev@latest login
-```
-
-Then point `trigger.config.ts`'s `project` at your own project ref from the
-dashboard.
-
 ## Running it
 
 ```bash
 npm run dev
 ```
 
-That starts `next dev` **and** the Trigger.dev dev worker together. Open
-<http://localhost:3000>; `/` redirects to `/editor` once you are signed in.
-Without the Trigger worker running, the canvas and chat still load but every AI
-turn hangs — the tasks have nowhere to execute.
+Open <http://localhost:3000>; `/` redirects to `/editor` once you are signed
+in. AI turns run inside `POST /api/ai/orchestrate`, so there is no separate
+worker to start.
 
 ## Create, edit and delete diagrams from an agent
 
@@ -185,14 +164,12 @@ an HTTP(S) origin without a path.
 
 ## Deploying
 
-The app runs on Vercel; the AI tasks run in Trigger.dev's cloud. They are two
-separate deploys and each needs its own copy of the environment.
+The app, AI runs included, deploys to Vercel.
 
 ```bash
 npx vercel link                        # once, to bind this checkout to a project
 npx tsx scripts/push-vercel-env.ts     # .env → Vercel, applying the _PROD rule
 npx vercel --prod                      # deploy the app
-npx trigger.dev@latest deploy          # deploy the tasks
 ```
 
 - **Migrations run on the host build.** `vercel-build` is
@@ -203,10 +180,9 @@ npx trigger.dev@latest deploy          # deploy the tasks
   is the one that must never be dropped: Vercel refuses to store an uploaded
   `.env`, but the entry survives as a dangling symlink and the Next build then
   dies with `ENOENT: stat '/vercel/path0/.env'`.
-- **Trigger.dev gets its keys from the deploy**, not from the dashboard: the
-  `syncEnvVars` extension reads the local `.env` at build time and pushes the
-  resolved set. A deploy from CI, with no `.env` to read, leaves the existing
-  vars alone rather than wiping them.
+- **AI turns need a long function timeout.** The orchestrate route sets
+  `maxDuration = 600`, which needs Fluid Compute on a Pro plan; Hobby caps it
+  at 300s.
 - **Clerk has no `_PROD` twin yet**, so the deployment authenticates against the
   Clerk *development* instance. It works — sign-in, sessions and the middleware
   all behave — but you get the development banner and development limits. Add
@@ -217,7 +193,7 @@ npx trigger.dev@latest deploy          # deploy the tasks
 
 | Command | What it does |
 | ------- | ------------ |
-| `npm run dev` | Next.js dev server + Trigger.dev dev worker |
+| `npm run dev` | Next.js dev server |
 | `npm run build` | Production build (runs `prisma generate` first) |
 | `npm run vercel-build` | What Vercel runs: generate, `migrate deploy`, build |
 | `npm run start` | Serve the production build |
@@ -235,10 +211,9 @@ each exits non-zero on failure.
 ## Layout
 
 ```
-app/api        Authenticated route handlers: validate → authorize → trigger → persist
+app/api        Authenticated route handlers: validate → authorize → run → persist
 app/editor     The workspace (project sidebar, canvas, AI panel)
-trigger/       Background tasks: orchestrator, design-agent, generate-spec
-lib/           Prisma client, access control, Liveblocks server helpers, prompts
+lib/           Prisma client, access control, Liveblocks helpers, AI agents, prompts
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed
 context/       Product, architecture, UI, and standards docs — read these first
@@ -257,10 +232,6 @@ the current state, unit by unit.
 - **Blob is private.** Every `@vercel/blob` call passes `access: "private"`;
   stored URLs are pointers, never handed to a browser. Reads go through the
   authorized download route.
-- **Deployed Trigger.dev environments need their own env vars.** The workers
-  write to Postgres and Blob and call Gemini, so `DATABASE_URL`,
-  `BLOB_READ_WRITE_TOKEN`, and `GEMINI_API_KEY` must be set in the Trigger.dev
-  dashboard, not only in your local `.env`.
 - **A mid-run failure leaves a partial diagram.** The canvas build is paced, not
   atomic — on a shared canvas a rollback would either clobber or miss concurrent
   human edits, so the error path reports how many changes landed instead.

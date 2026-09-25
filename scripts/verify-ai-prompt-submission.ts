@@ -19,7 +19,7 @@ async function checkMessageFailure(): Promise<void> {
       text: "Design checkout",
       runOptions,
       send: async () => null,
-      start: async () => ({ runId: "unreachable", token: "unreachable" }),
+      start: async () => ({ runId: "unreachable" }),
     }),
     { status: "message-error" },
   );
@@ -48,12 +48,12 @@ async function checkExistingPromptReusesItsIdentity(): Promise<void> {
       send: async () => {
         throw new Error("must be skipped");
       },
-      start: async () => ({ runId: "run-1", token: "token-1" }),
+      start: async () => ({ runId: "run-1" }),
     }),
     {
       status: "started",
       promptMessageId: "chat-existing",
-      subscription: { runId: "run-1", token: "token-1" },
+      subscription: { runId: "run-1" },
     },
   );
 }
@@ -75,7 +75,7 @@ async function checkLaunchAndLifecycleCallbacks(): Promise<void> {
     },
     start: async (_text, promptMessageId) => {
       events.push(`starting:${promptMessageId}`);
-      return { runId: "run-2", token: "token-2" };
+      return { runId: "run-2" };
     },
   });
 
@@ -91,7 +91,7 @@ async function checkSendAndCallbackFailuresPropagate(): Promise<void> {
         send: async () => {
           throw new Error("send failed");
         },
-        start: async () => ({ runId: "unreachable", token: "unreachable" }),
+        start: async () => ({ runId: "unreachable" }),
       }),
     /send failed/,
     "a rejected send is not mistaken for a run-start error",
@@ -111,7 +111,7 @@ async function checkSendAndCallbackFailuresPropagate(): Promise<void> {
         send: async () => "chat-3",
         start: async () => {
           startAfterPromptCallback = true;
-          return { runId: "unreachable", token: "unreachable" };
+          return { runId: "unreachable" };
         },
       }),
     /prompt callback failed/,
@@ -133,7 +133,7 @@ async function checkSendAndCallbackFailuresPropagate(): Promise<void> {
         send: async () => "chat-4",
         start: async () => {
           startAfterRunCallback = true;
-          return { runId: "unreachable", token: "unreachable" };
+          return { runId: "unreachable" };
         },
       }),
     /run callback failed/,
@@ -156,7 +156,7 @@ async function checkManualSidebarSubmissionUsesTheComposedController(): Promise<
     {
       start: async (prompt, promptMessageId, options) => {
         events.push(`start:${prompt}:${promptMessageId}:${options.modelId}`);
-        return { runId: "run-manual", token: "token-manual" };
+        return { runId: "run-manual" };
       },
     },
   );
@@ -180,7 +180,7 @@ async function checkManualSidebarSubmissionUsesTheComposedController(): Promise<
 
   const messageErrorSubmit = createAiPromptSubmit(
     { send: async () => null },
-    { start: async () => ({ runId: "unreachable", token: "unreachable" }) },
+    { start: async () => ({ runId: "unreachable" }) },
   );
   await submitAiSidebarPrompt({
     text: "   ",

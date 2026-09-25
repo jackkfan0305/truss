@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 
-import { startVerifiedAgentRun } from "../lib/agent-run-server";
+import { agentRunId, startVerifiedAgentRun } from "../lib/agent-run-server";
 import { handleOrchestratePost } from "../lib/orchestrate-route-handler";
-import {
-  parseOrchestrateRequest,
-  parseRunId,
-} from "../lib/orchestrate-requests";
+import { parseOrchestrateRequest } from "../lib/orchestrate-requests";
 import {
   AI_CHAT_FEED_ID,
   AI_DESIGN_MODELS,
@@ -136,26 +133,6 @@ function checkOrchestrateRequestParsing() {
   );
 }
 
-function checkRunIdParsing() {
-  assert.equal(parseRunId({ runId: " run_abc123 " }), "run_abc123", "trimmed");
-
-  const rejected: unknown[] = [
-    null,
-    "run_abc123",
-    ["run_abc123"],
-    {},
-    { runId: "" },
-    { runId: "   " },
-    { runId: 42 },
-    { runId: null },
-    { runId: `run_${"x".repeat(100)}` },
-  ];
-
-  for (const body of rejected) {
-    assert.equal(parseRunId(body), null, `rejected: ${JSON.stringify(body)}`);
-  }
-}
-
 interface PromptAnchorCase {
   name: string;
   messages: Array<{
@@ -164,16 +141,16 @@ interface PromptAnchorCase {
     updatedAt: number;
     data: unknown;
   }>;
-  shouldTrigger: boolean;
+  shouldStart: boolean;
 }
 
 /**
- * The prompt ID becomes trusted worker-authored run metadata, so the route-side
- * helper must prove the exact authenticated human message before spending a
- * Trigger run — an orchestrator run now, which can spend two more behind it. Every denied fixture also asserts that the trigger callback was
- * never reached.
+ * The prompt ID becomes trusted run metadata, so the route-side helper must
+ * prove the exact authenticated human message before spending an orchestrator
+ * run, which can spend two more behind it. Every denied fixture also asserts
+ * that no quota was consumed.
  */
-async function checkPromptAnchorBeforeTriggering() {
+async function checkPromptAnchorBeforeStarting() {
   const promptMessage: AiChatMessage = {
     role: "user",
     senderId: "user_ada",
@@ -208,22 +185,22 @@ async function checkPromptAnchorBeforeTriggering() {
     {
       name: "the authenticated user's exact normalized prompt",
       messages: [feedEntry(valid.promptMessageId, promptMessage)],
-      shouldTrigger: true,
+      shouldStart: true,
     },
     {
       name: "an invented message ID",
       messages: [feedEntry("chat-somewhere-else", promptMessage)],
-      shouldTrigger: false,
+      shouldStart: false,
     },
     {
       name: "a legacy assistant row",
       messages: [feedEntry(valid.promptMessageId, assistantMessage)],
-      shouldTrigger: false,
+      shouldStart: false,
     },
     {
       name: "an assistant run row",
       messages: [feedEntry(valid.promptMessageId, runMessage)],
-      shouldTrigger: false,
+      shouldStart: false,
     },
     {
       name: "another collaborator's prompt",
@@ -233,7 +210,7 @@ async function checkPromptAnchorBeforeTriggering() {
           senderId: "user_grace",
         }),
       ],
-      shouldTrigger: false,
+      shouldStart: false,
     },
     {
       name: "a prompt whose content differs",
@@ -243,14 +220,18 @@ async function checkPromptAnchorBeforeTriggering() {
           content: "Design a different system",
         }),
       ],
-      shouldTrigger: false,
+      shouldStart: false,
     },
   ];
 
+  const expectedRunId = agentRunId(
+    "user_ada",
+    valid.roomId,
+    valid.promptMessageId,
+  );
+
   for (const testCase of cases) {
-    let triggerCount = 0;
     let rateLimitCount = 0;
-    const idempotencyKeys: string[] = [];
     const reads: Array<{ roomId: string; feedId: string }> = [];
     const result = await startVerifiedAgentRun(
       parsedValid,
@@ -264,11 +245,6 @@ async function checkPromptAnchorBeforeTriggering() {
           rateLimitCount += 1;
           return true;
         },
-        trigger: async (_payload, options) => {
-          triggerCount += 1;
-          idempotencyKeys.push(String(options.idempotencyKey));
-          return { id: "run_verified" };
-        },
       },
     );
 
@@ -279,26 +255,25 @@ async function checkPromptAnchorBeforeTriggering() {
     );
     assert.equal(
       rateLimitCount,
-      testCase.shouldTrigger ? 1 : 0,
+      testCase.shouldStart ? 1 : 0,
       `${testCase.name}: only a verified prompt consumes quota`,
     );
     assert.equal(
-      triggerCount,
-      testCase.shouldTrigger ? 1 : 0,
-      `${testCase.name}: trigger boundary`,
-    );
-    assert.deepEqual(
-      result,
-      testCase.shouldTrigger
-        ? { status: "started", runId: "run_verified" }
-        : { status: "unverified" },
+      result.status,
+      testCase.shouldStart ? "started" : "unverified",
       `${testCase.name}: result`,
     );
-    assert.equal(
-      idempotencyKeys[0]?.length ?? 0,
-      testCase.shouldTrigger ? 64 : 0,
-      `${testCase.name}: a global hashed idempotency key reaches Trigger`,
-    );
+
+    if (result.status === "started") {
+      assert.equal(result.runId, expectedRunId);
+      assert.deepEqual(result.payload, {
+        prompt: parsedValid.prompt,
+        promptMessageId: parsedValid.promptMessageId,
+        roomId: parsedValid.roomId,
+        modelId: parsedValid.modelId,
+        thinkingLevel: parsedValid.thinkingLevel,
+      });
+    }
   }
 
   const denied = await startVerifiedAgentRun(parsedValid, "user_ada", {
@@ -306,34 +281,25 @@ async function checkPromptAnchorBeforeTriggering() {
       data: [feedEntry(valid.promptMessageId, promptMessage)],
     }),
     consumeRequestSlot: async () => false,
-    trigger: async () => {
-      throw new Error("rate-limited requests must not trigger");
-    },
   });
 
   assert.deepEqual(denied, { status: "rate_limited" });
 
-  const replayKeys: string[] = [];
-  const replayDependencies = {
-    readFeedMessages: async () => ({
-      data: [feedEntry(valid.promptMessageId, promptMessage)],
-    }),
-    consumeRequestSlot: async () => true,
-    trigger: async (
-      _payload: unknown,
-      options: { idempotencyKey: unknown },
-    ) => {
-      replayKeys.push(String(options.idempotencyKey));
-      return { id: "run_original" };
-    },
-  };
-
-  await startVerifiedAgentRun(parsedValid, "user_ada", replayDependencies);
-  await startVerifiedAgentRun(parsedValid, "user_ada", replayDependencies);
+  // The run ID is what the TaskRun unique constraint dedupes replays on.
   assert.equal(
-    replayKeys[0],
-    replayKeys[1],
-    "the same verified prompt always addresses the same global Trigger run",
+    agentRunId("user_ada", valid.roomId, valid.promptMessageId),
+    expectedRunId,
+    "the same verified prompt always addresses the same run",
+  );
+  assert.notEqual(
+    agentRunId("user_ada", valid.roomId, "chat-another-prompt"),
+    expectedRunId,
+    "a different prompt gets a different run",
+  );
+  assert.notEqual(
+    agentRunId("user_grace", valid.roomId, valid.promptMessageId),
+    expectedRunId,
+    "a different user gets a different run",
   );
 }
 
@@ -349,14 +315,27 @@ function request(body: unknown): Request {
 async function checkRouteAuthorizationAndFailureBoundaries() {
   let starts = 0;
   let records = 0;
+  let streams = 0;
+  const payload = {
+    prompt: valid.prompt,
+    promptMessageId: valid.promptMessageId,
+    roomId: valid.roomId,
+    modelId: DEFAULT_AI_DESIGN_MODEL_ID,
+    thinkingLevel: DEFAULT_AI_THINKING_LEVEL,
+  };
   const baseDependencies = {
     authorizeProject: async () => ({ ok: true as const, userId: "user_ada" }),
     startAgentRun: async () => {
       starts += 1;
-      return { status: "started" as const, runId: "run_verified" };
+      return { status: "started" as const, runId: "run_verified", payload };
     },
     recordTaskRun: async () => {
       records += 1;
+      return true;
+    },
+    streamRun: () => {
+      streams += 1;
+      return new Response("", { headers: { "X-Run-Id": "run_verified" } });
     },
   };
 
@@ -368,7 +347,7 @@ async function checkRouteAuthorizationAndFailureBoundaries() {
     }),
   });
   assert.equal(denied.status, 403);
-  assert.equal(starts, 0, "authorization denial prevents Trigger work");
+  assert.equal(starts, 0, "authorization denial prevents agent work");
   assert.equal(records, 0, "authorization denial prevents TaskRun writes");
 
   const unverified = await handleOrchestratePost(request(valid), {
@@ -390,14 +369,14 @@ async function checkRouteAuthorizationAndFailureBoundaries() {
   console.error = () => undefined;
 
   try {
-    const triggerFailure = await handleOrchestratePost(request(valid), {
+    const startFailure = await handleOrchestratePost(request(valid), {
       ...baseDependencies,
       startAgentRun: async () => {
-        throw new Error("Trigger unavailable");
+        throw new Error("Liveblocks unavailable");
       },
     });
-    assert.equal(triggerFailure.status, 502);
-    assert.equal(records, 0, "a failed trigger has no run to record");
+    assert.equal(startFailure.status, 502);
+    assert.equal(records, 0, "a failed start has no run to record");
 
     const recordFailure = await handleOrchestratePost(request(valid), {
       ...baseDependencies,
@@ -410,16 +389,25 @@ async function checkRouteAuthorizationAndFailureBoundaries() {
     console.error = originalConsoleError;
   }
 
+  assert.equal(streams, 0, "no failure path runs the orchestrator");
+
+  const replay = await handleOrchestratePost(request(valid), {
+    ...baseDependencies,
+    recordTaskRun: async () => false,
+  });
+  assert.equal(replay.status, 409);
+  assert.equal(streams, 0, "a replayed prompt is not run twice");
+
   const success = await handleOrchestratePost(request(valid), baseDependencies);
-  assert.equal(success.status, 202);
-  assert.deepEqual(await success.json(), { runId: "run_verified" });
+  assert.equal(success.status, 200);
+  assert.equal(success.headers.get("X-Run-Id"), "run_verified");
   assert.equal(records, 1, "one successful run is recorded once");
+  assert.equal(streams, 1, "one successful run is streamed once");
 }
 
 async function main() {
   checkOrchestrateRequestParsing();
-  checkRunIdParsing();
-  await checkPromptAnchorBeforeTriggering();
+  await checkPromptAnchorBeforeStarting();
   await checkRouteAuthorizationAndFailureBoundaries();
 
   console.log("✅ Orchestrate API request parsing and prompt anchor verified");

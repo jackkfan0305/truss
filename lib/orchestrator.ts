@@ -1,5 +1,4 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { logger, schemaTask } from "@trigger.dev/sdk";
 import { streamText, tool, type ModelMessage, type ToolResultPart } from "ai";
 import { z } from "zod";
 
@@ -30,15 +29,13 @@ import {
   SPEC_TOOL_NAME,
   buildOrchestratorPrompt,
 } from "@/lib/orchestrator-prompt";
-import {
-  orchestratorPayloadSchema,
-  type OrchestratorPayload,
-} from "@/lib/orchestrate-requests";
-import { runDesign } from "@/trigger/design-agent";
-import { runSpec } from "@/trigger/generate-spec";
+import type { OrchestratorPayload } from "@/lib/orchestrate-requests";
+import { runDesign } from "@/lib/design-agent";
+import { runSpec } from "@/lib/generate-spec";
 import {
   AI_RUN_STEPS,
   DEFAULT_AI_DESIGN_MODEL_ID,
+  type AiActivityPart,
   type AiActivityTerminalPart,
 } from "@/types/tasks";
 
@@ -55,28 +52,22 @@ const ORCHESTRATOR_THINKING_LEVEL = "low";
 /**
  * Chat routing (35-orchestrator-backend).
  *
- * The only task the API triggers. It reads every message, answers general
- * questions itself from the canvas and the conversation, and delegates to a
+ * The only thing the API runs, inside `/api/ai/orchestrate`'s own request. It
+ * reads every message, answers general questions itself from the canvas and the
+ * conversation, and delegates to a
  * specialist subagent — `design-agent` or `generate-spec` — when the user wants
  * work done. It owns the turn's durable chat row either way, so one prompt
  * produces exactly one assistant message with the subagent's work nested inside.
  *
  * ## Why the work runs in this process
  *
- * Both tools used to be child runs reached through `triggerAndWait`. That hop
- * cost about 30s to queue and boot the child machine and about 60s to restore
- * this run from the checkpoint the wait forced, and none of it was model time —
- * on one measured spec turn, 90 seconds of 2m35s. `designCanvas` calls
- * `runDesign` and `writeSpec` calls `runSpec`, both here, both with the canvas
- * and transcript this run already read.
+ * `designCanvas` calls `runDesign` and `writeSpec` calls `runSpec`, both here,
+ * both with the canvas and transcript this run already read.
  *
  * ## Why a manual loop rather than automatic tool execution
  *
- * Nothing checkpoints any more, so the original reason — an open `streamText`
- * connection cannot survive a run being suspended and resumed elsewhere — no
- * longer applies. The loop stays for the second reason, which is unchanged: it
- * runs tool calls **one at a time, in order**. A user essentially never wants a
- * spec written *while* the canvas is being modified, and both concurrent
+ * It runs tool calls **one at a time, in order**. A user essentially never wants
+ * a spec written *while* the canvas is being modified, and both concurrent
  * combinations are unsafe — two designs read the same pre-state and place their
  * nodes on top of each other, and a spec written during a design documents a
  * diagram that is still being drawn. Automatic execution would run a model's
@@ -86,104 +77,97 @@ const ORCHESTRATOR_THINKING_LEVEL = "low";
  * final text or a tool call, the work happens in `runOrchestratorLoop` outside
  * the stream, and the result is fed back as a tool-result message.
  */
-export const orchestrator = schemaTask({
-  id: "orchestrator",
-  schema: orchestratorPayloadSchema,
-  // Same reasoning as `design-agent`: the loop can cause canvas writes, and a
-  // second attempt would regenerate and duplicate them.
-  retry: { maxAttempts: 1 },
-  // `maxDuration` is compared against CPU time. It used to exclude the
-  // subagents, which ran as child runs; now every part of a turn is in this
-  // process — the routing and closing calls, the design's generation *and* its
-  // paced build (plain timers, not `wait.for`, so they count), and the spec's
-  // several thousand tokens of prose. Sized as the design agent's own 300s plus
-  // the spec's 300s, which is the worst case a single turn can reach; a run
-  // killed here dies mid-build and leaves a half-drawn canvas.
-  maxDuration: 600,
-  run: async (payload, { ctx }) => {
-    const { roomId, prompt, promptMessageId } = payload;
-    const runId = ctx.run.id;
+export async function runOrchestrator(
+  payload: OrchestratorPayload,
+  {
+    runId,
+    write,
+  }: {
+    runId: string;
+    /** The response stream; see `openActivityStream`. */
+    write: (part: AiActivityPart | AiActivityTerminalPart) => void;
+  }
+): Promise<{ text: string; steps: number }> {
+  const { roomId, prompt, promptMessageId } = payload;
 
-    logger.info("Orchestration requested", { roomId, promptLength: prompt.length });
+  console.info("Orchestration requested", { roomId, promptLength: prompt.length });
 
-    const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
-    const activity = openActivityStream(publisher.emit);
-    let activityOutcome: AiActivityTerminalPart["phase"] = "error";
+  const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
+  const activity = openActivityStream(publisher.emit, write);
+  let activityOutcome: AiActivityTerminalPart["phase"] = "error";
 
-    await publisher.start();
+  await publisher.start();
 
-    try {
-      activity.emit({ type: "step", text: AI_RUN_STEPS.readCanvas });
+  try {
+    activity.emit({ type: "step", text: AI_RUN_STEPS.readCanvas });
 
-      // In parallel: neither read depends on the other, and both are pure reads
-      // against the same room. `runId` is this run's own here, which is exactly
-      // the row the history must exclude — it is the turn being written.
-      const [context, history] = await Promise.all([
-        readCanvas(roomId),
-        readChatHistory(roomId, promptMessageId, runId),
-      ]);
+    // In parallel: neither read depends on the other, and both are pure reads
+    // against the same room. `runId` is this run's own here, which is exactly
+    // the row the history must exclude — it is the turn being written.
+    const [context, history] = await Promise.all([
+      readCanvas(roomId),
+      readChatHistory(roomId, promptMessageId, runId),
+    ]);
 
-      const messages: ModelMessage[] = [
-        {
-          role: "user",
-          content: buildOrchestratorPrompt({ context, history, prompt }),
-        },
-      ];
+    const messages: ModelMessage[] = [
+      {
+        role: "user",
+        content: buildOrchestratorPrompt({ context, history, prompt }),
+      },
+    ];
 
-      // How many specs this turn has written, so a second one does not overwrite
-      // the first — see `specIdForTurn`. A box rather than a counter passed by
-      // value because `runTool` is called once per tool call and has to carry
-      // the count across them.
-      const specsWritten = { count: 0 };
-      const getReads = createSequentialReadsProvider(
-        { context, history },
-        async (): Promise<RoomReads> => ({
-          context: await readCanvas(roomId),
-          history,
+    // How many specs this turn has written, so a second one does not overwrite
+    // the first — see `specIdForTurn`. A box rather than a counter passed by
+    // value because `runTool` is called once per tool call and has to carry
+    // the count across them.
+    const specsWritten = { count: 0 };
+    const getReads = createSequentialReadsProvider(
+      { context, history },
+      async (): Promise<RoomReads> => ({
+        context: await readCanvas(roomId),
+        history,
+      }),
+    );
+
+    const result = await runOrchestratorLoop(messages, {
+      callModel: (turnMessages) =>
+        callModel(turnMessages, publisher, activity),
+      runTool: (call) =>
+        runTool(call, {
+          payload,
+          runId,
+          activity,
+          getReads,
+          specsWritten,
         }),
-      );
+    });
 
-      const result = await runOrchestratorLoop(messages, {
-        callModel: (turnMessages) =>
-          callModel(turnMessages, publisher, activity),
-        runTool: (call) =>
-          runTool(call, {
-            payload,
-            runId,
-            activity,
-            getReads,
-            specsWritten,
-          }),
-      });
-
-      if (result.didHitStepCap) {
-        logger.warn("Orchestration hit the step cap", { roomId, steps: result.steps });
-      }
-
-      await publisher.finish("complete", result.text);
-      activityOutcome = "complete";
-
-      return { text: result.text, steps: result.steps };
-    } catch (error: unknown) {
-      logger.error("Orchestration failed", {
-        roomId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-
-      await publisher.finish(
-        "error",
-        "Something went wrong while working on that. Please try again."
-      );
-
-      throw error;
-    } finally {
-      // Runs on the success and failure paths alike — a stream left open keeps
-      // the sidebar waiting for chunks that will never come.
-      activity.emit({ type: "terminal", phase: activityOutcome });
-      await activity.close();
+    if (result.didHitStepCap) {
+      console.warn("Orchestration hit the step cap", { roomId, steps: result.steps });
     }
-  },
-});
+
+    await publisher.finish("complete", result.text);
+    activityOutcome = "complete";
+
+    return { text: result.text, steps: result.steps };
+  } catch (error: unknown) {
+    console.error("Orchestration failed", {
+      roomId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    await publisher.finish(
+      "error",
+      "Something went wrong while working on that. Please try again."
+    );
+
+    throw error;
+  } finally {
+    // Runs on the success and failure paths alike, so the browser always
+    // learns how the turn ended.
+    activity.emit({ type: "terminal", phase: activityOutcome });
+  }
+}
 
 /** What the tools accept, shared by the declaration and the re-validation. */
 const designToolInputSchema = z.object({
@@ -207,7 +191,7 @@ const specToolInputSchema = z.object({
 });
 
 /**
- * Declared without `execute` on purpose — see the task comment. The model
+ * Declared without `execute` on purpose — see `runOrchestrator`. The model
  * returns a tool call, and the loop performs the wait outside the stream.
  */
 const ORCHESTRATOR_TOOLS = {
@@ -309,7 +293,7 @@ async function runTool(
   if (call.toolName === DESIGN_TOOL_NAME) {
     // Re-validated at this boundary, not trusted: the model chose these
     // arguments, and a malformed one must become an explanation rather than a
-    // triggered run with a missing brief.
+    // design with a missing brief.
     const input = designToolInputSchema.safeParse(call.input);
 
     if (!input.success) {
@@ -321,13 +305,11 @@ async function runTool(
 
     activity.emit({ type: "step", text: AI_RUN_STEPS.designCanvas });
 
-    // Called, not triggered. `triggerAndWait` cost ~27s of child boot plus a
-    // checkpoint and restore of this run, none of it model time — see the
-    // `runDesign` comment. Inline, the design emits straight into this turn's
-    // one activity stream, so there is no second publisher writing a competing
-    // snapshot and nothing to replay afterwards. The first tool reuses the room
-    // read at the top of this run; later tools refresh the canvas so they observe
-    // any preceding design, including a partial build that threw.
+    // The design emits straight into this turn's one activity stream, so there
+    // is no second publisher writing a competing snapshot. The first tool
+    // reuses the room read at the top of this run; later tools refresh the
+    // canvas so they observe any preceding design, including a partial build
+    // that threw.
     try {
       const reads = await getReads();
       const output = await runDesign(
@@ -343,7 +325,7 @@ async function runTool(
 
       return toToolResult(call, describeDesignOutcome({ ok: true, output }));
     } catch (error: unknown) {
-      logger.warn("Design failed", {
+      console.warn("Design failed", {
         error: error instanceof Error ? error.message : String(error),
       });
 
@@ -363,12 +345,6 @@ async function runTool(
 
     activity.emit({ type: "step", text: AI_RUN_STEPS.writeSpec });
 
-    // Called, not triggered — the same change as `designCanvas`, and worth more
-    // here: `triggerAndWait` was the only thing left suspending this run, so a
-    // spec turn paid a child boot *and* a restore of this one. There is no
-    // `publisher.flush()` before it any more either; that existed because a
-    // scheduled debounce does not fire while a run is suspended, and nothing
-    // suspends now.
     try {
       const reads = await getReads();
       const output = await runSpec(
@@ -396,10 +372,10 @@ async function runTool(
 
       return toToolResult(call, describeSpecOutcome({ ok: true, output }));
     } catch (error: unknown) {
-      // Includes the `AbortTaskRunError` an empty canvas raises. Thrown out of
+      // Includes the error an empty canvas raises. Thrown out of
       // here it would abort the whole turn; as a tool result the model can say
       // there is nothing to write about yet.
-      logger.warn("Spec failed", {
+      console.warn("Spec failed", {
         error: error instanceof Error ? error.message : String(error),
       });
 

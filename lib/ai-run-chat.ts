@@ -64,11 +64,11 @@ export interface AiRunChatPublisher {
 }
 
 /**
- * Which run's chat row a task writes into.
+ * Which run's chat row a subagent writes into.
  *
  * A subagent publishes into its *parent's* row, so one user prompt produces one
  * assistant message with the delegated work nested inside it. A run with no
- * parent — a direct trigger, a dashboard replay — owns its own row.
+ * parent owns its own row.
  *
  * Not a bare `??`: an empty string is a caller that meant to pass a parent and
  * did not, and `chat-` is a row every such run would collide on.
@@ -184,7 +184,7 @@ export function createAiRunChatPublisher(
 
     // Clamped here rather than at `finish`, because `parseAiChatMessage` slices
     // on the way back out: a message that grew past the cap would render
-    // truncated while the worker went on appending to something nobody sees.
+    // truncated while the server went on appending to something nobody sees.
     const next = (content + delta).slice(0, MAX_CHAT_CONTENT_LENGTH);
 
     if (next === content) {

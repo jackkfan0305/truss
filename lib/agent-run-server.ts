@@ -1,11 +1,12 @@
-import { idempotencyKeys } from "@trigger.dev/sdk";
+import { createHash } from "node:crypto";
 
-import type { OrchestrateRequest } from "@/lib/orchestrate-requests";
+import type {
+  OrchestrateRequest,
+  OrchestratorPayload,
+} from "@/lib/orchestrate-requests";
 import {
   AI_CHAT_FEED_ID,
   parseAiChatMessage,
-  type AiDesignModelId,
-  type AiThinkingLevel,
 } from "@/types/tasks";
 
 interface AiChatFeedReadEntry {
@@ -15,14 +16,6 @@ interface AiChatFeedReadEntry {
   data: unknown;
 }
 
-interface AgentTriggerPayload {
-  prompt: string;
-  promptMessageId: string;
-  roomId: string;
-  modelId: AiDesignModelId;
-  thinkingLevel: AiThinkingLevel;
-}
-
 export interface VerifiedAgentRunDependencies {
   readFeedMessages: (params: {
     roomId: string;
@@ -30,23 +23,17 @@ export interface VerifiedAgentRunDependencies {
   }) => Promise<{ data: AiChatFeedReadEntry[] }>;
   /** Atomically consumes one durable request slot after the prompt is trusted. */
   consumeRequestSlot: (userId: string) => Promise<boolean>;
-  trigger: (
-    payload: AgentTriggerPayload,
-    options: {
-      idempotencyKey: Awaited<ReturnType<typeof idempotencyKeys.create>>;
-    },
-  ) => Promise<{ id: string }>;
 }
 
 export type AgentRunStartResult =
-  | { status: "started"; runId: string }
+  | { status: "started"; runId: string; payload: OrchestratorPayload }
   | { status: "unverified" }
   | { status: "rate_limited" };
 
 /**
- * Promotes a browser-supplied prompt ID into trusted worker metadata only after
+ * Promotes a browser-supplied prompt ID into a trusted run payload only after
  * the authenticated server proves that exact human message in the authorized
- * room. Invalid anchors return `null` without reaching Trigger.dev.
+ * room. Invalid anchors never reach the model.
  */
 export async function startVerifiedAgentRun(
   request: OrchestrateRequest,
@@ -73,29 +60,33 @@ export async function startVerifiedAgentRun(
     return { status: "rate_limited" };
   }
 
-  // The prompt row is the durable unit of user intent. A browser retry or a
-  // concurrent replay receives the original Trigger handle instead of spending
-  // another model run or applying the same canvas mutation twice.
-  const idempotencyKey = await idempotencyKeys.create(
-    [
-      "orchestrator",
-      authenticatedUserId,
-      request.roomId,
-      request.promptMessageId,
-    ],
-    { scope: "global" },
-  );
-
-  const handle = await dependencies.trigger(
-    {
+  return {
+    status: "started",
+    runId: agentRunId(authenticatedUserId, request.roomId, request.promptMessageId),
+    payload: {
       prompt: request.prompt,
       promptMessageId: request.promptMessageId,
       roomId: request.roomId,
       modelId: request.modelId,
       thinkingLevel: request.thinkingLevel,
     },
-    { idempotencyKey },
-  );
+  };
+}
 
-  return { status: "started", runId: handle.id };
+/**
+ * The prompt row is the durable unit of user intent, so its run ID is derived
+ * from it. A browser retry or a concurrent replay lands on the same ID, and the
+ * `TaskRun` unique constraint refuses the second run instead of spending another
+ * model call or applying the same canvas mutation twice.
+ */
+export function agentRunId(
+  userId: string,
+  roomId: string,
+  promptMessageId: string,
+): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(["orchestrator", userId, roomId, promptMessageId]))
+    .digest("hex");
+
+  return `run_${digest.slice(0, 32)}`;
 }

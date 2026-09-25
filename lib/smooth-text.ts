@@ -1,9 +1,9 @@
 /**
  * Paces streamed text onto the screen (33-thinking-disclosure).
  *
- * Reasoning arrives from the worker in bursts, not in a steady trickle: the
- * provider emits deltas at its own rhythm and the Trigger.dev stream batches
- * transport on top of that. Appending each burst as it lands makes the panel
+ * Reasoning arrives from the server in bursts, not in a steady trickle: the
+ * provider emits deltas at its own rhythm and the chat row publisher coalesces
+ * them on top of that. Appending each burst as it lands makes the panel
  * jump a paragraph at a time, which reads as sloppy rather than as live.
  *
  * So the burst is the *target* and this decides how much of it to show on any

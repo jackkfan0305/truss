@@ -1,5 +1,6 @@
-/// A triggered Trigger.dev run, recorded so a later request can prove the caller
-/// owns the run before it is handed a run-scoped realtime token.
+/// An orchestrator run, recorded before it starts. The run ID is derived from the
+/// prompt (lib/agent-run-server.ts), so a replayed prompt collides here and is
+/// refused instead of run twice.
 ///
 /// No relation to `Project`: deletion tombstones the project row rather than
 /// removing it (lib/project-lifecycle.ts), so there is nothing for a cascade to
@@ -7,9 +8,7 @@
 model TaskRun {
   id String @id @default(cuid())
 
-  /// Trigger.dev run ID. Unique, which in Postgres is itself the index the
-  /// token route's lookup uses — a separate `@@index([runId])` would be a
-  /// duplicate of it.
+  /// Orchestrator run ID. Unique, which is what dedupes replays.
   runId String @unique
 
   projectId String

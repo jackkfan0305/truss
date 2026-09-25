@@ -50,8 +50,6 @@ async function main() {
       isRoomActive={false}
       emptyState={<p>Empty</p>}
       projectId="test-project"
-      subscription={null}
-      onRunSettled={() => {}}
       hasOlderMessages
       isFetchingOlder={false}
       onFetchOlder={() => { fetched += 1 }}

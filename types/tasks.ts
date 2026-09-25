@@ -29,7 +29,7 @@ export type AiTaskStatus = (typeof AI_TASK_STATUSES)[number];
 export type AiStatusMessage = {
   kind: AiTaskKind;
   status: AiTaskStatus;
-  /** The Trigger.dev run this message belongs to. */
+  /** The orchestrator run this message belongs to. */
   runId: string;
   /** Human-readable line for the sidebar. Optional: a status alone is valid. */
   text?: string;
@@ -72,18 +72,6 @@ function isMember<T extends string>(
 ): value is T {
   return typeof value === "string" && values.includes(value as T);
 }
-
-/**
- * The design agent's live activity stream (26-ai-chat-functional).
- *
- * A Trigger.dev realtime stream rather than a third Liveblocks feed: this is
- * run-token scoped and interesting only while the run is on screen. Putting it
- * on a durable room feed would re-broadcast detailed work to every client.
- *
- * It is read only by the client that started the run, over the same run-scoped
- * token its keyed run and activity observers use.
- */
-export const AI_ACTIVITY_STREAM_ID = "design-activity";
 
 /**
  * The models the composer offers, shared by the picker and the worker.
@@ -172,8 +160,8 @@ export function parseAiThinkingLevel(
  * How long the AI cursor takes to travel to its next target, in milliseconds.
  *
  * Shared rather than duplicated because it is one behaviour split across two
- * processes: the worker waits this out before writing the node
- * (`trigger/design-agent.ts`), and the browser spends it animating the cursor
+ * processes: the server waits this out before writing the node
+ * (`lib/design-agent.ts`), and the browser spends it animating the cursor
  * there (`components/canvas/live-cursors.tsx`). If the two drift, nodes appear
  * before the cursor arrives — precisely the effect this pacing exists to avoid.
  */
@@ -222,7 +210,7 @@ export function getBuildStepMs(actionCount: number): number {
  * The phases a run reports, named once.
  *
  * These strings are written into durable chat history by
- * `trigger/orchestrator.ts` and `trigger/design-agent.ts`, and read back by
+ * `lib/orchestrator.ts` and `lib/design-agent.ts`, and read back by
  * the task stack and the orb state map. Changing a *value* orphans every
  * persisted run that carries it, so treat them as a wire format: add a key,
  * never edit one.

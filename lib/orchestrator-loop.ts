@@ -5,12 +5,12 @@ import { MAX_ORCHESTRATOR_STEPS } from "@/lib/orchestrator-prompt";
 /**
  * The orchestrator's tool-calling loop, without the runtime (35-orchestrator-backend).
  *
- * Split out of `trigger/orchestrator.ts` for the same reason the prompts are:
+ * Split out of `lib/orchestrator.ts` for the same reason the prompts are:
  * this is where a turn can silently stop converging, spend an unbounded number
  * of paid model calls, or turn a failed subagent into a failed turn — and none
  * of that is observable from a diff. `scripts/verify-orchestrator.ts` drives it
  * with fake model turns and fake subagent results, which needs a module free of
- * Trigger.dev, Liveblocks and a provider key.
+ * Liveblocks and a provider key.
  */
 
 export interface OrchestratorToolCall {
@@ -105,7 +105,7 @@ export async function runOrchestratorLoop(
   return { text: text || FALLBACK_CLOSING, steps, didHitStepCap: true };
 }
 
-/** A `triggerAndWait` Result, as much of it as this module reads. */
+/** A subagent's outcome, as much of it as this module reads. */
 export type SubagentResult<TOutput> =
   | { ok: true; output: TOutput }
   | { ok: false; error?: unknown };

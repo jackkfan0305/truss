@@ -58,5 +58,3 @@ next-env.d.ts
 # repo — so it must stay tracked. A new file under an ignored path would
 # otherwise be silently left out of every commit.
 !/.agents/skills/truss-diagram/
-
-.trigger

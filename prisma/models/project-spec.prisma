@@ -5,8 +5,8 @@
 /// through a project-scoped route, and deletion tombstones the project row
 /// rather than removing it, so the cascade is a safety net that never fires.
 model ProjectSpec {
-  /// The Trigger.dev run ID that produced this spec — no `@default`, because the
-  /// ID is chosen by the writer, not the database. `trigger/generate-spec.ts`
+  /// The run ID that produced this spec — no `@default`, because the
+  /// ID is chosen by the writer, not the database. `lib/generate-spec.ts`
   /// explains why: the blob pathname needs an ID before the upload, and reusing
   /// the run's own makes blob + row idempotent under retry.
   id String @id

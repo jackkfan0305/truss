@@ -5,8 +5,8 @@ import { resolveEnvKeys } from "../lib/env-keys";
 /**
  * The `_PROD` convention that keeps development keys out of production.
  *
- * Both deploy paths run through `resolveEnvKeys`, so the failure this guards
- * against is silent and expensive in both: production quietly served with the
+ * The deploy path runs through `resolveEnvKeys`, so the failure this guards
+ * against is silent and expensive: production quietly served with the
  * development Liveblocks project (rooms in the wrong place, no error anywhere),
  * or `_PROD` leaking into development as a name nothing reads while the real
  * key goes missing.
@@ -16,8 +16,8 @@ const values = {
   DATABASE_URL: "postgres://dev",
   LIVEBLOCKS_SECRET_KEY: "sk_dev_1",
   LIVEBLOCKS_SECRET_KEY_PROD: "sk_prod_1",
-  TRIGGER_SECRET_KEY: "tr_dev_1",
-  TRIGGER_SECRET_KEY_PROD: "tr_prod_1",
+  CLERK_SECRET_KEY: "sk_test_1",
+  CLERK_SECRET_KEY_PROD: "sk_live_1",
 };
 
 const development = resolveEnvKeys(values, { production: false });
@@ -26,8 +26,8 @@ const production = resolveEnvKeys(values, { production: true });
 // A key with a twin switches; a key without one is shared by both.
 assert.equal(development.LIVEBLOCKS_SECRET_KEY, "sk_dev_1");
 assert.equal(production.LIVEBLOCKS_SECRET_KEY, "sk_prod_1");
-assert.equal(development.TRIGGER_SECRET_KEY, "tr_dev_1");
-assert.equal(production.TRIGGER_SECRET_KEY, "tr_prod_1");
+assert.equal(development.CLERK_SECRET_KEY, "sk_test_1");
+assert.equal(production.CLERK_SECRET_KEY, "sk_live_1");
 assert.equal(development.DATABASE_URL, "postgres://dev");
 assert.equal(production.DATABASE_URL, "postgres://dev");
 

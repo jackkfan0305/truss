@@ -20,7 +20,7 @@ export function toPersistedAiActivity(
 }
 
 /**
- * Turns untrusted Trigger.dev stream chunks into the chronological activity
+ * Turns untrusted activity stream chunks into the chronological activity
  * timeline the sidebar renders. Adjacent reasoning deltas belong to one
  * disclosure; steps and canvas actions remain at their original positions.
  */

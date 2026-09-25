@@ -401,31 +401,17 @@ async function checkLaterToolsRefreshTheirCanvasRead() {
   assert.equal(refreshes, 2, "every tool after the first obtains a new snapshot");
 }
 
-/**
- * The whole point of the inline path: nothing in a turn may suspend the run.
- *
- * A `triggerAndWait` reintroduced here costs a child boot plus a restore of this
- * run — about 90 seconds on the measured spec turn — and it is a one-line change
- * that would read as perfectly normal in review.
- */
-function checkNothingInATurnSuspendsTheRun() {
+/** Both subagents run in this process, in the turn that called them. */
+function checkSubagentsRunInline() {
   const source = readFileSync(
-    new URL("../trigger/orchestrator.ts", import.meta.url),
+    new URL("../lib/orchestrator.ts", import.meta.url),
     "utf8",
   );
 
-  // The call form, not the bare word: the task comment explains at length why
-  // `triggerAndWait` is gone, and a check that cannot tell prose from code
-  // would fail on its own documentation.
-  assert.doesNotMatch(
-    source,
-    /\btasks\s*\.\s*(?:batch)?[tT]riggerAndWait/,
-    "tools run in this process; waiting on a child run checkpoints the turn",
-  );
   assert.match(
     source,
     /await runSpec\(/,
-    "the spec is written by calling runSpec, not by triggering generate-spec",
+    "the spec is written by calling runSpec",
   );
   assert.match(source, /await runDesign\(/);
 }
@@ -435,7 +421,7 @@ async function main() {
   checkThePromptCarriesTheRoom();
   checkEachSpecOfATurnGetsItsOwnId();
   await checkLaterToolsRefreshTheirCanvasRead();
-  checkNothingInATurnSuspendsTheRun();
+  checkSubagentsRunInline();
   await checkTheLoopStopsWhenTheModelStops();
   await checkTheLoopStopsAtTheStepCap();
   await checkAnAnswerSurvivesALaterSilentStep();

@@ -1,5 +1,4 @@
 import { mutateFlow } from "@liveblocks/react-flow/node";
-import { logger } from "@trigger.dev/sdk";
 
 import { selectAiChatMessages, type ChatMessage } from "@/lib/ai-chat";
 import { selectDesignChatHistory } from "@/lib/canvas-context";
@@ -9,12 +8,12 @@ import { AI_CHAT_FEED_ID } from "@/types/tasks";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 /**
- * The two reads every AI task starts with (35-orchestrator-backend).
+ * The two reads every AI run starts with (35-orchestrator-backend).
  *
- * Node-only — it holds the Liveblocks secret and the Trigger logger — so the
+ * Node-only — it holds the Liveblocks secret — so the
  * pure prompt modules stay importable by the verify scripts. Shared because the
  * orchestrator, the design agent and the spec writer all open a turn the same
- * way, and a per-task copy is three places to forget the failure rule.
+ * way, and a per-agent copy is three places to forget the failure rule.
  */
 export interface RoomReads {
   context: DesignContext;
@@ -71,7 +70,7 @@ export async function readChatHistory(
       chatRunId,
     );
   } catch (error: unknown) {
-    logger.warn("Chat history unavailable; continuing without it", {
+    console.warn("Chat history unavailable; continuing without it", {
       roomId,
       error: error instanceof Error ? error.message : String(error),
     });

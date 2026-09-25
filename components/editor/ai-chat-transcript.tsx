@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
 } from "react"
 import { ArrowDown, Loader2 } from "lucide-react"
 
@@ -19,15 +18,7 @@ import {
 } from "@/components/editor/ai-run-tasks"
 import { ChatEntry } from "@/components/editor/chat-entry"
 import { SpecAttachmentList } from "@/components/editor/spec-attachment"
-import {
-  DesignRunObserver,
-  type DesignRunObserverProps,
-} from "@/components/editor/design-run-observer"
 import { Button } from "@/components/ui/button"
-import type {
-  AgentRunSettlement,
-  RunSubscription,
-} from "@/hooks/use-agent-run"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import type { AiRunTurn } from "@/lib/ai-run-turns"
 import {
@@ -51,12 +42,9 @@ interface AiChatTranscriptProps {
   emptyState: React.ReactNode
   /** The project generated specs belong to — a room ID *is* one (lib/room-id.ts). */
   projectId: string
-  subscription: RunSubscription | null
-  onRunSettled: (settlement: AgentRunSettlement) => void
   hasOlderMessages: boolean
   isFetchingOlder: boolean
   onFetchOlder: () => void
-  ObserverComponent?: ComponentType<DesignRunObserverProps>
   useCollaboratorsSource?: typeof useCollaborators
 }
 
@@ -78,12 +66,9 @@ export function AiChatTranscript({
   isRoomActive,
   emptyState,
   projectId,
-  subscription,
-  onRunSettled,
   hasOlderMessages,
   isFetchingOlder,
   onFetchOlder,
-  ObserverComponent = DesignRunObserver,
   useCollaboratorsSource = useCollaborators,
 }: AiChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -348,14 +333,6 @@ export function AiChatTranscript({
           </ol>
         )}
       </div>
-
-      {subscription ? (
-        <ObserverComponent
-          key={subscription.runId}
-          subscription={subscription}
-          onSettled={onRunSettled}
-        />
-      ) : null}
 
       {showJump ? (
         <Button

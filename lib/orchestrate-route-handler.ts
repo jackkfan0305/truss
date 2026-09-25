@@ -1,5 +1,8 @@
 import type { AgentRunStartResult } from "@/lib/agent-run-server";
-import type { OrchestrateRequest } from "@/lib/orchestrate-requests";
+import type {
+  OrchestrateRequest,
+  OrchestratorPayload,
+} from "@/lib/orchestrate-requests";
 import { parseOrchestrateRequest } from "@/lib/orchestrate-requests";
 import { jsonError, readJsonBody } from "@/lib/project-requests";
 
@@ -16,11 +19,14 @@ export interface OrchestratePostDependencies {
     request: OrchestrateRequest,
     userId: string,
   ) => Promise<AgentRunStartResult>;
+  /** Records the run; `false` when this prompt already has one. */
   recordTaskRun: (run: {
     runId: string;
     projectId: string;
     userId: string;
-  }) => Promise<void>;
+  }) => Promise<boolean>;
+  /** Runs the orchestrator, answering with its activity as it happens. */
+  streamRun: (payload: OrchestratorPayload, runId: string) => Response;
 }
 
 /** Injectable route workflow: every public boundary is verifiable without Next. */
@@ -57,7 +63,7 @@ export async function handleOrchestratePost(
     );
   } catch (error: unknown) {
     console.error(
-      `Orchestrator trigger failed for ${orchestrateRequest.projectId}`,
+      `Orchestrator start failed for ${orchestrateRequest.projectId}`,
       error,
     );
     return jsonError("Could not start the agent", 502);
@@ -74,20 +80,22 @@ export async function handleOrchestratePost(
     );
   }
 
+  let isNewRun: boolean;
+
   try {
-    await dependencies.recordTaskRun({
+    isNewRun = await dependencies.recordTaskRun({
       runId: start.runId,
       projectId: orchestrateRequest.projectId,
       userId: access.userId,
     });
   } catch (error: unknown) {
     console.error(`Task run record failed for ${start.runId}`, error);
-
-    return jsonError(
-      "The agent started, but this run could not be tracked. The canvas will still update.",
-      502,
-    );
+    return jsonError("Could not start the agent", 502);
   }
 
-  return Response.json({ runId: start.runId }, { status: 202 });
+  if (!isNewRun) {
+    return jsonError("This prompt already has a run", 409);
+  }
+
+  return dependencies.streamRun(start.payload, start.runId);
 }

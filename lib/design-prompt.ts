@@ -11,9 +11,8 @@ import type { AiChatMessage } from "@/types/tasks";
 /**
  * Everything the design agent tells the model (23-design-agent-logic).
  *
- * Separate from `trigger/design-agent.ts` for the same reason `lib/design-plan.ts`
- * is: this is pure string building with no Liveblocks client and no Trigger.dev
- * runtime, so `scripts/verify-design-agent.ts` can assert on what the model is
+ * Separate from `lib/design-agent.ts` for the same reason `lib/design-plan.ts`
+ * is: this is pure string building with no Liveblocks client, so `scripts/verify-design-agent.ts` can assert on what the model is
  * actually shown. A prompt regression is invisible in review and expensive in
  * production — it costs a whole run to notice.
  *

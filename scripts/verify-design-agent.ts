@@ -24,8 +24,8 @@ import {
   selectAiActivityTimeline,
 } from "../lib/ai-timeline";
 import {
+  readAiRunStream,
   reduceAiRunTurns,
-  resolveAiRunPhase,
   type AiRunTurn,
 } from "../lib/ai-run-turns";
 import { selectLatestAiStatus } from "../lib/ai-status";
@@ -990,61 +990,52 @@ function checkRunTurnsRemainAnchoredForTheSession() {
  * ten minutes ago. Settled turns must not produce one at all.
  */
 /**
- * A finished run releases the composer on the stream's terminal marker alone.
- *
- * The run record can lag behind the worker, so it remains a fallback instead
- * of gating the terminal marker delivered by the activity stream.
+ * The route's NDJSON stream settles the turn. Lines can split across chunks,
+ * and a stream cut off before its terminal marker must still release the
+ * composer, as an error.
  */
-function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
-  assert.equal(
-    resolveAiRunPhase({
-      terminalPhase: "complete",
-      runOutcome: null,
-      didGraceElapse: false,
-    }),
-    "complete",
-    "the terminal marker settles a run without waiting for the run record",
+async function checkRunStreamSettlesTheTurn() {
+  const streamOf = (chunks: string[]) =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      },
+    });
+
+  const complete = await readAiRunStream(
+    streamOf([
+      '{"type":"step","text":"Reading the canvas"}\n{"type":"reas',
+      'oning","text":"Thinking"}\nnot json\n',
+      '{"type":"terminal","phase":"complete"}\n',
+    ])
   );
 
-  assert.equal(
-    resolveAiRunPhase({
-      terminalPhase: "error",
-      runOutcome: "complete",
-      didGraceElapse: true,
-    }),
-    "error",
-    "the worker's own outcome wins over the run record",
+  assert.equal(complete.phase, "complete");
+  assert.deepEqual(
+    complete.activity.map((part) => part.type),
+    ["step", "reasoning"],
+    "a line split across chunks still parses, and a bad line is skipped"
   );
 
-  assert.equal(
-    resolveAiRunPhase({
-      terminalPhase: null,
-      runOutcome: null,
-      didGraceElapse: false,
-    }),
-    null,
-    "a run with neither signal keeps streaming",
+  const cutOff = await readAiRunStream(
+    streamOf(['{"type":"step","text":"Reading the canvas"}\n'])
   );
 
-  assert.equal(
-    resolveAiRunPhase({
-      terminalPhase: null,
-      runOutcome: "complete",
-      didGraceElapse: false,
-    }),
-    null,
-    "a healthy stream's final tail is not truncated by the run record",
+  assert.equal(cutOff.phase, "error", "no terminal marker settles as an error");
+  assert.equal(cutOff.activity.length, 1);
+
+  const failed = await readAiRunStream(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("connection reset"));
+      },
+    })
   );
 
-  assert.equal(
-    resolveAiRunPhase({
-      terminalPhase: null,
-      runOutcome: "error",
-      didGraceElapse: true,
-    }),
-    "error",
-    "a run killed before its terminal marker still releases the composer",
-  );
+  assert.equal(failed.phase, "error", "a broken connection settles as an error");
 }
 
 /**
@@ -1060,6 +1051,7 @@ function checkRunSettlesOnTheStreamMarkerNotTheRunRecord() {
  */
 function assertWorkerPersistsLiveActivity(
   source: string,
+  designSource: string,
   streamSource: string
 ): void {
   const publisherOptions = extractPublisherOptions(source);
@@ -1070,30 +1062,21 @@ function assertWorkerPersistsLiveActivity(
 
   assert.match(
     source,
-    /openActivityStream\(publisher\.emit\)/,
+    /openActivityStream\(publisher\.emit,\s*write\)/,
     "the run publisher receives every stream activity emission"
   );
 
-  // The task wrapper owns the row: it opens it, and settles it either way.
+  // The orchestrator owns the row: it opens it, and settles it either way.
   assert.match(source, /publisher\.start\(\)/);
-  assert.match(source, /publisher\.finish\("complete",\s*result\.summary\)/);
-  assert.match(
-    source,
-    /onFailure:\s*\(text\)\s*=>\s*publisher\.finish\("error",\s*text\)/,
-    "a failed design still settles the row it opened"
-  );
+  assert.match(source, /publisher\.finish\("complete",\s*result\.text\)/);
+  assert.match(source, /publisher\.finish\(\s*"error"/);
 
-  const designRun = extractFunction(source, "runDesign");
+  const designRun = extractFunction(designSource, "runDesign");
 
   assert.doesNotMatch(
     designRun,
     /createAiRunChatPublisher\(/,
     "runDesign must not open a second publisher on the caller's row"
-  );
-  assert.doesNotMatch(
-    designRun,
-    /activity\.close\(/,
-    "the activity stream belongs to the caller, which closes it"
   );
 
   const activityStream = extractFunction(streamSource, "openActivityStream");
@@ -1109,6 +1092,7 @@ function assertWorkerPersistsLiveActivity(
   );
 
   assert.doesNotMatch(source, /publishAiChatSummary\(/);
+  assert.doesNotMatch(designSource, /publishAiChatSummary\(/);
 }
 
 function extractPublisherOptions(source: string): string {
@@ -1154,28 +1138,29 @@ function extractFunction(source: string, name: string): string {
 }
 
 function checkWorkerPersistsLiveActivity(): void {
-  const source = readFileSync(
-    new URL("../trigger/design-agent.ts", import.meta.url),
-    "utf8"
-  );
-  const streamSource = readFileSync(
-    new URL("../lib/ai-activity-stream.ts", import.meta.url),
-    "utf8"
-  );
-  // A worker that constructs a publisher, never feeds it, and lets the design
-  // open a competing one — every failure this check exists to catch.
+  const read = (path: string) =>
+    readFileSync(new URL(path, import.meta.url), "utf8");
+  const source = read("../lib/orchestrator.ts");
+  const designSource = read("../lib/design-agent.ts");
+  const streamSource = read("../lib/ai-activity-stream.ts");
+  // An orchestrator that constructs a publisher, never feeds it, and lets the
+  // design open a competing one — every failure this check exists to catch.
   const insufficientSource = `
     const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
-    const activity = openActivityStream(() => undefined);
+    const activity = openActivityStream(() => undefined, write);
+  `;
+  const insufficientDesignSource = `
     async function runDesign(payload, options) {
       const publisher = createAiRunChatPublisher({ roomId, runId, promptMessageId });
-      await activity.close();
     }
   `;
 
-  assertWorkerPersistsLiveActivity(source, streamSource);
+  assertWorkerPersistsLiveActivity(source, designSource, streamSource);
   assert.throws(() =>
-    assertWorkerPersistsLiveActivity(insufficientSource, streamSource)
+    assertWorkerPersistsLiveActivity(insufficientSource, designSource, streamSource)
+  );
+  assert.throws(() =>
+    assertWorkerPersistsLiveActivity(source, insufficientDesignSource, streamSource)
   );
 }
 
@@ -1224,7 +1209,7 @@ function checkEveryActionTypeDescribesItself() {
   assert.equal(described.deleteNode, "api");
 }
 
-function main() {
+async function main() {
   checkGarbageNeverThrows();
   checkPaletteAndShapesAreEnforced();
   checkAddedNodesAreCanvasReady();
@@ -1245,7 +1230,7 @@ function main() {
   checkActivityTimelinePreservesChronology();
   checkActivityTimelineAppendsIncrementally();
   checkRunTurnsRemainAnchoredForTheSession();
-  checkRunSettlesOnTheStreamMarkerNotTheRunRecord();
+  await checkRunStreamSettlesTheTurn();
   checkWorkerPersistsLiveActivity();
   checkEveryActionTypeDescribesItself();
   checkCanvasDescriptionCarriesSizes();
@@ -1261,10 +1246,8 @@ function main() {
   );
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error: unknown) => {
   console.error("❌ Design agent verification failed");
   console.error(error);
   process.exitCode = 1;
-}
+});

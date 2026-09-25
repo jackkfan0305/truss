@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/ui/themes";
 import { useLayoutEffect, useReducer, useSyncExternalStore } from "react";
 
+import { TrussLoader } from "@/components/ui/truss-loader";
 import {
   consumePendingAgentEntry,
   getAgentLaunchSessionStorage,
@@ -44,12 +45,7 @@ const clerkAppearance = {
 function AgentLaunchCaptureStatus(): React.ReactNode {
   return (
     <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
-      <section
-        className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6"
-        role="status"
-      >
-        <p className="text-sm text-copy-secondary">Preparing your diagram request.</p>
-      </section>
+      <TrussLoader label="Preparing your diagram request" />
     </main>
   );
 }
@@ -57,12 +53,7 @@ function AgentLaunchCaptureStatus(): React.ReactNode {
 function AppBootstrapStatus(): React.ReactNode {
   return (
     <main className="flex min-h-screen items-center justify-center bg-page px-6 py-12">
-      <section
-        className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6"
-        role="status"
-      >
-        <p className="text-sm text-copy-secondary">Loading Truss.</p>
-      </section>
+      <TrussLoader label="Loading Truss" />
     </main>
   );
 }

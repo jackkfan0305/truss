@@ -5,6 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    /* Motion: panel and surface open/close (transitions.dev token scale). */
+    --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+
     /* Typography */
     --font-sans: var(--font-geist-sans);
     --font-mono: var(--font-geist-mono);
@@ -174,6 +177,15 @@
     background-size: 22px 22px;
 }
 
+/* Prompt Input owns an inner InputGroup with its own dark fill and border.
+ * Keep the composer's outer form as the only visible container. */
+.ai-chat-composer > [data-slot="input-group"] {
+    background: transparent;
+    border: 0;
+    border-radius: calc(1.625rem - 0.5rem);
+    box-shadow: none;
+}
+
 /*
  * React Flow draws each resize edge as a 1px-wide element and each corner as a
  * 7px square, which are near-impossible pointer targets. The pseudo-element
@@ -335,8 +347,69 @@
  * wants the transform-and-mask version instead.
  */
 /*
+ * The loading mark: a truss triangle that builds itself the way the AI builds a
+ * diagram, edge by edge, each joint lighting as its edge reaches it, then fades
+ * and starts again. All three parts share one period, so the per-part delays
+ * are a fixed phase offset that holds on every loop.
+ */
+@keyframes truss-loader-edge {
+    0% {
+        stroke-dashoffset: 1;
+        opacity: 1;
+    }
+    28%,
+    72% {
+        stroke-dashoffset: 0;
+        opacity: 1;
+    }
+    92%,
+    100% {
+        stroke-dashoffset: 0;
+        opacity: 0;
+    }
+}
+
+@keyframes truss-loader-joint {
+    0%,
+    8% {
+        opacity: 0.35;
+        transform: scale(0.7);
+        fill: var(--bg-base);
+    }
+    22% {
+        opacity: 1;
+        transform: scale(1.15);
+        fill: var(--accent-primary);
+    }
+    36%,
+    72% {
+        opacity: 1;
+        transform: scale(1);
+        fill: var(--accent-primary);
+    }
+    92%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.7);
+        fill: var(--bg-base);
+    }
+}
+
+.truss-loader-edge {
+    stroke-dasharray: 1;
+    animation: truss-loader-edge 2.4s var(--ease-smooth-out) infinite both;
+}
+
+.truss-loader-joint {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: truss-loader-joint 2.4s var(--ease-smooth-out) infinite both;
+}
+
+/*
  * Arrival is decoration: the node and the edge are already in shared state, so
- * skipping the motion loses nothing but the flourish.
+ * skipping the motion loses nothing but the flourish. The loader keeps its
+ * finished triangle and only breathes, so it still reads as "working".
  */
 @media (prefers-reduced-motion: reduce) {
     .canvas-node-arrive,
@@ -344,8 +417,24 @@
         animation: none;
     }
 
-    .canvas-edge-draw {
+    .canvas-edge-draw,
+    .truss-loader-edge {
         stroke-dasharray: none;
+    }
+
+    .truss-loader-edge,
+    .truss-loader-joint {
+        animation: none;
+    }
+
+    .truss-loader {
+        animation: truss-loader-breathe 2.4s ease-in-out infinite;
+    }
+}
+
+@keyframes truss-loader-breathe {
+    50% {
+        opacity: 0.5;
     }
 }
 

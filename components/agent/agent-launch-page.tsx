@@ -15,6 +15,12 @@ import {
   startAgentLaunchProjectOnce,
 } from "@/lib/agent-launch-browser";
 import { createRoomIdSuffix } from "@/lib/room-id";
+import {
+  agentCardClassName,
+  agentLabelClassName,
+  agentSecondaryButtonClassName,
+} from "@/components/agent/agent-status";
+import { TrussLoader } from "@/components/ui/truss-loader";
 
 interface AgentLaunchPageProps {
   resumeLaunchId: string | null;
@@ -37,13 +43,13 @@ function openAgentLaunchProject(
 function statusMessage(record: AgentLaunchRecord): string {
   switch (record.stage) {
     case "captured":
-      return "Preparing your diagram request.";
+      return "Preparing your diagram request";
     case "creating-project":
-      return "Creating your project.";
+      return "Creating your project";
     case "project-created":
-      return "Opening your project.";
+      return "Opening your project";
     default:
-      return "Preparing your diagram request.";
+      return "Preparing your diagram request";
   }
 }
 
@@ -53,7 +59,7 @@ export function AgentLaunchStatus({
 }: AgentLaunchStatusProps): React.ReactNode {
   if (!record) {
     return (
-      <section className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6" role="alert">
+      <section className={agentCardClassName} role="alert">
         <p className="text-sm text-copy-secondary">
           We couldn&apos;t find that diagram request. Start again from the agent.
         </p>
@@ -63,18 +69,16 @@ export function AgentLaunchStatus({
 
   if (record.stage === "failed") {
     return (
-      <section className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6" role="alert">
-        <p className="font-mono text-xs uppercase tracking-[0.18em] text-copy-muted">
-          Diagram request
-        </p>
+      <section className={agentCardClassName} role="alert">
+        <p className={agentLabelClassName}>Diagram request</p>
         <h1 className="mt-3 text-xl font-semibold tracking-tight text-copy-primary">
           {record.title}
         </h1>
         <p className="mt-3 text-sm text-copy-secondary">
-          {record.error ?? "We couldn&apos;t continue this diagram request."}
+          {record.error ?? "We couldn't continue this diagram request."}
         </p>
         <button
-          className="mt-5 rounded-xl border border-surface-border bg-elevated px-3 py-2 text-sm font-medium text-copy-primary transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          className={`mt-5 ${agentSecondaryButtonClassName}`}
           onClick={onRetry}
           type="button"
         >
@@ -85,15 +89,7 @@ export function AgentLaunchStatus({
   }
 
   return (
-    <section className="w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6" role="status">
-      <p className="font-mono text-xs uppercase tracking-[0.18em] text-copy-muted">
-        Diagram request
-      </p>
-      <h1 className="mt-3 text-xl font-semibold tracking-tight text-copy-primary">
-        {record.title}
-      </h1>
-      <p className="mt-3 text-sm text-copy-secondary">{statusMessage(record)}</p>
-    </section>
+    <TrussLoader title={record.title} label={statusMessage(record)} />
   );
 }
 

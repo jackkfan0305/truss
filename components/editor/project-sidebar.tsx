@@ -37,8 +37,9 @@ export function ProjectSidebar({
       aria-label="Projects"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 left-0 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-surface/80 p-4 shadow-2xl shadow-black/60 backdrop-blur-xl transition-transform duration-200 ease-out",
-        isOpen ? "translate-x-0" : "-translate-x-[calc(100%+2rem)]",
+        "absolute inset-y-0 left-0 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-elevated px-4 pt-3.5 pb-4 shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        // Open is the invitation, close gets out of the way: 400ms in, 350ms out.
+        isOpen ? "translate-x-0 duration-400" : "-translate-x-[calc(100%+2rem)] duration-350",
         className
       )}
     >
@@ -114,7 +115,7 @@ function ProjectList({
         <li
           key={project.id}
           className={cn(
-            "flex items-center gap-1 rounded-xl px-2 py-1.5 transition-colors",
+            "group flex items-center gap-1 rounded-xl px-2 py-1.5 transition-colors",
             isActive ? "bg-subtle" : "hover:bg-subtle"
           )}
         >
@@ -139,6 +140,9 @@ function ProjectList({
               size="icon-xs"
               onClick={() => onRename(project)}
               aria-label={`Rename ${project.name}`}
+              // Row actions stay out of the way until the row is pointed at or
+              // focused; touch screens have no hover, so they always show there.
+              className="transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 group-focus-within:opacity-100"
             >
               <Pencil className="h-3 w-3 text-copy-muted" />
             </Button>
@@ -150,6 +154,7 @@ function ProjectList({
               size="icon-xs"
               onClick={() => onDelete(project)}
               aria-label={`Delete ${project.name}`}
+              className="transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 group-focus-within:opacity-100"
             >
               <Trash2 className="h-3 w-3 text-copy-muted" />
             </Button>

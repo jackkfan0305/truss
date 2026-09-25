@@ -13,6 +13,13 @@ import {
   type RedirectGuard,
 } from "@/lib/agent-link-browser";
 import type { AgentLinkPayloadV1 } from "@/lib/agent-link";
+import {
+  AgentDoneStatus,
+  agentCardClassName as cardClassName,
+  agentLabelClassName as labelClassName,
+  agentSecondaryButtonClassName as secondaryButtonClassName,
+} from "@/components/agent/agent-status";
+import { TrussLoader } from "@/components/ui/truss-loader";
 
 interface AgentLinkPageProps {
   resumeLinkId: string | null;
@@ -26,13 +33,6 @@ type LinkOperationState =
 
 export type AgentLinkViewState = LinkOperationState | { kind: "not-found" };
 
-// Same card/label/button strings as components/agent/agent-pick-page.tsx,
-// verbatim, so the two one-time agent entry pages read as one visual family.
-const cardClassName =
-  "w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6";
-const labelClassName = "font-mono text-xs uppercase tracking-[0.18em] text-copy-muted";
-const secondaryButtonClassName =
-  "rounded-xl border border-surface-border bg-elevated px-3 py-2 text-sm font-medium text-copy-primary transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand";
 
 export function AgentLinkStatus({ state }: { state: AgentLinkViewState }): React.ReactNode {
   if (state.kind === "not-found") {
@@ -58,22 +58,13 @@ export function AgentLinkStatus({ state }: { state: AgentLinkViewState }): React
   }
 
   if (state.kind === "linked") {
-    return (
-      <section className={cardClassName} role="status">
-        <p className="text-sm text-copy-secondary">
-          Truss is linked — you can close this tab.
-        </p>
-      </section>
-    );
+    return <AgentDoneStatus message="Truss is linked. You can close this tab." />;
   }
 
   return (
-    <section className={cardClassName} role="status">
-      <p className={labelClassName}>Link agent</p>
-      <p className="mt-3 text-sm text-copy-secondary">
-        {state.kind === "awaiting-sign-in" ? "Redirecting you to sign in…" : "Linking your agent…"}
-      </p>
-    </section>
+    <TrussLoader
+      label={state.kind === "awaiting-sign-in" ? "Redirecting you to sign in" : "Linking your agent"}
+    />
   );
 }
 

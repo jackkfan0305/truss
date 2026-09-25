@@ -8,6 +8,28 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- UI polish (2026-09-24): `TrussLoader` replaces the plain "Loading Truss",
+  "Connecting to the canvas" and agent-launch text, and backs a new
+  `app/editor/[roomId]/loading.tsx`. The projects sidebar now matches the AI
+  sidebar surface (solid `bg-elevated`), both panels use 400ms/350ms
+  `ease-smooth-out` motion, both toggles are plain Hugeicons buttons, and
+  project row actions reveal on hover. The root page title is "Truss".
+  Checked signed-in in the browser; the Liveblocks badge still overlaps the
+  composer's right edge.
+
+- Trigger.dev removed (2026-09-24). `POST /api/ai/orchestrate` now runs the
+  orchestrator in the request (`maxDuration` 600s) and streams activity back
+  as NDJSON; `after()` keeps a run going if the tab closes. `trigger/*` moved to
+  `lib/orchestrator.ts`, `lib/design-agent.ts` and `lib/generate-spec.ts` as
+  plain functions, and the standalone task wrappers are gone. The token route,
+  `lib/run-tokens.ts`, `DesignRunObserver` and `trigger.config.ts` are deleted.
+  `useAgentRun` reads the response stream (`readAiRunStream`) and settles the
+  turn itself. The run ID is a hash of user, room and prompt message, and a
+  replay collides on `TaskRun.runId` and gets a 409, which replaces Trigger's
+  idempotency key. `npm run dev` is `next dev` alone. Unit suite and typecheck
+  pass; a signed-in browser run of a design turn and a spec turn is still
+  needed.
+
 - Reply streaming follow-up: the worker now publishes the first answer chunk
   promptly instead of losing short answers to the 400ms debounce. The live
   assistant row mounts its reply renderer before text arrives, then reveals
@@ -1632,3 +1654,79 @@ result is observed.
      checks in `scripts/verify-run-steps.ts` instead of wiring a call that
      could never do anything.
 - Gates: typecheck, lint, `verify:unit`, and `build` all exit 0.
+
+## Reference composer and Metal FX
+
+- Installed `metal-fx@2.0.11` and reshaped the AI Elements composer to the
+  supplied dark, rounded reference. The plus glyph is visual only. Model and
+  effort stay functional dropdowns; the model trigger reads "Agent" and exposes
+  its current model on hover, while effort displays the actual chosen level
+  because no automatic effort mode exists.
+- The send arrow now uses a chromatic Metal FX circle. The ring pauses for
+  reduced motion and the existing border beam remains the working indicator.
+  The prompt and Enter-to-send path remain on AI Elements Prompt Input.
+- Focused composer markup and interaction checks, typecheck, full lint (one
+  existing AI Elements image warning), `verify:unit`, and the production build
+  pass. The unit command needed
+  access to `tsx`'s local IPC pipe, and Next's font fetch needed network access.
+
+## Composer visual correction
+
+- Removed Prompt Input's inner InputGroup border and dark fill in this composer.
+  That layer sat over the rounded outer form and made its corners and surface
+  look doubled. The outer form now owns the visible background and edge.
+- Forced the model and effort triggers to a full pill radius because the
+  library's small-trigger radius selector overrode the earlier `rounded-full`
+  utility. Raised their fills, the decorative plus, and the plain send button
+  so each control remains legible without WebGL. The sidebar uses an elevated
+  charcoal background, with subtle message and composer surfaces.
+- A headless Chromium static render confirmed a 32px composer radius, a
+  transparent borderless inner InputGroup, and 9999px trigger radii. This
+  render does not hydrate Metal FX or exercise the signed-in sidebar.
+- After the final surface adjustment, a second Chromium render confirmed the
+  pills' raised fill and a visible plain send edge. Typecheck, lint, full unit
+  verification, production build, and `git diff --check` pass. Lint retains
+  the existing AI Elements image warning.
+
+## Compact composer follow-up
+
+- Reduced the composer radius and height, along with the plus and send circles.
+  Removed the sidebar's footer wrapper so the rounded beam/form is the only
+  bottom chat element; the composer itself owns its outer margin. The working
+  beam remains aligned to its radius. A local Chromium render measured the
+  beam and form at the same 392x118px box with a 28px radius and a transparent,
+  borderless inner group. Typecheck, lint, unit verification, production build,
+  and `git diff --check` pass. Lint retains the existing AI Elements image
+  warning.
+
+## Composer focus and size follow-up
+
+- A Chromium focus inspection found the apparent rectangular layer: AI
+  Elements' inner InputGroup drew a 3px focus ring inside the outer form's
+  focus border. The composer now suppresses that inner ring while retaining
+  one subtle border on the rounded form. Its minimum height drops another
+  12px, with the beam and inner clipping radii aligned to the new 26px edge.
+- A second focused Chromium render measured the form and beam at the same
+  392x106px box and confirmed that the inner group has no background, border,
+  or box shadow. Typecheck, lint, full unit verification, production build,
+  and `git diff --check` pass. Lint retains the existing AI Elements image
+  warning.
+
+## Composer wrapper correction
+
+- An attempt to remove the extra rectangle by making the sidebar transparent
+  was rejected: the user wants the normal dark chat background. The full-height
+  elevated sidebar background, left border, shadow, and normal pointer behavior
+  are restored.
+- The idle Border Beam wrapper is now absent from the DOM. The rounded Prompt
+  Input form renders directly with the same outer margin; Border Beam wraps it
+  only while work is active. This removes the extra idle container while keeping
+  the requested working effect. A markup regression checks both states. The
+  direct form overrides Prompt Input's default `w-full`: otherwise its side
+  margins overflow the sidebar and clip the right rounded corner.
+- Focused markup and keyboard submission checks and typecheck pass. Production
+  build, full unit verification, lint, and `git diff --check` pass. A Chromium
+  preview confirmed the idle form is a direct child of the dark sidebar, has
+  no Border Beam wrapper, and fits from x=13 to x=404 inside the 416px sidebar
+  with a 26px rounded edge. In the working render, the beam and form share those
+  same bounds. Lint retains the existing AI Elements image warning.

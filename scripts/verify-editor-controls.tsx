@@ -102,13 +102,6 @@ function parentDivContaining(html: string, text: string): string {
   return html.slice(tagStart, tagEnd + 1)
 }
 
-function assertFloatingChrome(button: string): void {
-  assert.match(button, /border-surface-border/)
-  assert.match(button, /bg-surface\/80/)
-  assert.match(button, /shadow-lg/)
-  assert.match(button, /backdrop-blur-xl/)
-}
-
 const closedProjectsToggle = controlledButton(closedHtml, "projects-sidebar")
 const openProjectsToggle = controlledButton(
   projectsOpenHtml,
@@ -129,8 +122,9 @@ const closedProjectTitle = parentDivContaining(closedHtml, "Checkout API")
 const aiOpenProjectTitle = parentDivContaining(aiOpenHtml, "Checkout API")
 const aiOpenUtilities = parentDivContaining(aiOpenHtml, "Saved")
 
-assertFloatingChrome(closedProjectsToggle)
-assertFloatingChrome(closedAiToggle)
+// Both sidebar toggles are plain icon buttons, not floating chips.
+assert.doesNotMatch(closedProjectsToggle, /border-surface-border|backdrop-blur-xl/)
+assert.doesNotMatch(closedAiToggle, /border-surface-border|backdrop-blur-xl/)
 assert.doesNotMatch(
   closedHtml,
   /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="(?:projects-sidebar|ai-sidebar)"/
@@ -139,8 +133,9 @@ assert.match(closedProjectsToggle, /top-3/)
 assert.match(closedProjectsToggle, /left-3/)
 assert.ok(
   openProjectsToggle.includes(
-    "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
-  )
+    "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)]"
+  ),
+  "the open toggle slides to the panel's inner edge on a transform"
 )
 assert.match(closedAiToggle, /top-3/)
 assert.match(closedAiToggle, /right-3/)
@@ -149,12 +144,13 @@ assert.match(closedProjectsToggle, /aria-expanded="false"/)
 assert.match(closedProjectsToggle, /aria-label="Open projects sidebar"/)
 assert.match(openProjectsToggle, /aria-expanded="true"/)
 assert.match(openProjectsToggle, /aria-label="Close projects sidebar"/)
-assert.match(closedHtml, /lucide-panel-left-open/)
-assert.match(projectsOpenHtml, /lucide-panel-left-close/)
+// Hugeicons SidebarLeftIcon, the same glyph open or closed (shadcn's pattern).
+assert.match(closedHtml, /d="M9\.5 3L9\.5 21"/)
+assert.match(projectsOpenHtml, /d="M9\.5 3L9\.5 21"/)
 
 assert.match(closedAiToggle, /aria-expanded="false"/)
 assert.match(closedAiToggle, /aria-label="Open AI sidebar"/)
-assert.match(closedHtml, /lucide-panel-right-open/)
+assert.match(closedHtml, /d="M14\.5 3\.00003L14\.5 21"/)
 
 // One close affordance, not two: the panel header carries the close control
 // while the panel is open, so the navbar's floating toggle must not render

@@ -1,13 +1,9 @@
 "use client"
 
 import type { ReactNode } from "react"
-import {
-  LayoutTemplate,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightOpen,
-  Share2,
-} from "lucide-react"
+import { SidebarLeftIcon, SidebarRightIcon } from "@hugeicons/core-free-icons"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { LayoutTemplate, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -40,10 +36,14 @@ interface EditorNavbarProps {
   className?: string
 }
 
+/** The sidebars' own surface, so the chrome reads as one family. */
 const FLOATING_SURFACE =
-  "rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
-const FLOATING_CONTROL =
-  "pointer-events-auto absolute top-3 z-10 rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
+  "rounded-xl border border-surface-border bg-elevated shadow-lg shadow-page/60"
+/**
+ * Plain icon buttons at the canvas corners, one per sidebar. `top-3.5` centres
+ * the 36px button on the 40px chips beside it.
+ */
+const SIDEBAR_TOGGLE = "pointer-events-auto absolute top-3.5 z-10 rounded-lg"
 
 export function EditorNavbar({
   isSidebarOpen,
@@ -58,8 +58,6 @@ export function EditorNavbar({
   profile,
   className,
 }: EditorNavbarProps) {
-  const LeftToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
-
   return (
     <header
       className={cn(
@@ -76,27 +74,34 @@ export function EditorNavbar({
         aria-label={
           isSidebarOpen ? "Close projects sidebar" : "Open projects sidebar"
         }
+        // Rides along with the panel on a transform, on the panel's own
+        // timing, so it slides instead of jumping to the panel's inner edge.
         className={cn(
-          FLOATING_CONTROL,
+          SIDEBAR_TOGGLE,
+          "left-3 transition-transform ease-smooth-out motion-reduce:transition-none",
           isSidebarOpen
-            ? "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
-            : "left-3"
+            ? "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)] duration-400"
+            : "translate-x-0 duration-350"
         )}
       >
-        <LeftToggleIcon className="size-5 text-copy-secondary" />
+        <HugeiconsIcon
+          icon={SidebarLeftIcon}
+          aria-hidden
+          className="size-5 text-copy-secondary"
+        />
       </Button>
 
       {projectName && !isSidebarOpen ? (
         <div
           className={cn(
             FLOATING_SURFACE,
-            "pointer-events-auto absolute flex h-9 min-w-0 items-center px-3",
+            "pointer-events-auto absolute flex h-10 min-w-0 items-center px-4",
             isAiSidebarOpen
               ? "top-15 left-3 max-w-[calc(100%-14rem)] xl:top-3 xl:left-14 xl:max-w-sm"
               : "top-3 left-14 max-w-[calc(100%-7rem)] sm:max-w-sm"
           )}
         >
-          <p className="min-w-0 truncate pr-2 text-sm font-medium text-copy-primary">
+          <p className="min-w-0 truncate text-sm font-medium text-copy-primary">
             {projectName}
           </p>
         </div>
@@ -105,13 +110,14 @@ export function EditorNavbar({
       <div
         className={cn(
           FLOATING_SURFACE,
-          "pointer-events-auto absolute flex h-10 items-center gap-1 px-1",
+          "pointer-events-auto absolute flex h-10 items-center gap-0.5 px-1.5",
           isAiSidebarOpen
             ? "top-15 right-3 xl:top-3 xl:right-[calc(26rem+0.75rem)]"
             : "top-15 right-3 sm:top-3 sm:right-14"
         )}
       >
         {saveStatus}
+        {saveStatus && (onOpenTemplates || onShare) ? <GroupDivider /> : null}
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="size-4" />
@@ -136,8 +142,13 @@ export function EditorNavbar({
             </span>
           </Button>
         ) : null}
-        {presence}
-        {profile}
+        {(saveStatus || onOpenTemplates || onShare) && (presence || profile) ? (
+          <GroupDivider />
+        ) : null}
+        <div className="flex items-center gap-2 pr-0.5 pl-1">
+          {presence}
+          {profile}
+        </div>
       </div>
 
       {onToggleAiSidebar && !isAiSidebarOpen ? (
@@ -148,11 +159,20 @@ export function EditorNavbar({
           aria-controls="ai-sidebar"
           aria-expanded={isAiSidebarOpen}
           aria-label="Open AI sidebar"
-          className={cn(FLOATING_CONTROL, "right-3")}
+          className={cn(SIDEBAR_TOGGLE, "right-3")}
         >
-          <PanelRightOpen className="size-5 text-copy-secondary" />
+          <HugeiconsIcon
+            icon={SidebarRightIcon}
+            aria-hidden
+            className="size-5 text-copy-secondary"
+          />
         </Button>
       ) : null}
     </header>
   )
+}
+
+/** Separates the save state, the actions and the people in the utility chip. */
+function GroupDivider() {
+  return <span aria-hidden className="mx-1 h-4 w-px bg-surface-border-subtle" />
 }

@@ -16,6 +16,14 @@ import {
   type RedirectGuard,
 } from "@/lib/agent-pick-browser";
 import type { AgentPickPayloadV1 } from "@/lib/agent-pick";
+import {
+  AgentDoneStatus,
+  agentCardClassName as cardClassName,
+  agentDestructiveButtonClassName as destructiveButtonClassName,
+  agentLabelClassName as labelClassName,
+  agentSecondaryButtonClassName as secondaryButtonClassName,
+} from "@/components/agent/agent-status";
+import { TrussLoader } from "@/components/ui/truss-loader";
 
 interface AgentPickPageProps {
   resumePickId: string | null;
@@ -35,13 +43,6 @@ type PickOperationState =
 
 export type AgentPickViewState = PickOperationState | { kind: "not-found" };
 
-const cardClassName =
-  "w-full max-w-md rounded-2xl border border-surface-border bg-surface p-6";
-const labelClassName = "font-mono text-xs uppercase tracking-[0.18em] text-copy-muted";
-const secondaryButtonClassName =
-  "rounded-xl border border-surface-border bg-elevated px-3 py-2 text-sm font-medium text-copy-primary transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand";
-const destructiveButtonClassName =
-  "rounded-xl border border-transparent bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand";
 
 export function AgentPickStatus({ state }: { state: AgentPickViewState }): React.ReactNode {
   if (state.kind === "not-found") {
@@ -76,7 +77,7 @@ export function AgentPickStatus({ state }: { state: AgentPickViewState }): React
         <p className="mt-3 text-sm text-copy-secondary">
           Your agent asked to delete this diagram. This can&apos;t be undone.
         </p>
-        <div className="mt-5 flex gap-3">
+        <div className="mt-6 flex justify-end gap-2">
           <button className={secondaryButtonClassName} onClick={state.onCancel} type="button">
             Cancel
           </button>
@@ -89,20 +90,13 @@ export function AgentPickStatus({ state }: { state: AgentPickViewState }): React
   }
 
   if (state.kind === "done") {
-    return (
-      <section className={cardClassName} role="status">
-        <p className="text-sm text-copy-secondary">{state.message}</p>
-      </section>
-    );
+    return <AgentDoneStatus message={state.message} />;
   }
 
   return (
-    <section className={cardClassName} role="status">
-      <p className={labelClassName}>Diagram request</p>
-      <p className="mt-3 text-sm text-copy-secondary">
-        {state.kind === "awaiting-agent" ? "Waiting for your agent…" : "Preparing your request."}
-      </p>
-    </section>
+    <TrussLoader
+      label={state.kind === "awaiting-agent" ? "Waiting for your agent" : "Preparing your request"}
+    />
   );
 }
 

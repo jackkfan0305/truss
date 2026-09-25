@@ -92,7 +92,7 @@ server.registerTool(
   {
     title: "Apply a full graph to an existing Truss diagram",
     description:
-      "Replaces a diagram's graph with `desiredGraph`, built by editing the graph truss_get_diagram returned in place: reuse the `id` of every node/edge kept or modified, assign new kebab-case ids only to genuinely new ones, and never reuse an id from `opaqueNodeIds`. `fingerprint` must be the value truss_get_diagram returned for this diagram — this call retries once on its own if it goes stale, but a fingerprint you made up will fail. If the result removes any node or edge present in the read graph, get an explicit yes from the user first and state exactly what will be removed, by label — this is the only safety net a destructive edit gets, since there is no browser tab in front of the user and Liveblocks undo does not cover a server-side edit.",
+      "Replaces a diagram's graph with `desiredGraph`, built by editing the graph truss_get_diagram returned in place: reuse the `id` of every node/edge kept or modified, assign new kebab-case ids only to genuinely new ones, and never reuse an id from `opaqueNodeIds`. `fingerprint` must be the value truss_get_diagram returned for this diagram — this call retries once on its own if it goes stale, but a fingerprint you made up will fail. If the result removes any node or edge present in the read graph, get an explicit yes from the user first and state exactly what will be removed, by label — this is the only safety net a destructive edit gets, since there is no browser tab in front of the user and server-side edits cannot be undone by the client.",
     inputSchema: {
       baseUrl: baseUrlShape,
       diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),

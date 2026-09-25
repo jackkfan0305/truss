@@ -214,7 +214,7 @@ async function checkAgentGraphReadUpstreamFailure(): Promise<void> {
     "diagram-1",
     agentGraphDependencies({
       readCanvas: async () => {
-        throw new Error("liveblocks unavailable");
+        throw new Error("blob unavailable");
       },
     }),
   );

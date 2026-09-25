@@ -18,10 +18,9 @@ interface EditorNavbarProps {
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
   /**
-   * Workspace only — the collaborator avatar stack, rendered beside the Clerk
-   * UserButton. A slot rather than a component so the navbar stays outside the
-   * Liveblocks room: the editor home has no room, and calling a presence hook
-   * there would throw (19-presence-avatars-cursors).
+   * Workspace only — metadata for the active diagram. A slot rather than a
+   * component so the navbar stays decoupled from flow state: the editor home
+   * has no active diagram.
    */
   presence?: ReactNode
   /**

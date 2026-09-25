@@ -236,7 +236,7 @@ async function checkSemanticReplayAndDivergentConflict(): Promise<void> {
   assert.equal(divergent.nodes[0].data.label, "Human edit", "a divergent room is never overwritten");
 }
 
-/** Duplicate IDs in Liveblocks Storage are corrupt, not an idempotent replay. */
+/** Duplicate IDs in the stored snapshot are corrupt, not an idempotent replay. */
 async function checkDuplicateLiveFlowIdsConflict(): Promise<void> {
   const canonical = materializeAgentGraph(graph);
 

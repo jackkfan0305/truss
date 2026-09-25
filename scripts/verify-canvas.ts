@@ -210,7 +210,7 @@ function checkShapeGeometryStaysInsideTheNode() {
 }
 
 /**
- * Edge defaults (16-edge-behavior). These are written into Liveblocks Storage
+ * Edge defaults (16-edge-behavior). These are written into the stored snapshot
  * on connect, so a drifted value is baked into every edge created afterwards —
  * and a hardcoded hex or a mismatched arrowhead colour is invisible in review
  * but obvious on the canvas.

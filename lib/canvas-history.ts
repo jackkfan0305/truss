@@ -4,8 +4,8 @@ import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 
 /**
- * Undo and redo for one editor tab. Liveblocks room history did this before
- * (ADR 0005); React Flow has no equivalent.
+ * Undo and redo for one editor tab. The diagram history is stored locally in
+ * React state; React Flow has no built-in undo mechanism (ADR 0005).
  *
  * Entries are whole snapshots. React state arrays are immutable, so an entry
  * shares every node object it did not change and costs little.

@@ -71,9 +71,9 @@ export type DiagramIdResult =
   | { ok: false };
 
 /**
- * Validates the optional `id` field. Client-supplied because the ID is also the
- * room ID the create dialog previews, so it is checked here rather than trusted:
- * an unchecked value would land in a URL path and a Liveblocks room name.
+ * Validates the optional `id` field. Client-supplied because the ID doubles as
+ * the editor route segment, so it is checked here rather than trusted:
+ * an unchecked value would land in a URL path.
  *
  * `{ ok: true, id: undefined }` means the caller should fall back to the
  * schema's `cuid()` default.

@@ -1654,3 +1654,15 @@ result is observed.
   `registerSyncNow` to `CanvasSaveContext` alongside `registerSaveNow`.
 - Fixed react-hook-harness to support `useContext` for test compatibility.
 - All gates pass: `typecheck`, `lint`, `verify:unit`.
+
+- Task 10 complete: Remove Liveblocks surface and packages. Deleted:
+  `app/api/liveblocks-auth/route.ts`, `lib/liveblocks.ts`, `liveblocks.config.ts`,
+  `scripts/verify-liveblocks.ts`. Uninstalled five `@liveblocks/*` packages.
+  Simplified `deleteDiagramResources` to atomic tombstone write with no room
+  argument; deleted `RoomLifecycle`, `cleanupTombstonedRoom`, and `TOMBSTONED`.
+  Updated verification to TDD discipline: rewrote deletion checks, confirmed
+  tests fail (RED), implemented simplification, confirmed tests pass (GREEN).
+  Swept comments to replace "Liveblocks Storage" with "flow state" or "stored
+  snapshot" and "room ID" with "diagram ID". All gates pass: `typecheck`, `lint`,
+  `verify:unit`, `build` (no `/api/liveblocks-auth` route), `verify:integration`.
+  Step 7 (Vercel env cleanup) pending owner approval.

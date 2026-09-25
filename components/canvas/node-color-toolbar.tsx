@@ -62,7 +62,7 @@ export function NodeColorToolbar({ nodeId, color }: NodeColorToolbarProps) {
             aria-label={key}
             aria-pressed={key === color}
             // Writes through React Flow's controlled flow, so the change lands
-            // in Liveblocks Storage via `onNodesChange` — no server call.
+            // in the stored snapshot via `onNodesChange` — no server call.
             onClick={() => updateNodeData(nodeId, { color: key })}
           >
             <span

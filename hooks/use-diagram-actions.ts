@@ -79,8 +79,8 @@ export function useDiagramActions() {
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The diagram ID is also the Liveblocks room ID and the /editor/[roomId]
-  // segment — one identifier, per 10-liveblocks-setup.
+  // The diagram ID doubles as the /editor/[diagramId] segment — one identifier
+  // for both the database row and the route.
   const roomId = buildRoomId(name, suffix)
 
   const closeDialog = () => {

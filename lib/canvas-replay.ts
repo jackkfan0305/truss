@@ -11,7 +11,7 @@ import type { CanvasEdge, CanvasNode } from "@/types/canvas";
 /**
  * How an open editor shows an agent write it picked up by polling: removals
  * and updates at once, then additions one at a time behind the agent cursor.
- * The same order the server's paced draw used when Liveblocks carried it.
+ * The same order the server's paced draw uses.
  */
 export interface CanvasReplayPlan {
   /** The remote canvas minus everything the replay will add. */

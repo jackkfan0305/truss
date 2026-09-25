@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { authorizeDiagram } from "@/lib/diagram-access";
-import { getLiveblocks } from "@/lib/liveblocks";
 import { deleteDiagramResources } from "@/lib/diagram-lifecycle";
 import {
   jsonError,
@@ -76,15 +75,7 @@ export async function DELETE(
   }
 
   try {
-    await deleteDiagramResources(
-      diagramId,
-      access.userId,
-      {
-        deleteRoom: async (roomId) => {
-          await getLiveblocks().deleteRoom(roomId);
-        },
-      },
-    );
+    await deleteDiagramResources(diagramId, access.userId);
   } catch (error: unknown) {
     console.error(`Diagram deletion failed for ${diagramId}`, error);
     return jsonError("Could not delete diagram", 500);

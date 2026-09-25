@@ -33,9 +33,9 @@ export interface SnapshotFlow extends AgentCanvasFlow {
 }
 
 /**
- * Same semantics the Liveblocks flow had: `updateNode` and `updateEdge` merge
- * shallowly, and `removeNodes` does not cascade to edges. Callers that remove
- * a node remove its edges themselves (see `applyDiff`).
+ * Flow semantics: `updateNode` and `updateEdge` merge shallowly, and
+ * `removeNodes` does not cascade to edges. Callers that remove a node remove
+ * its edges themselves (see `applyDiff`).
  */
 export function createSnapshotFlow(snapshot: CanvasSnapshot): SnapshotFlow {
   let nodes = [...snapshot.nodes];

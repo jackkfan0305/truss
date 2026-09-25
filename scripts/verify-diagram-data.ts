@@ -5,16 +5,13 @@ import assert from "node:assert/strict";
 import { Prisma } from "../generated/prisma/client";
 import { prisma } from "../lib/prisma";
 import { getAccessibleDiagram } from "../lib/diagram-access";
-import {
-  cleanupTombstonedRoom,
-  deleteDiagramResources,
-} from "../lib/diagram-lifecycle";
+import { deleteDiagramResources } from "../lib/diagram-lifecycle";
 import { getOwnedDiagrams } from "../lib/diagrams";
 import { buildRoomId } from "../lib/room-id";
 
 /**
  * Exercises the editor home's data layer against the live database: the
- * room-ID-as-primary-key create that POST /api/diagrams performs, and owner-only
+ * diagram ID create that POST /api/diagrams performs, and owner-only
  * access checks where only the diagram owner can open it. Neither can be checked
  * by types alone.
  *
@@ -109,39 +106,13 @@ async function checkRoomIdCreate() {
 
 const CLEANUP_DIAGRAM_ID = "verify-room-cleanup-failure";
 
-async function checkActiveRoomIsPreserved() {
-  let roomDeletionAttempted = false;
-
-  assert.equal(
-    await cleanupTombstonedRoom("verify-owned-one", {
-      deleteRoom: async () => {
-        roomDeletionAttempted = true;
-      },
-    }),
-    false,
-    "an active diagram's room must never be removed by the auth fence",
-  );
-  assert.equal(roomDeletionAttempted, false);
-}
-
-async function checkMissingDiagramPreservesRoom() {
-  let roomDeletionAttempted = false;
-
+async function checkMissingDiagramFails() {
   await assert.rejects(
-    deleteDiagramResources("verify-does-not-exist", OWNER_ID, {
-      deleteRoom: async () => {
-        roomDeletionAttempted = true;
-      },
-    }),
+    deleteDiagramResources("verify-does-not-exist", OWNER_ID),
     (error: unknown) =>
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2025",
     "a missing database row must fail deletion",
-  );
-  assert.equal(
-    roomDeletionAttempted,
-    false,
-    "a database deletion failure must not destroy Liveblocks data",
   );
 }
 
@@ -157,47 +128,25 @@ async function seedCleanupFailureDiagram() {
   });
 }
 
-async function checkCleanupFailureLeavesTombstone() {
-  const cleanupFailure = new Error("Liveblocks unavailable");
+async function checkDeletionTombstonesTheRow() {
+  await deleteDiagramResources(CLEANUP_DIAGRAM_ID, OWNER_ID);
 
-  await assert.rejects(
-    deleteDiagramResources(CLEANUP_DIAGRAM_ID, OWNER_ID, {
-      deleteRoom: async () => {
-        throw cleanupFailure;
-      },
-    }),
-    cleanupFailure,
-  );
-
-  const deleting = await prisma.diagram.findUnique({
+  const tombstone = await prisma.diagram.findUnique({
     where: { id: CLEANUP_DIAGRAM_ID },
-    select: {
-      name: true,
-      storyboardId: true,
-      canvasJsonPath: true,
-      deletingAt: true,
-      deletedAt: true,
-    },
+    select: { ownerId: true, name: true, storyboardId: true, canvasJsonPath: true, deletingAt: true, deletedAt: true },
   });
 
-  assert.ok(deleting, "the tombstone row must survive a failed cleanup");
-  assert.equal(deleting.name, "Deleted diagram", "the name must be scrubbed");
+  assert.ok(tombstone, "the tombstone row is permanent");
+  assert.equal(tombstone.ownerId, OWNER_ID);
+  assert.equal(tombstone.name, "Deleted diagram", "the name is scrubbed");
+  assert.equal(tombstone.storyboardId, null, "a deleted diagram leaves its board");
   assert.equal(
-    deleting.storyboardId,
-    null,
-    "a deleting diagram must detach from its board rather than keep a panel there",
-  );
-  assert.equal(
-    deleting.canvasJsonPath,
+    tombstone.canvasJsonPath,
     "https://blob.example/verify-room-cleanup-failure.json",
-    "the artifact pointer is retained until blob deletion exists",
+    "the artifact pointer is kept until blob deletion exists",
   );
-  assert.notEqual(deleting.deletingAt, null, "deletingAt marks the tombstone");
-  assert.equal(
-    deleting.deletedAt,
-    null,
-    "deletedAt is only stamped once room cleanup succeeds",
-  );
+  assert.notEqual(tombstone.deletingAt, null);
+  assert.notEqual(tombstone.deletedAt, null, "with no external room there is nothing left to finish");
 }
 
 async function checkTombstoneIsHiddenAndReserved() {
@@ -229,65 +178,17 @@ async function checkTombstoneIsHiddenAndReserved() {
   );
 }
 
-async function checkAuthFenceCleansTombstone() {
-  let roomDeletionAttempted = false;
-  assert.equal(
-    await cleanupTombstonedRoom(CLEANUP_DIAGRAM_ID, {
-      deleteRoom: async () => {
-        roomDeletionAttempted = true;
-      },
-    }),
-    true,
-    "the auth fence must remove a room recreated after tombstoning",
-  );
-  assert.equal(roomDeletionAttempted, true);
-}
-
-async function checkDeletionRetryFinalizesTombstone() {
-  let roomDeletionAttempted = false;
-  await deleteDiagramResources(CLEANUP_DIAGRAM_ID, OWNER_ID, {
-    deleteRoom: async () => {
-      roomDeletionAttempted = true;
-    },
-  });
-  assert.equal(
-    roomDeletionAttempted,
-    true,
-    "retrying a deletion must retry Liveblocks cleanup",
-  );
-
-  const finalized = await prisma.diagram.findUnique({
-    where: { id: CLEANUP_DIAGRAM_ID },
-    select: {
-      id: true,
-      ownerId: true,
-      name: true,
-      storyboardId: true,
-      canvasJsonPath: true,
-      deletedAt: true,
-    },
-  });
-
-  assert.ok(finalized, "the tombstone row is permanent");
-  assert.equal(finalized.ownerId, OWNER_ID, "the owner stays for cleanup retries");
-  assert.equal(finalized.name, "Deleted diagram");
-  assert.equal(finalized.storyboardId, null);
-  assert.equal(
-    finalized.canvasJsonPath,
-    "https://blob.example/verify-room-cleanup-failure.json",
-    "final tombstone must preserve any artifact pointer until blob deletion exists",
-  );
-  assert.notEqual(finalized.deletedAt, null, "deletedAt finalizes the tombstone");
+async function checkDeletionRetryIsHarmless() {
+  await deleteDiagramResources(CLEANUP_DIAGRAM_ID, OWNER_ID);
+  assert.ok(await prisma.diagram.findUnique({ where: { id: CLEANUP_DIAGRAM_ID } }));
 }
 
 async function checkDiagramResourceDeletion() {
-  await checkActiveRoomIsPreserved();
-  await checkMissingDiagramPreservesRoom();
+  await checkMissingDiagramFails();
   await seedCleanupFailureDiagram();
-  await checkCleanupFailureLeavesTombstone();
+  await checkDeletionTombstonesTheRow();
   await checkTombstoneIsHiddenAndReserved();
-  await checkAuthFenceCleansTombstone();
-  await checkDeletionRetryFinalizesTombstone();
+  await checkDeletionRetryIsHarmless();
 }
 
 async function checkDiagramAccess() {

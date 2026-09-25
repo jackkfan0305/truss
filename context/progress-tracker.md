@@ -1635,3 +1635,5 @@ result is observed.
   pulling in unrelated agent skills.
 - Configured `turbopack.root` to the current application directory so nested
   worktrees do not make Next.js select a parent checkout's lockfile.
+
+[Task 8 complete: The canvas runs on local React Flow state.]

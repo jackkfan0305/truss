@@ -8,11 +8,9 @@ current panels, diagrams, and terminal-agent work. A cancelled or failed
 sign-in returns to the same temporary storyboard. Each browser tab has an
 independent in-memory temporary storyboard. If saving fails, the temporary
 storyboard remains available for retry. After saving succeeds, the page enters
-the normal owned state, removes `Sign in to save`, and exposes collaboration.
+the normal owned state and removes `Sign in to save`.
 
-Temporary storyboards cannot invite collaborators. The invite control stays
-hidden until the storyboard has an owner. All other storyboard features remain
-available, including terminal-agent operations.
+All storyboard features remain available, including terminal-agent operations.
 
 ## Consequences
 

@@ -37,7 +37,8 @@
 ## Data and Storage
 
 - Diagram metadata and relationships belong in PostgreSQL via Prisma.
-- Canvas snapshots belong in Vercel Blob; Prisma stores only the blob URL reference.
+- Canvas snapshots are versioned and stored in Vercel Blob; Prisma stores the blob URL reference and version counter.
+- Every canvas write is a compare-and-swap on the version counter.
 - Do not store large generated content directly in the database.
 
 ## File Organization

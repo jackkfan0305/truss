@@ -7,8 +7,8 @@
 | Framework        | Next.js 16 + TypeScript | Full-stack app with server/client boundaries                   |
 | UI               | Tailwind + shadcn/ui    | Component composition and styling                              |
 | Auth             | Clerk                   | User identity and route protection                             |
-| Database         | Prisma + PostgreSQL     | Relational metadata: storyboards, diagrams, collaborators, agent tokens |
-| Canvas           | Liveblocks + React Flow | Real-time collaborative canvas, presence, and cursors          |
+| Database         | Prisma + PostgreSQL     | Relational metadata: storyboards, diagrams, agent tokens |
+| Canvas           | React Flow + Vercel Blob | Versioned canvas snapshots, local undo/redo, agent replay     |
 | Artifact storage | Vercel Blob             | Canvas snapshots                                               |
 
 ## System Boundaries
@@ -22,60 +22,53 @@
 ## Storage Model
 
 - **Database**: metadata, ownership, relationships, and agent tokens.
-- **Vercel Blob**: canvas snapshots at `canvas/{diagramId}.json`.
-- Storyboard, diagram, and collaborator records belong in PostgreSQL.
-- Canvas content is stored in and retrieved from Vercel Blob.
+- **Vercel Blob**: canvas snapshots at `canvas/{diagramId}.json`, private access only.
+- Storyboard and diagram records belong in PostgreSQL.
+- Canvas content is stored in and retrieved from Vercel Blob as versioned snapshots.
 - The blob URL is stored in the database (`canvasJsonPath`) as the reference to the artifact.
 - The Blob store is configured for **private** access. Every `@vercel/blob` call
-  must pass `access: "private"` — `"public"` is rejected outright, not
-  downgraded — and a stored blob URL is not fetchable on its own (`403`). Reads
-  go through `get(url, { access: "private", useCache: false })`, which attaches
-  the token; `useCache: false` is required because every save overwrites the
-  same pathname, so the CDN copy is exactly the stale artifact a read must not
-  return. Artifact URLs are therefore pointers, never something to hand to a
-  browser directly.
-- Diagram IDs are never reused. Deletion first stamps `deletingAt`, a durable
-  tombstone, then deletes its Liveblocks room, then finalizes the row by
-  stamping `deletedAt`. Either stamp makes the diagram inaccessible and excludes
-  it from diagram lists. Timestamps rather than a lifecycle enum: they record
-  *when* as well as whether, which is what a stalled cleanup needs.
-- A cleanup failure leaves the tombstone available to the owner-only delete
-  endpoint for retry. Keeping the row permanently reserved prevents old room
-  tokens, delayed cleanup, or stale authorization from crossing generations.
-- Liveblocks auth rechecks access after token preparation. If deletion won the
-  race, it withholds the token and removes any room the request recreated.
-- Stamping `deletingAt` immediately scrubs the diagram name and detaches it
-  from any parent storyboard, so a board stops rendering a panel for something
-  being deleted. The owner ID stays for authorized cleanup retries. Collaborator
-  emails belong to the storyboard and are untouched: deleting one diagram must
-  not strip its board of the people invited to the plan.
-- `canvasJsonPath` is retained as a cleanup pointer until Vercel Blob deletion
-  is implemented; never clear an artifact reference without deleting the
+  must pass `access: "private"` and a stored blob URL is not fetchable directly
+  (403). Reads go through `get(url, { access: "private", useCache: false })`,
+  which attaches the token. `useCache: false` is required because every save
+  overwrites the same path, so the CDN copy would be exactly the stale artifact
+  a read must not return.
+- Every write is a compare-and-swap on `Diagram.canvasVersion`. The editor's
+  autosave and agent-token routes both check the version: if the stored version
+  does not match, the write fails with `409` and nothing changes. An idle editor
+  polls `GET /api/diagrams/:id/canvas?since=N` every 4 seconds. When the version
+  increases, the new canvas is fetched and replayed node by node behind the
+  agent cursor; a remote apply clears the undo stack.
+- Diagram IDs are never reused. Deletion stamps `deletingAt` and `deletedAt`
+  together in a single tombstone write. Either stamp makes the diagram
+  inaccessible and excludes it from diagram lists. Timestamps rather than a
+  lifecycle enum record *when* as well as whether, which is what a stalled
+  cleanup needs.
+- A cleanup failure leaves the tombstone for retry. Keeping the row reserved
+  prevents old tokens or stale authorization from crossing generations.
+- `canvasJsonPath` is retained as a cleanup pointer until Blob deletion is
+  implemented; never clear an artifact reference without deleting the
   referenced blob first.
 
 ## Auth and Collaboration Model
 
-- A **storyboard** is the top-level artifact and the only thing collaborators are invited to (see `CONTEXT.md`). A **diagram** is its own model with a nullable `storyboardId`, so a diagram that belongs to no plan is still a valid diagram — the shape every agent-created one starts in.
+- A **storyboard** is the top-level artifact owned by one user. A **diagram** is
+  its own model with a nullable `storyboardId`, so a diagram that belongs to no
+  plan is still a valid diagram; this is the shape every agent-created one starts in.
 - A signed-out user may work in a temporary storyboard in the current tab. It
-  has no owner, is not persisted, and cannot invite collaborators. All other
-  storyboard features remain available, including panel and diagram work and
-  terminal-agent operations. Signing in through the in-page modal preserves the
-  temporary storyboard and creates a new authenticated user's storyboard from
-  the complete current work. Each tab owns an independent in-memory temporary
-  storyboard. A failed save leaves the temporary storyboard available for
-  retry; after a successful save, the page enters the normal owned state and
-  exposes collaboration.
-- Storyboards and diagrams each have a single owner (Clerk user ID) and their own Liveblocks room. A storyboard owner can read every diagram on that storyboard, even when a diagram has a different owner; diagram mutations remain restricted to the diagram owner.
-- Storyboards can include additional collaborators, stored by email. There is no local user table; names and avatars are read from the Clerk Backend API at render time.
+  has no owner, is not persisted. All storyboard features remain available,
+  including panel and diagram work and terminal-agent operations. Signing in
+  through the in-page modal preserves the temporary storyboard and creates a
+  new authenticated user's storyboard from the complete current work. Each tab
+  owns an independent in-memory temporary storyboard. A failed save leaves the
+  temporary storyboard available for retry; after a successful save, the page
+  enters the normal owned state.
+- Storyboards and diagrams each have a single owner (Clerk user ID). Only the
+  owner may access or modify them.
 - Only authenticated users can access protected routes.
-- Owner or collaborator may **open** a storyboard and read its member list. That list covers everyone with access — the owner plus collaborators — each carrying a derived `owner` / `collaborator` role. Roles are not stored: owner is `Storyboard.ownerId`, collaborator is the existence of a `StoryboardCollaborator` row.
-- A diagram is reachable by its owner, or by a collaborator on its **parent storyboard**. A standalone diagram has no collaborator list to consult and so is owner-only; the editor hides its Share control rather than offering an invite that has nowhere to land.
-- Only the **owner** may rename or delete a diagram, or invite and remove collaborators. Enforced server-side in every handler via `authorizeDiagram(request, diagramId, { requireOwner })` and `authorizeStoryboard(request, storyboardId, { requireOwner })`. Both live behind the shared `Identity`/`Authorization` primitives in `lib/access.ts`.
-- Liveblocks room tokens are issued only after verifying diagram membership.
-  Humans receive room/storage write access but feeds read-only. User chat goes
-  through an authenticated server route that derives Clerk identity, while AI
-  summaries and status are worker-authored; room clients cannot forge roles or
-  delete durable feed entries.
+- Only the **owner** may open, rename, or delete a diagram. Enforced server-side
+  in every handler via `authorizeDiagram(request, diagramId, { requireOwner })`.
+  It lives behind the shared `Identity`/`Authorization` primitives in
+  `lib/access.ts`.
 
 ## Agent Skill Operations (Create, Edit, Delete)
 
@@ -104,18 +97,16 @@ one-shot local HTTP listener.
   so an unpublished description-driven record cannot resume as a graph launch.
 - `POST /api/diagrams/:diagramId/agent-launch-import` is owner-only and checks
   authorization before consuming its JSON body. It accepts only a canonical
-  launch UUID plus a strict compact graph, then writes through one server-side
-  Liveblocks `mutateFlow` callback. Empty rooms draw canonical nodes before
-  edges through the same native AI-drawing loop: a 540ms cursor-arrival wait
-  then `getBuildStepMs` between items (at most 76 seconds for 100 items), so
-  mounted editors receive progressive native canvas updates. Exact full replays
-  make no flow writes;
-  an exact canonical partial subset resumes only missing items; any extra or
-  differing item conflicts without overwrite. After empty, resumed, or exact
-  import it persists the canonical requested snapshot Blob-first then Prisma
-  pointer-second. A persistence failure is retryable through exact replay.
-  The import route declares `maxDuration = 120`, leaving execution headroom for
-  that maximum native draw plus authorization and persistence.
+  launch UUID plus a strict compact graph, then writes it immediately to the
+  stored canvas through `mutateStoredCanvas` with a version check. Exact full
+  replays and exact canonical partial subsets write nothing; divergent changes
+  return 409. After any successful write it persists the canonical requested
+  snapshot Blob-first then Prisma pointer-second. A persistence failure is
+  retryable through exact replay. The browser polls for new versions and
+  replays the imported graph node by node behind the agent cursor through the
+  native AI-drawing loop (540ms cursor-arrival wait then `getBuildStepMs`
+  between items). The import route declares `maxDuration = 120`, leaving
+  execution headroom for authorization and persistence.
 - Diagram IDs are persisted before the launch page posts. A `409` first reads
   the same ID through the owner-only diagram route and resumes only when both
   its ID and title match; an inaccessible or mismatched collision gets one new
@@ -195,72 +186,48 @@ the server waits to **receive** a request, not how long it takes to
 resolve a diagram name or think through a diff does not trip either timeout.
 No backoff loop, no page-side state machine beyond "waiting."
 
-### Reading the live canvas
+### Reading the canvas
 
-- `GET /api/diagrams/:id/agent-graph` is owner-only — matching the apply
-  route, a read a collaborator could take but not act on would only be an
-  information leak — and reads the **live Liveblocks room** through
-  `readCanvas`, never the autosaved Vercel Blob snapshot. The blob lags the
-  room by up to the autosave debounce; diffing against it would compute a
-  delta against a canvas that may no longer exist, silently reintroducing or
-  re-deleting whatever changed in between.
+- `GET /api/diagrams/:id/agent-graph` is owner-only and reads the stored
+  canvas snapshot from Vercel Blob.
 - The response splits what the compact contract can express (`graph`) from
-  what it cannot (`opaqueNodeIds`, `opaqueEdgeIds`) — human-created nodes with
+  what it cannot (`opaqueNodeIds`, `opaqueEdgeIds`). Nodes with
   arbitrary IDs, over-length labels, or off-enum colors land in the opaque
   sets rather than being silently dropped. `fingerprint` is a hash of the
-  full live room state, opaque items included, used for optimistic
+  full stored canvas state, opaque items included, used for optimistic
   concurrency on apply.
 
 ### Applying the edit
 
-- `POST /api/diagrams/:id/agent-graph-edit` recomputes the fingerprint
-  **inside** the `mutateFlow` callback, not before it. Checking outside the
-  callback would reopen the exact read-then-write race the fingerprint
-  exists to close — a collaborator could edit the room in the gap between an
-  outside check and the mutation. A mismatch inside the callback aborts with
-  no write and reports `409`.
+- `POST /api/diagrams/:id/agent-graph-edit` writes to the stored canvas
+  through `mutateStoredCanvas`, which compares the fingerprint against the
+  current stored snapshot. If the fingerprint does not match, the write is
+  refused (`409`) and nothing changes. This prevents a race between the agent
+  reading the canvas and writing its edit.
 - An edit that reuses an ID from `opaqueNodeIds`/`opaqueEdgeIds` is refused
-  outright (`collidesWithOpaque`, `409`), rather than applied. `addNodes`
-  replaces on ID collision, so without this check a reply that happened to
-  reuse an opaque ID would silently overwrite the very item the
-  never-remove-what-you-did-not-see rule exists to protect.
-- Removals and updates land first as one batch; additions then draw paced,
-  same cursor-animated loop as import. The diagram makes room before it is
-  drawn into, so a viewer sees an intentional rearrangement rather than new
-  nodes appearing on top of geometry that is about to change.
-- **Edges anchored to a removed node are swept with it, opaque ones
-  included.** `removeNodes` in `@liveblocks/react-flow` is a per-ID map
-  delete — it does not cascade to edges. The diff can only name edges the
-  agent could see, so an opaque edge touching a removed node would otherwise
-  survive pointing at a node that no longer exists, permanently, because
-  opaque items are invisible to every future diff and nothing could ever
-  reach it again. This does not weaken the removal invariant: an edge is not
-  independent of its endpoints, so deleting the node is what deletes it, the
-  same as a human dragging that node to the bin would.
+  outright (`collidesWithOpaque`, `409`), rather than applied.
+- The write is immediate, not paced. The idle editor polls for new versions
+  and replays the changes node by node behind the agent cursor.
+- **Edges anchored to a removed node are swept with it, opaque ones included.**
+  An opaque edge touching a removed node would otherwise survive pointing at
+  a node that no longer exists, permanently, because opaque items are
+  invisible to every future diff and nothing could ever reach it again. This
+  does not weaken the removal invariant: an edge is not independent of its
+  endpoints, so deleting the node is what deletes it.
 
-### Undo does not cover a server-side edit
+### Undo and remote changes
 
-Liveblocks' `history.undo()` (`node_modules/@liveblocks/core/dist/index.d.ts`,
-`interface History`) is documented in its own type signature: "Undoes the
-last operation executed by **the current client**. It does not impact
-operations made by other clients." The room has no concept of "changes this
-human made through the UI" versus "changes an agent made through the API" —
-it only knows per-connection history, and `mutateFlow` runs through
-`@liveblocks/node`'s REST client (`app/api/diagrams/[diagramId]/agent-graph-edit/route.ts`),
-a connection entirely separate from the browser tab's room session. From the
-browser's history stack, an agent-applied batch is indistinguishable from a
-collaborator's edit: invisible to Cmd+Z. This matches `CanvasControls`' own
-doc comment (`components/canvas/canvas-controls.tsx`): undo is "per-client —
-it takes back *your* last change, not a collaborator's."
-Consequence: the terminal's destructive-edit confirmation
-(`references/operations.md`) is not a convenience layered on top of a working
-undo. It is the only safety net a user has against an agent removing the
-wrong nodes, and it must never be skipped.
+Undo is per-tab and per-session: each editor tab holds its own stack of
+canvas snapshots (capped at 100, coalesced over 500ms). When a remote
+canvas change is replayed (detected through polling), the undo stack is
+cleared. This prevents undo from resurrecting nodes the agent removed or
+deleting nodes the agent added. Two tabs on the same diagram keep separate
+stacks; the one that saves second gets a conflict and is told to reload.
 
 ## Starter System Designs
 
 - Prebuilt templates are static canvas snapshots stored in the codebase.
-- Templates are loaded into the active Liveblocks room when a user imports one.
+- Templates are loaded into the canvas through the agent-launch-import route.
 - Import can occur on canvas creation or from within the editor at any time.
 - Template data follows the same node/edge schema as user-created canvas content.
 - Templates do not require a separate database record; they are resolved by template ID at import time.
@@ -271,32 +238,23 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`. The
 terminal agent is the only model in the system, and every canvas write arrives
 through the graph import and edit routes it calls.
 
-- A room ID *is* its diagram ID, so a request naming both must have them agree.
-  Authorization is checked against the diagram; a mismatch is rejected rather
-  than reconciled.
-- The write goes through `@liveblocks/react-flow`'s server-side `mutateFlow`,
-  the same Storage shape the client edits — there is no separate agent write
-  path. The supplied graph is validated into canvas objects *before* the write,
-  so nothing unvalidated can reach the room and a failure before the draw begins
-  leaves the canvas untouched.
-- The draw is **paced, not atomic**. One `mutateFlow` holds the whole graph, but
-  the callback sleeps between actions, and `mutateStorage` flushes buffered ops
-  on a 200ms debounce while the callback is still running — so the room receives
-  the graph progressively off a single Storage fetch. A call per action would
-  re-fetch the whole document each time, which is O(n²) transfer as the diagram
-  grows, for the same result on screen.
-- The consequence is that a mid-draw failure leaves a **partial diagram**. This
-  is accepted rather than rolled back: on a shared canvas a rollback either
-  clobbers or misses concurrent human edits. The error path reports how many of
-  the requested changes landed instead of claiming the canvas is unchanged.
-- Pacing is a shared server/client contract, not a server detail. The cursor
-  sweep duration lives in `types/tasks.ts` because the server waits it out
-  before writing and the browser spends it animating the cursor there; if the
-  two drift, nodes appear before the cursor arrives.
-- Progress is visible to the whole room, not just the caller: the agent takes
-  ephemeral Liveblocks presence (`setPresence`, self-expiring TTL) so its cursor
-  and avatar appear alongside the humans'. It is cosmetic — a failure to
-  announce is logged and never aborts a write.
+- A diagram ID belongs to exactly one owner. Authorization is checked against
+  the diagram's owner before any write.
+- The write goes through `mutateStoredCanvas`, which validates the supplied
+  graph into canvas objects before writing, so nothing unvalidated can reach
+  the Blob and the canvas remains untouched on validation failure.
+- The write is **immediate, not paced**. All requested changes write at once to
+  the Blob and increment `canvasVersion`. A mid-write failure leaves a
+  **partial diagram**. This is accepted rather than rolled back because a
+  rollback would lose concurrent editor edits. The error path reports how many
+  of the requested changes landed.
+- An idle editor polls `GET /api/diagrams/:id/canvas?since=N` every 4 seconds.
+  When the version increases, the new canvas is fetched and replayed node by
+  node behind the agent cursor. The cursor sweep duration lives in
+  `types/tasks.ts` because the browser animates it during replay.
+- Progress is visible only to the owner: the agent takes an ephemeral cursor
+  and avatar on the canvas during replay. It is cosmetic; if the replay stalls,
+  the next poll will replay from the stored canvas again.
 
 
 ## Invariants

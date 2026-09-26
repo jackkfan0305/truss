@@ -1,27 +1,27 @@
 # Truss
 
-Truss is a collaborative planning board. A terminal agent authors a plan as a
-board of panels, the owner and their teammates argue with it in place, and the
-curated feedback goes back to that agent to keep the questioning loop running
-until the plan is worth implementing.
+Truss is a planning board. A terminal agent authors a plan as a board of
+panels, the owner argues with it in place, and the curated feedback goes back to
+that agent to keep the questioning loop running until the plan is worth
+implementing.
 
 ## Language
 
 ### The artifact
 
 **Storyboard**:
-A board of panels expressing one plan, owned by one user and shared with
-collaborators. It is the top-level object in the app.
+A board of panels expressing one plan, owned by one user. It is the top-level
+object in the app.
 _Avoid_: Project, board, doc, plan
 
 **Temporary storyboard**:
 An unsigned-in storyboard that supports the full storyboard-building
-experience in the current tab but has no owner, collaborators, or persisted
-record. It disappears when the page is refreshed or the tab is closed. Signing
-in through the in-page sign-in modal preserves it and turns it into a new
-storyboard owned by that user. It includes the complete current storyboard,
-including its panels, diagrams, and terminal-agent work. Each browser tab has
-its own temporary storyboard.
+experience in the current tab but has no owner or persisted record. It
+disappears when the page is refreshed or the tab is closed. Signing in through
+the in-page sign-in modal preserves it and turns it into a new storyboard owned
+by that user. It includes the complete current storyboard, including its panels,
+diagrams, and terminal-agent work. Each browser tab has its own temporary
+storyboard.
 _Avoid_: Anonymous project, guest board, draft plan
 
 **Panel**:
@@ -45,7 +45,7 @@ is to be implemented, never real syntax.
 _Avoid_: Snippet, listing
 
 **Diagram**:
-A system architecture graph in its own Liveblocks room, rendered on a
+A system architecture graph stored as one versioned snapshot, rendered on a
 storyboard as static SVG and opening into a full editor. Valid on its own with
 no storyboard pointing at it.
 _Avoid_: Chart, graph, canvas, figure
@@ -54,8 +54,8 @@ _Avoid_: Chart, graph, canvas, figure
 
 **Thread**:
 A comment conversation anchored to a block, a decision option, a diagram node,
-or nothing at all. Started by anyone, resolved by the owner. Rendered as a
-free-floating sticky note tethered to its anchor.
+or nothing at all. Started by the owner or the agent, resolved by the owner.
+Rendered as a free-floating sticky note tethered to its anchor.
 _Avoid_: Comment, note, annotation
 
 **Queue**:
@@ -83,14 +83,10 @@ _Avoid_: Close, finish, accept, complete
 **Owner**:
 The user a storyboard belongs to. The only one who edits panels, picks
 decisions, queues, and stops.
-_Avoid_: Author, creator
-
-**Collaborator**:
-A user invited to a storyboard by email. Comments and replies, nothing else.
-_Avoid_: Viewer, member, guest
+_Avoid_: Author, creator, Collaborator (removed, ADR 0005)
 
 **Agent**:
-The terminal agent holding an agent token, present in the room under the
+The terminal agent holding an agent token, present on the canvas under the
 owner's name plus a suffix. It authors panels and answers threads; it never
 queues and never picks.
 _Avoid_: AI, assistant, bot

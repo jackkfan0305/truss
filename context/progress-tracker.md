@@ -1666,3 +1666,17 @@ result is observed.
   snapshot" and "room ID" with "diagram ID". All gates pass: `typecheck`, `lint`,
   `verify:unit`, `build` (no `/api/liveblocks-auth` route), `verify:integration`.
   Step 7 (Vercel env cleanup) pending owner approval.
+
+- Task 11 complete: Documentation. ADR 0005 records the owner-only, Liveblocks-free canvas
+  architecture. Updated domain glossary in CONTEXT.md: Storyboard, Temporary storyboard,
+  Diagram, Thread, and Agent entries rewritten; Collaborator entry deleted and added to
+  Owner's Avoid list with note "(removed, ADR 0005)". ADR 0003 marked superseded by ADR
+  0005. ADR 0004 wording updated to remove collaborator invitation paragraph. 
+  Updated context files: project-overview.md goals, flow, and features reduced to 
+  owner-only; ui-context.md theme section simplified; code-standards.md storage rules 
+  updated to document versioned Blob and compare-and-swap; architecture-context.md 
+  stack table, storage model, auth model, agent canvas writes, and undo sections 
+  rewritten for owner-only model without Liveblocks. Included idle poll and 4-second 
+  interval. Progress tracker entry added listing tasks 1-10, migrations, removed 
+  packages, and deferred Vercel env cleanup (owner decision 2026-09-26). All gates pass: 
+  `typecheck`, `lint`, `verify:unit`, `build`.

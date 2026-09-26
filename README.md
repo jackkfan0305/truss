@@ -11,13 +11,13 @@ Truss runs no model of its own — see
 
 ## What it does
 
-- **Diagrams** — sign in, create a diagram, open it in the editor. The owner can
+- **Diagrams**: sign in, create a diagram, open it in the editor. The owner can
   rename and delete it.
-- **Canvas** — React Flow with shaped/colored nodes, right-angle labelled edges,
+- **Canvas**: React Flow with shaped/colored nodes, right-angle labelled edges,
   and snapshots persisted to Vercel Blob.
-- **Starter templates** — prebuilt system designs (monolith, microservices,
+- **Starter templates**: prebuilt system designs (monolith, microservices,
   event-driven, serverless…) that import straight into the editor.
-- **Agent-drawn diagrams** — the `truss-diagram` skill creates, reads, edits and
+- **Agent-drawn diagrams**: the `truss-diagram` skill creates, reads, edits and
   deletes diagrams over MCP. Writes land through a paced draw, so a mounted
   editor watches the agent's cursor place each node.
 

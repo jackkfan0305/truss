@@ -48,14 +48,14 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 
 - A curated library of prebuilt system design templates.
 - Users can import a starter template into the canvas at any point during editing.
-- Templates are static canvas snapshots loaded directly into the active room.
+- Templates are static canvas snapshots loaded directly into the canvas.
 - Covers common patterns: monolith, microservices, event-driven, serverless, and more.
 
 ### Agent Diagram Operations
 
 - The `truss-diagram` skill creates, reads, edits, and deletes diagrams over MCP.
-- Output is structured as canvas nodes and edges written into the shared room.
-- Writes are paced, so a mounted editor watches the agent's cursor place each item.
+- Output is structured as canvas nodes and edges written to the canvas.
+- Writes are immediate, so a mounted editor polls for changes and replays them.
 
 ## Scope
 

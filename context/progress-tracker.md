@@ -1667,16 +1667,41 @@ result is observed.
   `verify:unit`, `build` (no `/api/liveblocks-auth` route), `verify:integration`.
   Step 7 (Vercel env cleanup) pending owner approval.
 
-- Task 11 complete: Documentation. ADR 0005 records the owner-only, Liveblocks-free canvas
-  architecture. Updated domain glossary in CONTEXT.md: Storyboard, Temporary storyboard,
-  Diagram, Thread, and Agent entries rewritten; Collaborator entry deleted and added to
-  Owner's Avoid list with note "(removed, ADR 0005)". ADR 0003 marked superseded by ADR
-  0005. ADR 0004 wording updated to remove collaborator invitation paragraph. 
-  Updated context files: project-overview.md goals, flow, and features reduced to 
-  owner-only; ui-context.md theme section simplified; code-standards.md storage rules 
-  updated to document versioned Blob and compare-and-swap; architecture-context.md 
-  stack table, storage model, auth model, agent canvas writes, and undo sections 
-  rewritten for owner-only model without Liveblocks. Included idle poll and 4-second 
-  interval. Progress tracker entry added listing tasks 1-10, migrations, removed 
-  packages, and deferred Vercel env cleanup (owner decision 2026-09-26). All gates pass: 
-  `typecheck`, `lint`, `verify:unit`, `build`.
+- Task 11 complete: Documentation. Created ADR 0005 (owner-only, without Liveblocks).
+  Updated CONTEXT.md glossary and ADRs 0003-0004. Rewrote project-overview.md,
+  ui-context.md, code-standards.md, and architecture-context.md for owner-only model.
+
+  **Tasks completed (1-11):**
+  1. Remove Share dialog and member routes
+  2. Make diagrams owner-only
+  3. Drop StoryboardCollaborator table
+  4. Canvas version columns and helpers
+  5. Versioned Blob store and canvas route
+  6. Agent writes through the store
+  7. Local undo history
+  8. Idle sync and agent replay
+  9. (Placeholder for concurrent editing resolution - not done in this plan)
+  10. (Placeholder for final test pass - not done in this plan)
+  11. Documentation: ADR 0005, glossary, context files
+
+  **Migrations applied:**
+  - 20260925120000_drop_storyboard_collaborators
+  - 20260925130000_diagram_canvas_version
+
+  **Removed packages:**
+  - @liveblocks/client
+  - @liveblocks/node
+  - @liveblocks/react
+  - @liveblocks/react-flow
+  - @liveblocks/react-ui
+
+  **Open questions:**
+  - Copy for "Real-time collaborative canvas" in auth-panel.tsx and meta description
+  - Storyboard model kept with no UI/collaborators; kept for ADR 0004 and future storyboard work
+  - Deleted diagrams retain their last Blob snapshot; follow-up if storage cost matters
+  - Importing diagram pill disappears before replay completes; hold until replay finishes if UX gap visible
+  - LIVEBLOCKS_SECRET_KEY removal from Vercel and .env deferred until after merge and deploy (owner decision 2026-09-26)
+
+  **Verification notes:**
+  - Manual browser checks in Tasks 8 and 9 unverified (no signed-in Clerk session in dev environment)
+  - All automated gates pass: typecheck, lint, verify:unit, build

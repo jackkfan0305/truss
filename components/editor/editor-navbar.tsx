@@ -3,7 +3,7 @@
 import type { ReactNode } from "react"
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { LayoutTemplate, Share2 } from "lucide-react"
+import { LayoutTemplate } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -13,14 +13,12 @@ interface EditorNavbarProps {
   onToggleSidebar: () => void
   /** Workspace only — the editor home has no active diagram. */
   diagramName?: string
-  onShare?: () => void
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
   /**
-   * Workspace only — the collaborator avatar stack, rendered beside the Clerk
-   * UserButton. A slot rather than a component so the navbar stays outside the
-   * Liveblocks room: the editor home has no room, and calling a presence hook
-   * there would throw (19-presence-avatars-cursors).
+   * Workspace only — metadata for the active diagram. A slot rather than a
+   * component so the navbar stays decoupled from flow state: the editor home
+   * has no active diagram.
    */
   presence?: ReactNode
   /**
@@ -47,7 +45,6 @@ export function EditorNavbar({
   isSidebarOpen,
   onToggleSidebar,
   diagramName,
-  onShare,
   onOpenTemplates,
   presence,
   saveStatus,
@@ -107,20 +104,14 @@ export function EditorNavbar({
         )}
       >
         {saveStatus}
-        {saveStatus && (onOpenTemplates || onShare) ? <GroupDivider /> : null}
+        {saveStatus && onOpenTemplates ? <GroupDivider /> : null}
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="size-4" />
             <span className="hidden sm:inline">Templates</span>
           </Button>
         ) : null}
-        {onShare ? (
-          <Button variant="ghost" size="sm" onClick={onShare}>
-            <Share2 className="size-4" />
-            <span className="hidden sm:inline">Share</span>
-          </Button>
-        ) : null}
-        {(saveStatus || onOpenTemplates || onShare) && (presence || profile) ? (
+        {(saveStatus || onOpenTemplates) && (presence || profile) ? (
           <GroupDivider />
         ) : null}
         <div className="flex items-center gap-2 pr-0.5 pl-1">

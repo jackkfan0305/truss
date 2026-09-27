@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { authorizeDiagram } from "@/lib/diagram-access";
-import { getLiveblocks } from "@/lib/liveblocks";
 import { deleteDiagramResources } from "@/lib/diagram-lifecycle";
 import {
   jsonError,
@@ -12,15 +11,14 @@ interface RouteParams {
   params: Promise<{ diagramId: string }>;
 }
 
-// Both handlers here are owner-only. The gate moved to lib/diagram-access.ts in
-// 09-share-dialog once the collaborator routes needed it too.
+// Every handler here is owner-only, like every diagram route.
 
 export async function GET(
   request: Request,
   { params }: RouteParams,
 ): Promise<Response> {
   const { diagramId } = await params;
-  const access = await authorizeDiagram(request, diagramId, { requireOwner: true });
+  const access = await authorizeDiagram(request, diagramId);
 
   if (!access.ok) {
     return access.response;
@@ -42,7 +40,7 @@ export async function PATCH(
 ): Promise<Response> {
   const { diagramId } = await params;
 
-  const access = await authorizeDiagram(request, diagramId, { requireOwner: true });
+  const access = await authorizeDiagram(request, diagramId);
 
   if (!access.ok) {
     return access.response;
@@ -69,7 +67,6 @@ export async function DELETE(
   const { diagramId } = await params;
 
   const access = await authorizeDiagram(request, diagramId, {
-    requireOwner: true,
     allowDeletionStates: true,
   });
 
@@ -78,15 +75,7 @@ export async function DELETE(
   }
 
   try {
-    await deleteDiagramResources(
-      diagramId,
-      access.ownerId,
-      {
-        deleteRoom: async (roomId) => {
-          await getLiveblocks().deleteRoom(roomId);
-        },
-      },
-    );
+    await deleteDiagramResources(diagramId, access.userId);
   } catch (error: unknown) {
     console.error(`Diagram deletion failed for ${diagramId}`, error);
     return jsonError("Could not delete diagram", 500);

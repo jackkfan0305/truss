@@ -317,8 +317,8 @@ export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
     };
     const parsed = agentGraphNodeSchema.safeParse(candidate);
 
-    // A duplicate ID is opaque rather than a second entry. The live room cannot
-    // produce one — Liveblocks keys nodes by ID — but this function is typed for
+    // A duplicate ID is opaque rather than a second entry. The stored snapshot
+    // cannot produce one because IDs are keys, but this function is typed for
     // any snapshot, and a duplicate would survive into `graph.nodes`, where the
     // diff's `new Map(...)` would silently collapse the two into one and drop a
     // physically distinct node from its removal basis.
@@ -371,7 +371,7 @@ export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
  * A stable hash of the whole live room, opaque items included.
  *
  * Optimistic concurrency for edits: the read hands this out, the apply hands it
- * back, and the server recomputes it under the same `mutateFlow` callback that
+ * back, and the server recomputes it under the same `mutateCanvas` callback that
  * performs the write. Covering opaque items matters — a collaborator editing a
  * node the agent cannot see still invalidates the basis the agent reasoned from.
  */

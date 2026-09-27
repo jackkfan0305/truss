@@ -4,7 +4,7 @@
  * production one.
  *
  * Nothing at runtime reads this — application code just reads
- * `LIVEBLOCKS_SECRET_KEY` and friends, and gets whatever the environment it is
+ * `CLERK_SECRET_KEY` and friends, and gets whatever the environment it is
  * running in was given. The resolution happens once per deploy, in
  * `scripts/push-vercel-env.ts`.
  */

@@ -19,7 +19,7 @@ import {
   isSvgShape,
 } from "../lib/node-shape-geometry";
 import { resolveShortcut, type ShortcutKeys } from "../lib/canvas-shortcuts";
-import { dedupeByUser, getInitials } from "../lib/presence";
+import { getInitials } from "../lib/presence";
 import {
   getParallelEdgeLabelOffset,
   positionParallelEdgeLabel,
@@ -217,7 +217,7 @@ function checkShapeGeometryStaysInsideTheNode() {
 }
 
 /**
- * Edge defaults (16-edge-behavior). These are written into Liveblocks Storage
+ * Edge defaults (16-edge-behavior). These are written into the stored snapshot
  * on connect, so a drifted value is baked into every edge created afterwards —
  * and a hardcoded hex or a mismatched arrowhead colour is invisible in review
  * but obvious on the canvas.
@@ -760,48 +760,6 @@ function checkInitialsAlwaysRenderSomething() {
   }
 }
 
-function checkAvatarsAreOnePerPerson() {
-  // Two tabs for `user_ada`, one for `user_grace` — three connections, two
-  // people. This is the case that put duplicate avatars in the navbar.
-  const connections = [
-    { id: "user_ada", connectionId: 1 },
-    { id: "user_grace", connectionId: 2 },
-    { id: "user_ada", connectionId: 3 },
-  ];
-
-  const people = dedupeByUser(connections);
-
-  // `Map` keeps a key at its first insertion while later writes replace the
-  // value, so Ada holds her original slot and does not jump down the stack when
-  // she opens another tab.
-  assert.deepEqual(
-    people.map((person) => person.id),
-    ["user_ada", "user_grace"],
-    "a person with several tabs is one avatar, in their original position",
-  );
-  assert.equal(
-    people.find((person) => person.id === "user_ada")?.connectionId,
-    3,
-    "the most recent connection wins for a duplicated person",
-  );
-
-  // An ID-less connection cannot be attributed to anyone, so it must not
-  // collapse into another one — that would silently hide a participant.
-  const anonymous = dedupeByUser([
-    { connectionId: 4 },
-    { connectionId: 5 },
-    { id: "user_ada", connectionId: 6 },
-  ]);
-
-  assert.equal(
-    anonymous.length,
-    3,
-    "connections with no user ID stay separate entries",
-  );
-
-  assert.deepEqual(dedupeByUser([]), [], "an empty room dedupes to nothing");
-}
-
 function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
   const validNode = {
     id: "node-1",
@@ -995,11 +953,10 @@ function main() {
   checkTemplatesAreWellFormed();
   checkTemplateBoundsEncloseEveryNode();
   checkInitialsAlwaysRenderSomething();
-  checkAvatarsAreOnePerPerson();
   checkSnapshotsRejectJunkAndSurviveRoundTrips();
   checkCanvasBrandingIsHidden();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials/dedupe and snapshot validation verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials and snapshot validation verified",
   );
 }
 

@@ -30,8 +30,8 @@ import {
  *
  * Edges are visually secondary to nodes, so they sit dimmed until they are the
  * thing being looked at. Labels write through `updateEdgeData`, which is the
- * same controlled path node labels already use — so an edit reaches Liveblocks
- * Storage via `onEdgesChange` with no new plumbing.
+ * same controlled path node labels already use — so an edit reaches the stored
+ * snapshot via `onEdgesChange` with no new plumbing.
  */
 
 /** Dimmed at rest, full strength when hovered, selected or being labelled. */

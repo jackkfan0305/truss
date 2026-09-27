@@ -26,7 +26,7 @@ async function main() {
     : "direct (adapter-pg)";
 
   const storyboards = await prisma.storyboard.findMany({
-    include: { _count: { select: { collaborators: true, diagrams: true } } },
+    include: { _count: { select: { diagrams: true } } },
     orderBy: { createdAt: "asc" },
   });
   const diagrams = await prisma.diagram.findMany({
@@ -40,7 +40,7 @@ async function main() {
 
   for (const storyboard of storyboards) {
     console.log(
-      `  - ${storyboard.name} (${storyboard._count.collaborators} collaborators, ${storyboard._count.diagrams} diagrams)`,
+      `  - ${storyboard.name} (${storyboard._count.diagrams} diagrams)`,
     );
   }
 

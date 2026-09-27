@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useCanvasSyncNow } from "@/components/canvas/canvas-save-context";
 import { useAgentLaunchImport } from "@/hooks/use-agent-launch-import";
 
 export function AgentLaunchImportController({
@@ -10,10 +11,12 @@ export function AgentLaunchImportController({
   launchId?: string;
   roomId: string;
 }) {
+  const syncNow = useCanvasSyncNow();
   const { error, isImporting, retry } = useAgentLaunchImport({
     launchId,
     roomId,
     canStart: true,
+    onImported: syncNow,
   });
 
   return (

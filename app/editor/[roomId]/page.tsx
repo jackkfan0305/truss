@@ -6,15 +6,14 @@ import { EditorShell } from "@/components/editor/editor-shell";
 import { isAgentLaunchId } from "@/lib/agent-launch";
 import { getCurrentIdentity } from "@/lib/access";
 import { getAccessibleDiagram } from "@/lib/diagram-access";
-import { getOwnedDiagrams, getSharedDiagrams } from "@/lib/diagrams";
+import { getOwnedDiagrams } from "@/lib/diagrams";
 
 export const metadata: Metadata = {
   title: "Truss Editor",
   description: "Collaborative system design workspace.",
 };
 
-// `roomId` is the diagram ID and the future Liveblocks room ID — one identifier
-// (see the architecture decisions in context/progress-tracker.md).
+// `roomId` is the diagram ID (see the architecture decisions in context/progress-tracker.md).
 interface EditorRoomPageProps {
   params: Promise<{ roomId: string }>;
   searchParams: Promise<{ launch?: string | string[] }>;
@@ -40,10 +39,9 @@ export default async function EditorRoomPage({
   // The access check runs alongside the sidebar lists rather than before them:
   // the denied path is the rare one, and serialising would add a round trip to
   // every successful load.
-  const [activeDiagram, ownedDiagrams, sharedDiagrams] = await Promise.all([
+  const [activeDiagram, ownedDiagrams] = await Promise.all([
     getAccessibleDiagram(roomId, identity),
     getOwnedDiagrams(identity.userId),
-    getSharedDiagrams(identity),
   ]);
 
   // Unknown diagram and inaccessible diagram are the same answer on purpose.
@@ -54,7 +52,6 @@ export default async function EditorRoomPage({
   return (
     <EditorShell
       ownedDiagrams={ownedDiagrams}
-      sharedDiagrams={sharedDiagrams}
       activeDiagram={activeDiagram}
       launchId={launchId}
     />

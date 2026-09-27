@@ -8,7 +8,6 @@ const baseNavbarProps = {
   isSidebarOpen: false,
   onToggleSidebar: () => undefined,
   diagramName: "Checkout API",
-  onShare: () => undefined,
   onOpenTemplates: () => undefined,
   saveStatus: <span>Saved</span>,
   presence: <span>Collaborators</span>,
@@ -27,21 +26,10 @@ const homeHtml = renderToStaticMarkup(
   />
 )
 
-/*
- * A diagram with no parent storyboard has nobody to invite — collaborators are
- * invited to a storyboard, never to a diagram — so the shell passes no
- * `onShare` and the navbar must render no Share control at all. Offering one
- * would open a dialog whose invite POST the server answers 404.
- */
-const standaloneHtml = renderToStaticMarkup(
-  <EditorNavbar {...baseNavbarProps} onShare={undefined} />
-)
-
 const diagramSidebarProps = {
   isOpen: true,
   onClose: () => undefined,
   ownedDiagrams: [],
-  sharedDiagrams: [],
   onCreateDiagram: () => undefined,
   onRenameDiagram: () => undefined,
   onDeleteDiagram: () => undefined,
@@ -129,19 +117,12 @@ assert.match(closedDiagramTitle, /left-14/)
 
 assert.match(closedHtml, /Saved/)
 assert.match(closedHtml, /Templates/)
-assert.match(closedHtml, /Share/)
+assert.doesNotMatch(closedHtml, /Share/)
 assert.match(closedHtml, /Collaborators/)
 assert.match(closedHtml, /Profile/)
 assert.match(closedHtml, /pointer-events-none absolute/)
 assert.doesNotMatch(closedHtml, /border-b/)
 assert.match(homeHtml, /Profile/)
-
-assert.doesNotMatch(standaloneHtml, /Share/)
-// The rest of the workspace chrome is untouched by the missing parent: only
-// Share goes, so a failure here is a gate that took too much with it.
-assert.match(standaloneHtml, /Templates/)
-assert.match(standaloneHtml, /Saved/)
-assert.match(standaloneHtml, /Checkout API/)
 
 assert.match(openDiagramSidebar, /inset-y-0/)
 assert.match(openDiagramSidebar, /left-0/)

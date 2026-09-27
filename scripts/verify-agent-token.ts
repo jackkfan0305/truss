@@ -103,9 +103,10 @@ async function checkBearerResolutionReturnsOwnerIdentity(): Promise<void> {
 
   assert.ok(identity, "a valid bearer token resolves to an identity");
   assert.equal(identity?.userId, OWNER_ID);
-  assert.ok(
-    identity?.email === null || typeof identity?.email === "string",
-    "email is either resolved or gracefully null, never a thrown error",
+  assert.deepEqual(
+    Object.keys(identity ?? {}),
+    ["userId"],
+    "identity carries the user ID and nothing else",
   );
 
   // Best-effort lastUsedAt stamping actually lands on the success path.
@@ -138,19 +139,17 @@ async function checkUnknownMalformedAndRevokedTokensResolveToNothing(): Promise<
 
 /** `authorizeDiagram` answers 401 for a request an unknown bearer token cannot resolve. */
 async function checkAuthorizeDiagramAnswers401ForAnUnknownToken(): Promise<void> {
-  const response = await authorizeDiagram(bearerRequest(mintAgentToken()), DIAGRAM_ID, {
-    requireOwner: false,
-  });
+  const response = await authorizeDiagram(bearerRequest(mintAgentToken()), DIAGRAM_ID);
 
   assert.equal(response.ok, false);
   assert.equal(!response.ok && response.response.status, 401);
 }
 
 /**
- * `authorizeDiagram`'s 401 → 404 → 403 ordering, deletion-tombstone rule, and
- * owner-path laziness, all driven by a real bearer identity against the live
- * database. Nothing in this ordering logic branches on identity source, so
- * this is the same code path a Clerk session takes.
+ * `authorizeDiagram`'s 401 → 404 → 403 ordering and deletion-tombstone rule, all
+ * driven by a real bearer identity against the live database. Nothing in this
+ * ordering logic branches on identity source, so this is the same code path a
+ * Clerk session takes.
  */
 async function checkAuthorizeDiagramOrderingUnderBearerIdentity(): Promise<void> {
   const ownerToken = mintAgentToken();
@@ -168,30 +167,16 @@ async function checkAuthorizeDiagramOrderingUnderBearerIdentity(): Promise<void>
   });
 
   // Unknown diagram: 404, before any role is considered.
-  const missing = await authorizeDiagram(bearerRequest(ownerToken), "no-such-diagram", {
-    requireOwner: false,
-  });
+  const missing = await authorizeDiagram(bearerRequest(ownerToken), "no-such-diagram");
   assert.equal(!missing.ok && missing.response.status, 404, "unknown diagram is 404");
 
-  // Owner match: ok, and this path never needed a Clerk email lookup to succeed.
-  const owner = await authorizeDiagram(bearerRequest(ownerToken), DIAGRAM_ID, {
-    requireOwner: true,
-  });
-  assert.ok(owner.ok && owner.role === "owner" && owner.userId === OWNER_ID);
+  // Owner match: ok.
+  const owner = await authorizeDiagram(bearerRequest(ownerToken), DIAGRAM_ID);
+  assert.ok(owner.ok && owner.userId === OWNER_ID);
 
-  // Non-owner + requireOwner: 403, before any collaborator lookup.
-  const forbiddenOwnerOnly = await authorizeDiagram(bearerRequest(strangerToken), DIAGRAM_ID, {
-    requireOwner: true,
-  });
+  // A stranger is 403.
+  const forbiddenOwnerOnly = await authorizeDiagram(bearerRequest(strangerToken), DIAGRAM_ID);
   assert.equal(!forbiddenOwnerOnly.ok && forbiddenOwnerOnly.response.status, 403);
-
-  // Non-owner, collaborator allowed: still 403, because this token's owner has
-  // no real Clerk account to resolve an email for — the collaborator check
-  // must deny safely rather than throw when email resolution comes back empty.
-  const forbiddenCollaborator = await authorizeDiagram(bearerRequest(strangerToken), DIAGRAM_ID, {
-    requireOwner: false,
-  });
-  assert.equal(!forbiddenCollaborator.ok && forbiddenCollaborator.response.status, 403);
 
   // Deletion tombstone: 404 for everyone by default, retryable for the owner.
   await prisma.diagram.create({
@@ -203,13 +188,10 @@ async function checkAuthorizeDiagramOrderingUnderBearerIdentity(): Promise<void>
     },
   });
 
-  const tombstoneDefault = await authorizeDiagram(bearerRequest(ownerToken), TOMBSTONE_DIAGRAM_ID, {
-    requireOwner: true,
-  });
+  const tombstoneDefault = await authorizeDiagram(bearerRequest(ownerToken), TOMBSTONE_DIAGRAM_ID);
   assert.equal(!tombstoneDefault.ok && tombstoneDefault.response.status, 404);
 
   const tombstoneRetry = await authorizeDiagram(bearerRequest(ownerToken), TOMBSTONE_DIAGRAM_ID, {
-    requireOwner: true,
     allowDeletionStates: true,
   });
   assert.ok(tombstoneRetry.ok, "the owner may retry cleanup on a tombstoned diagram");

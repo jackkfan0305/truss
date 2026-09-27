@@ -3,13 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   type DragEvent,
-  type MouseEvent,
 } from "react";
-import { useUpdateMyPresence } from "@liveblocks/react";
-import { useLiveblocksFlow } from "@liveblocks/react-flow";
 import {
+  addEdge,
   Background,
   BackgroundVariant,
   ConnectionLineType,
@@ -18,10 +17,14 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
   useReactFlow,
-  type DefaultEdgeOptions,
+  type Connection,
+  type EdgeChange,
   type EdgeTypes,
   type IsValidConnection,
+  type NodeChange,
   type NodeTypes,
   type XYPosition,
 } from "@xyflow/react";
@@ -32,13 +35,18 @@ import { CanvasEdgeRouteProvider } from "@/components/canvas/canvas-edge-routes"
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
+import { useSetAgentPresence } from "@/components/canvas/agent-presence";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
 import { useCanvasSave } from "@/components/canvas/canvas-save-context";
 import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
-import { useCanvasRestore } from "@/hooks/use-canvas-restore";
-import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
+import { useCanvasHistory } from "@/hooks/use-canvas-history";
+import { useCanvasRemoteSync } from "@/hooks/use-canvas-remote-sync";
+import { isCanvasHistoryCommit } from "@/lib/canvas-history";
+import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
+import type { RemoteCanvas } from "@/lib/canvas-client";
+import { drawNodesThenEdges, planCanvasReplay } from "@/lib/canvas-replay";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -73,20 +81,20 @@ const EDGE_TYPES: EdgeTypes = {
 };
 
 /**
- * React Flow merges these into the connection *before* handing it to
- * `onConnect`, so `useLiveblocksFlow` writes the type, arrowhead and stroke
- * straight into Storage — every client renders a new edge the same way with no
- * post-processing step (16-edge-behavior).
- *
- * `data.label` is seeded empty rather than left absent so the key exists on the
- * edge's `LiveObject` from creation, the same as a node's `data`.
+ * A new edge with every canvas default written onto it, so the stored edge and
+ * the rendered one are the same object with no post-processing step
+ * (16-edge-behavior). `data.label` starts empty so the key always exists.
  */
-const DEFAULT_EDGE_OPTIONS: DefaultEdgeOptions = {
-  type: CANVAS_EDGE_TYPE,
-  data: { label: "" },
-  style: CANVAS_EDGE_STYLE,
-  markerEnd: CANVAS_EDGE_MARKER,
-};
+function createCanvasEdge(connection: Connection): CanvasEdge {
+  return {
+    ...connection,
+    id: `edge-${crypto.randomUUID()}`,
+    type: CANVAS_EDGE_TYPE,
+    data: { label: "" },
+    style: CANVAS_EDGE_STYLE,
+    markerEnd: CANVAS_EDGE_MARKER,
+  } as CanvasEdge;
+}
 
 /**
  * `ConnectionMode.Loose` treats any two distinct handles as connectable, and
@@ -104,7 +112,7 @@ const isConnectionBetweenNodes: IsValidConnection<CanvasEdge> = ({
 }) => source !== target;
 
 /**
- * The collaborative canvas surface (11-base-canvas, 12-shape-panel).
+ * The canvas surface.
  *
  * `ReactFlowProvider` is what lets `CanvasFlow` call `useReactFlow` in the same
  * component that renders the drop target — the wrapper sits outside `ReactFlow`,
@@ -121,132 +129,109 @@ export function Canvas(props: CanvasProps) {
 }
 
 interface CanvasProps {
-  /** Doubles as the room ID and the diagram the canvas is persisted under. */
+  /** The diagram the canvas is persisted under. */
   diagramId: string;
-  /**
-   * The starter template picker is opened from the editor navbar, which sits
-   * outside the room — but importing one is a Storage write, so the dialog is
-   * rendered here where the flow state is (18-starter-templates).
-   */
+  /** The stored canvas this editor opened on, loaded by `CanvasSurface`. */
+  initial: RemoteCanvas;
+  /** Opened from the navbar, but importing writes flow state, which lives here (18-starter-templates). */
   isTemplatesOpen: boolean;
   onTemplatesOpenChange: (open: boolean) => void;
 }
 
-function CanvasFlow({
-  diagramId,
-  isTemplatesOpen,
-  onTemplatesOpenChange,
-}: CanvasProps) {
+function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
   /*
    * Autosave state reaches the navbar through context rather than a callback
    * prop: the indicator lives outside `ReactFlowProvider` and cannot read the
-   * flow state that drives it, and pushing it up through an effect would
-   * re-render the whole workspace an extra time per save (21-canvas-autosave).
+   * flow state that drives it (21-canvas-autosave).
    */
-  const { setStatus: setSaveStatus, registerSaveNow } = useCanvasSave();
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, onDelete } =
-    useLiveblocksFlow<CanvasNode, CanvasEdge>({
-      suspense: true,
-      nodes: { initial: [] },
-      edges: { initial: [] },
-    });
-  const { fitView, screenToFlowPosition } = useReactFlow<
-    CanvasNode,
-    CanvasEdge
-  >();
+  const { setStatus: setSaveStatus, registerSaveNow, registerSyncNow } = useCanvasSave();
+  const [nodes, setNodes, applyNodeChanges] = useNodesState<CanvasNode>(initial.snapshot.nodes);
+  const [edges, setEdges, applyEdgeChanges] = useEdgesState<CanvasEdge>(initial.snapshot.edges);
+  const { fitView, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const isAwaitingImportedNodes = useRef(false);
-  const updateMyPresence = useUpdateMyPresence();
 
-  /**
-   * Broadcast the pointer in *canvas* coordinates, not screen coordinates: the
-   * other clients are panned and zoomed differently, so a screen position would
-   * land somewhere else on their diagram (19-presence-avatars-cursors).
-   *
-   * Liveblocks throttles presence updates itself (100ms by default), so the
-   * raw mousemove firing rate does not become the network rate.
-   */
-  const handleMouseMove = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      updateMyPresence({
-        cursor: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
-      });
+  const current = useMemo(() => ({ nodes, edges }), [nodes, edges]);
+  const payload = useMemo(() => canonicalCanvasPayload(current), [current]);
+
+  const restore = useCallback(
+    (snapshot: CanvasSnapshot) => {
+      setNodes(snapshot.nodes);
+      setEdges(snapshot.edges);
     },
-    [screenToFlowPosition, updateMyPresence],
+    [setEdges, setNodes],
+  );
+  const history = useCanvasHistory(current, restore);
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange<CanvasNode>[]) => {
+      if (changes.some((change) => isCanvasHistoryCommit(change, nodes))) {
+        history.checkpoint();
+      }
+
+      applyNodeChanges(changes);
+    },
+    [applyNodeChanges, history, nodes],
   );
 
-  /** Off the canvas, there is no position to show — the cursor is hidden. */
-  const handleMouseLeave = useCallback(() => {
-    updateMyPresence({ cursor: null });
-  }, [updateMyPresence]);
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<CanvasEdge>[]) => {
+      if (changes.some((change) => isCanvasHistoryCommit(change, nodes))) {
+        history.checkpoint();
+      }
 
-  /**
-   * `add` changes go through `onNodesChange` rather than a local `setNodes`, so
-   * the new node is written straight into Liveblocks Storage and reaches every
-   * other client in the room.
-   */
+      applyEdgeChanges(changes);
+    },
+    [applyEdgeChanges, history, nodes],
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      history.checkpoint();
+      setEdges((existing) => addEdge(createCanvasEdge(connection), existing));
+    },
+    [history, setEdges],
+  );
+
   const addNode = useCallback(
     ({ shape, width, height }: ShapeDragPayload, center: XYPosition) => {
-      onNodesChange([
+      history.checkpoint();
+      setNodes((existing) => [
+        ...existing,
         {
-          type: "add",
-          item: {
-            id: createNodeId(shape),
-            type: CANVAS_NODE_TYPE,
-            // The drop point is where the cursor was, so the node is centred on
-            // it rather than hanging off its bottom-right corner.
-            position: { x: center.x - width / 2, y: center.y - height / 2 },
-            width,
-            height,
-            data: { label: "", color: DEFAULT_NODE_COLOR, shape },
-          },
+          id: createNodeId(shape),
+          type: CANVAS_NODE_TYPE,
+          // Centred on the drop point rather than hanging off its corner.
+          position: { x: center.x - width / 2, y: center.y - height / 2 },
+          width,
+          height,
+          data: { label: "", color: DEFAULT_NODE_COLOR, shape },
         },
       ]);
     },
-    [onNodesChange],
+    [history, setNodes],
   );
 
   /**
-   * A template *replaces* the canvas, so everything on it is deleted before the
-   * template is added.
-   *
-   * The clear goes through `onDelete` rather than `remove` changes on purpose:
-   * `@liveblocks/react-flow`'s change appliers no-op on `"remove"` — deletion is
-   * `onDelete`'s job — so removal changes would leave the old diagram in place
-   * and the template would land on top of it.
-   *
-   * Nodes and edges are copied on the way in so the template constants are never
-   * aliased into Storage and cannot be edited by reference on the canvas.
+   * A template replaces the canvas. Nodes and edges are copied so the template
+   * constants are never aliased into flow state.
    */
   const handleImportTemplate = useCallback(
     (template: CanvasTemplate) => {
-      onDelete({ nodes, edges });
-      onNodesChange(
-        template.nodes.map((node) => ({
-          type: "add",
-          item: { ...node, data: { ...node.data } },
-        })),
-      );
-      onEdgesChange(
+      history.checkpoint();
+      setNodes(template.nodes.map((node) => ({ ...node, data: { ...node.data } })));
+      setEdges(
         template.edges.map((edge) => ({
-          type: "add",
-          item: {
-            ...edge,
-            data: { ...edge.data, label: edge.data?.label ?? "" },
-          },
+          ...edge,
+          data: { ...edge.data, label: edge.data?.label ?? "" },
         })),
       );
-
       isAwaitingImportedNodes.current = true;
     },
-    [edges, nodes, onDelete, onEdgesChange, onNodesChange],
+    [history, setEdges, setNodes],
   );
 
-  /**
-   * Fitting the view has to wait for the imported nodes to come back *through*
-   * Storage — `fitView` called straight after the write measures the canvas as
-   * it was, which on a previously empty one is a no-op.
-   */
+  /** `fitView` must wait for the imported nodes to render, or it measures the old canvas. */
   useEffect(() => {
     if (!isAwaitingImportedNodes.current || nodes.length === 0) {
       return;
@@ -256,48 +241,64 @@ function CanvasFlow({
     void fitView({ duration: VIEWPORT_TRANSITION_MS });
   }, [fitView, nodes]);
 
-  /**
-   * A restored snapshot is written through the same `add` changes a drop uses,
-   * so it lands in Liveblocks Storage and reaches everyone else in the room
-   * rather than existing only in this client's local flow state.
-   */
-  const handleRestore = useCallback(
-    (snapshot: CanvasSnapshot) => {
-      onNodesChange(
-        snapshot.nodes.map((node) => ({ type: "add", item: node })),
-      );
-      onEdgesChange(
-        snapshot.edges.map((edge) => ({ type: "add", item: edge })),
-      );
-
-      isAwaitingImportedNodes.current = true;
-    },
-    [onEdgesChange, onNodesChange],
-  );
-
-  /*
-   * ponytail: two clients opening the *same* cold room within one round trip
-   * can both restore, which duplicates every node. Narrow enough to accept for
-   * now — it needs an empty room, which means nobody has edited it since the
-   * last save. A Storage-held "restored" flag is the fix if it ever shows up.
-   */
-  useCanvasRestore(
-    diagramId,
-    nodes.length === 0 && edges.length === 0,
-    handleRestore,
-  );
-
-  // Status is set straight from the save lifecycle, so the navbar indicator
-  // updates without this component re-rendering to report it.
-  const { saveNow } = useCanvasAutosave(diagramId, nodes, edges, setSaveStatus);
+  const autosave = useCanvasAutosave(diagramId, payload, initial.version, setSaveStatus);
 
   useEffect(() => {
-    registerSaveNow(saveNow);
+    registerSaveNow(autosave.saveNow);
 
     // The handle must not outlive the canvas, or a Save click on the editor
-    // home would call into an unmounted room.
+    // home would call into an unmounted canvas.
     return () => registerSaveNow(null);
-  }, [registerSaveNow, saveNow]);
+  }, [autosave.saveNow, registerSaveNow]);
+
+  const setAgentPresence = useSetAgentPresence();
+
+  // Read from an async callback that outlives the render that created it.
+  const latest = useRef(current);
+
+  useEffect(() => {
+    latest.current = current;
+  }, [current]);
+
+  const applyRemoteCanvas = useCallback(
+    async (remote: RemoteCanvas) => {
+      autosave.adopt(canonicalCanvasPayload(remote.snapshot), remote.version);
+      // Undo must never reach back across a change this tab did not make.
+      history.reset();
+
+      if (!remote.isAgentWrite) {
+        restore(remote.snapshot);
+        return;
+      }
+
+      const plan = planCanvasReplay(latest.current, remote.snapshot);
+
+      restore(plan.base);
+      await autosave.whilePaused(() =>
+        drawNodesThenEdges(
+          plan,
+          {
+            addNodes: (added) => setNodes((existing) => [...existing, ...added]),
+            addEdges: (added) => setEdges((existing) => [...existing, ...added]),
+          },
+          {
+            moveCursor: (cursor) => setAgentPresence({ cursor }),
+            clearCursor: () => setAgentPresence(null),
+            sleep: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
+          },
+        ),
+      );
+    },
+    [autosave, history, restore, setAgentPresence, setEdges, setNodes],
+  );
+
+  const { syncNow } = useCanvasRemoteSync(diagramId, autosave, applyRemoteCanvas);
+
+  useEffect(() => {
+    registerSyncNow(syncNow);
+
+    return () => registerSyncNow(null);
+  }, [registerSyncNow, syncNow]);
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(SHAPE_DRAG_MIME)) {
@@ -354,7 +355,7 @@ function CanvasFlow({
   return (
     <div
       ref={wrapperRef}
-      // `relative` anchors the live-cursor overlay to the canvas.
+      // `relative` anchors the agent cursor overlay to the canvas.
       className="relative h-full w-full"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
@@ -365,15 +366,9 @@ function CanvasFlow({
           edges={edges}
           nodeTypes={NODE_TYPES}
           edgeTypes={EDGE_TYPES}
-          defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onDelete={onDelete}
-          // On the wrapper rather than `onPaneMouseMove`, so the cursor keeps
-          // broadcasting while the pointer is over a node instead of freezing.
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
           // Handles are drawn on all four sides, so a connection must be allowed to
           // land on any of them rather than only on a declared target handle.
           connectionMode={ConnectionMode.Loose}
@@ -408,7 +403,7 @@ function CanvasFlow({
             <ShapePanel onAddShape={handleAddShape} />
           </Panel>
           <Panel position="bottom-left">
-            <CanvasControls />
+            <CanvasControls history={history} />
           </Panel>
         </ReactFlow>
       </CanvasEdgeRouteProvider>

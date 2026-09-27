@@ -4,9 +4,85 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
-- Phase 1 — Foundation: design system and UI primitives
+- canvas-without-liveblocks: removing Liveblocks collaborator surface
 
 ## Current Goal
+
+- Task 1 complete: Remove the Share dialog and the storyboard member routes.
+  The Share button no longer appears in the navbar. Deleted: share-dialog
+  component, use-storyboard-members hook, member API routes, storyboard-access
+  and clerk-users modules. Editor shell no longer manages share state.
+
+- Task 2 complete: Make every diagram owner-only. Diagrams are no longer
+  shared with collaborators. Simplified `Identity` to `{ userId: string }`,
+  removed `DiagramAccess` type, deleted `StoryboardRole` and `getSharedDiagrams`.
+  The sidebar's Shared tab is gone. Every diagram is owner-only; `authorizeDiagram`
+  requires ownership, never falls through to collaborator checks. Deleted
+  `types/storyboard.ts`.
+
+- Task 3 complete: Drop the storyboard collaborator table. Removed the
+  `StoryboardCollaborator` model from the schema and the `collaborators`
+  relation from `Storyboard`. Migration `20260925120000_drop_storyboard_collaborators`
+  drops the table. Updated `prisma/seed.ts` and `scripts/verify-prisma.ts`
+  to remove collaborator handling.
+
+- Task 4 complete: Canvas version columns and wire helpers. Added `canvasVersion`
+  and `canvasWrittenByAgent` columns to `Diagram` model for compare-and-swap
+  writes. Migration `20260925130000_diagram_canvas_version` applied. Added pure
+  helpers: `CanvasVersionConflictError`, `parseCanvasVersion`, `parseCanvasWrite`,
+  `canonicalCanvasPayload` in `lib/canvas-snapshot.ts`; `parseCanvasReadResponse`
+  and `RemoteCanvas` in `lib/canvas-client.ts`; `SnapshotFlow` and `createSnapshotFlow`
+  in `lib/agent-canvas-write.ts`. Verifier `scripts/verify-canvas-version.ts` added
+  and registered in `package.json`. Phase 2 foundation complete.
+
+- Task 5 complete: Versioned Blob store and the canvas route. Implemented canvas
+  persistence as versioned snapshots: `readStoredCanvas`, `readStoredCanvasSince`,
+  `writeStoredCanvas`, `mutateStoredCanvas` in `lib/canvas-persistence.ts` handle
+  compare-and-swap on `canvasVersion` with automatic cleanup of orphaned blobs.
+  `CanvasBlobClient` interface abstracts Blob I/O for testability. `GET /api/diagrams/:id/canvas`
+  supports `?since=N` polling returning `{ changed: false }` without touching Blob.
+  `PUT` is compare-and-swap returning `{ version, savedAt }` or `409`. Updated
+  `lib/canvas-read.ts` and `app/api/diagrams/[diagramId]/canvas/route.ts` to use
+  new persistence layer. Temporary `saveCanvasSnapshot` re-export kept for agent routes
+  (removed in Task 6). Verifier `scripts/verify-canvas-store.ts` added covering
+  fresh writes, stale writes, lost swaps, read retries, polling, and mutations.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
+- Task 6 complete: Agent writes go through the store. Rewired both agent routes
+  (`agent-graph-edit`, `agent-launch-import`) to call `mutateStoredCanvas` instead
+  of Liveblocks `mutateFlow`. Agent writes are now immediate (no server pacing);
+  a version conflict inside `mutateCanvas` throws `CanvasVersionConflictError` and
+  the route answers `409`. Deleted `lib/ai-activity.ts`, `lib/agent-graph-import-config.ts`,
+  and the temporary `saveCanvasSnapshot` from `lib/canvas-persistence.ts`. Removed
+  `drawNodesThenEdges`, `AgentCanvasAddFlow`, and Liveblocks' `CanvasDrawingDependencies`
+  from `lib/agent-canvas-write.ts`; kept the native drawing loop in `lib/canvas-drawing.ts`
+  for Task 9. Updated doc comments to reference `mutateCanvas` instead of `mutateFlow`.
+  Verifiers updated for new dependency shape: edit tests version conflict with `409`,
+  import tests that exact replays and partial resumes write nothing and something respectively.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
+- Task 7 complete: Local undo history for the canvas. Added pure module
+  `lib/canvas-history.ts` with `pushCanvasHistory`, `undoCanvasHistory`, and
+  `redoCanvasHistory` functions managing per-tab undo/redo stacks capped at
+  `MAX_CANVAS_HISTORY=100`. `isCanvasHistoryCommit` detects whether a React Flow
+  change (drag, resize, add, remove, replace) starts an undoable edit, ignoring
+  intermediate drag frames and resize measurements. React hook `useCanvasHistory`
+  in `hooks/use-canvas-history.ts` manages checkpoint timing with
+  `CANVAS_HISTORY_COALESCE_MS=500` so rapid edits share one undo step. Exports
+  `CanvasHistoryControls` interface with `undo`, `redo`, `canUndo`, `canRedo`,
+  `checkpoint`, and `reset` methods for Task 8 to wire. Verifier
+  `scripts/verify-canvas-history.ts` added and registered in `package.json`.
+  All gates pass: `typecheck`, `lint`, `verify:unit`.
+
+- Merged main (2026-09-27): agent edits and imports now run
+  `resolveAgentGraphLayout` inside `mutateCanvas`, the canvas renders through
+  `CanvasEdgeRouteProvider`, and the stored-canvas loading state uses
+  `TrussLoader`. Codex review fix: after an agent replay, `whilePaused` flushed
+  before React committed the restored snapshot. An update-only agent edit
+  therefore saved the pre-agent canvas under the adopted version and reverted
+  the edit on the server. The flush now runs in an effect after the resume
+  render. `scripts/verify-canvas-autosave.tsx` covers both the empty replay and
+  a local edit made during a replay.
 
 - Editor UI polish merged onto main (2026-09-24). `TrussLoader` replaces
   the text-only app boot, canvas connect and agent entry states and backs
@@ -75,10 +151,6 @@ Update this file whenever the current phase, active feature, or implementation s
   and manual-handle preservation. The focused canvas verifier, strict
   typecheck, and focused ESLint pass.
 
-- PR review fixes applied: storyboard owners can read every diagram on their
-  storyboard, the editor only exposes Share to storyboard owners, member-list
-  fetches cancel stale effect runs without nested state updates, and independent
-  seed writes run concurrently while dependency-ordered cleanup stays serial.
 
 - Product decision recorded for the next storyboard flow: signed-out users can
   build a temporary storyboard with every storyboard feature except inviting
@@ -1651,3 +1723,73 @@ result is observed.
   pulling in unrelated agent skills.
 - Configured `turbopack.root` to the current application directory so nested
   worktrees do not make Next.js select a parent checkout's lockfile.
+
+[Task 8 complete: The canvas runs on local React Flow state.]
+
+[Task 9 complete: Idle sync and the agent replay.]
+- The canvas polls for remote changes on a 4-second idle interval and replays
+  agent writes through the browser-local pacing loop (cursor + delay). Remote
+  writes update the canvas immediately; removals and updates land at once while
+  new nodes and edges arrive paced behind the moving cursor. Unsaved edits block
+  polling. Launch imports trigger an immediate sync after the import completes,
+  so the user sees the graph draw at once instead of waiting for the next poll.
+- Refactored `lib/canvas-drawing.ts` to accept browser dependencies
+  (`moveCursor`, `clearCursor`, `sleep`) instead of server-side Liveblocks ones.
+  Created `lib/canvas-replay.ts` with `planCanvasReplay` and `drawNodesThenEdges`
+  to split remote snapshots into immediate updates and paced additions.
+- Implemented `useCanvasRemoteSync` hook for polling and `useCanvasSyncNow` to
+  expose syncNow to contexts without a provider (launch import status). Added
+  `registerSyncNow` to `CanvasSaveContext` alongside `registerSaveNow`.
+- Fixed react-hook-harness to support `useContext` for test compatibility.
+- All gates pass: `typecheck`, `lint`, `verify:unit`.
+
+- Task 10 complete: Remove Liveblocks surface and packages. Deleted:
+  `app/api/liveblocks-auth/route.ts`, `lib/liveblocks.ts`, `liveblocks.config.ts`,
+  `scripts/verify-liveblocks.ts`. Uninstalled five `@liveblocks/*` packages.
+  Simplified `deleteDiagramResources` to atomic tombstone write with no room
+  argument; deleted `RoomLifecycle`, `cleanupTombstonedRoom`, and `TOMBSTONED`.
+  Updated verification to TDD discipline: rewrote deletion checks, confirmed
+  tests fail (RED), implemented simplification, confirmed tests pass (GREEN).
+  Swept comments to replace "Liveblocks Storage" with "flow state" or "stored
+  snapshot" and "room ID" with "diagram ID". All gates pass: `typecheck`, `lint`,
+  `verify:unit`, `build` (no `/api/liveblocks-auth` route), `verify:integration`.
+  Step 7 (Vercel env cleanup) pending owner approval.
+
+- Task 11 complete: Documentation. Created ADR 0005 (owner-only, without Liveblocks).
+  Updated CONTEXT.md glossary and ADRs 0003-0004. Rewrote project-overview.md,
+  ui-context.md, code-standards.md, and architecture-context.md for owner-only model.
+
+  **Tasks completed (1-11):**
+  1. Remove Share dialog and member routes
+  2. Make diagrams owner-only
+  3. Drop StoryboardCollaborator table
+  4. Canvas version columns and helpers
+  5. Versioned Blob store and canvas route
+  6. Agent writes through the store
+  7. Local undo history
+  8. Idle sync and agent replay
+  9. (Placeholder for concurrent editing resolution - not done in this plan)
+  10. (Placeholder for final test pass - not done in this plan)
+  11. Documentation: ADR 0005, glossary, context files
+
+  **Migrations applied:**
+  - 20260925120000_drop_storyboard_collaborators
+  - 20260925130000_diagram_canvas_version
+
+  **Removed packages:**
+  - @liveblocks/client
+  - @liveblocks/node
+  - @liveblocks/react
+  - @liveblocks/react-flow
+  - @liveblocks/react-ui
+
+  **Open questions:**
+  - Copy for "Real-time collaborative canvas" in auth-panel.tsx and meta description
+  - Storyboard model kept with no UI/collaborators; kept for ADR 0004 and future storyboard work
+  - Deleted diagrams retain their last Blob snapshot; follow-up if storage cost matters
+  - Importing diagram pill disappears before replay completes; hold until replay finishes if UX gap visible
+  - LIVEBLOCKS_SECRET_KEY removal from Vercel and .env deferred until after merge and deploy (owner decision 2026-09-26)
+
+  **Verification notes:**
+  - Manual browser checks in Tasks 8 and 9 unverified (no signed-in Clerk session in dev environment)
+  - All automated gates pass: typecheck, lint, verify:unit, build

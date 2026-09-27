@@ -1,8 +1,8 @@
 # Truss
 
-A real-time collaborative system design workspace. Your terminal agent draws a
-system onto a shared canvas through the `truss-diagram` skill, and your
-collaborators refine it live.
+A system design workspace. Your terminal agent draws a system onto a canvas
+through the `truss-diagram` skill. Diagrams persist to Vercel Blob and can be
+opened, renamed and deleted through the web editor.
 
 Truss runs no model of its own — see
 [ADR 0001](docs/adr/0001-no-server-side-ai.md).
@@ -11,18 +11,13 @@ Truss runs no model of its own — see
 
 ## What it does
 
-- **Diagrams** — sign in, create a diagram, open it in the editor. The owner can
+- **Diagrams**: sign in, create a diagram, open it in the editor. The owner can
   rename and delete it.
-- **Storyboards** — the plan a diagram sits on, and the thing collaborators are
-  invited to by email. A diagram with no parent storyboard is owner-only and
-  shows no Share control. Nothing creates a storyboard yet; the agent-facing
-  create lands with the storyboard tools.
-- **Collaborative canvas** — React Flow over Liveblocks Storage. Live cursors,
-  presence avatars, shaped/colored nodes, right-angle labelled edges, and
-  snapshots persisted to Vercel Blob.
-- **Starter templates** — prebuilt system designs (monolith, microservices,
-  event-driven, serverless…) that import straight into the live room.
-- **Agent-drawn diagrams** — the `truss-diagram` skill creates, reads, edits and
+- **Canvas**: React Flow with shaped/colored nodes, right-angle labelled edges,
+  and snapshots persisted to Vercel Blob.
+- **Starter templates**: prebuilt system designs (monolith, microservices,
+  event-driven, serverless…) that import straight into the editor.
+- **Agent-drawn diagrams**: the `truss-diagram` skill creates, reads, edits and
   deletes diagrams over MCP. Writes land through a paced draw, so a mounted
   editor watches the agent's cursor place each node.
 
@@ -34,18 +29,17 @@ Truss runs no model of its own — see
 | UI               | Tailwind v4, shadcn/ui, Base UI |
 | Auth             | Clerk                   |
 | Database         | Prisma 7 + PostgreSQL   |
-| Canvas           | Liveblocks + React Flow (`@xyflow/react`) |
+| Canvas           | React Flow (`@xyflow/react`) + Vercel Blob |
 | Artifact storage | Vercel Blob (private access) |
 
 ## Prerequisites
 
 - Node.js 20+ (developed on 26)
 - A PostgreSQL database
-- Accounts for: [Clerk](https://clerk.com),
-  [Liveblocks](https://liveblocks.io), and
+- Accounts for: [Clerk](https://clerk.com) and
   [Vercel Blob](https://vercel.com/docs/storage/vercel-blob).
 
-All three have free tiers that are enough to run this locally.
+Both have free tiers that are enough to run this locally.
 
 ## Setup
 
@@ -72,15 +66,6 @@ NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/editor
 NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/editor
-
-# ------------------------------------------------------------- Liveblocks
-# Project → API keys. Server-only, read in lib/liveblocks.ts.
-LIVEBLOCKS_SECRET_KEY=sk_...
-
-# Optional. Nothing reads it: the canvas authenticates through
-# /api/liveblocks-auth, not through LiveblocksProvider's publicApiKey. Kept
-# unprefixed so it stays out of the client bundle.
-LIVEBLOCKS_PUBLIC_KEY=pk_...
 
 # ------------------------------------------------------------ Vercel Blob
 # Vercel dashboard → Storage → Blob. Server-only: a read-write token in the
@@ -222,7 +207,7 @@ each exits non-zero on failure.
 .agents/skills The agent skills themselves, one copy
 app/api        Authenticated route handlers: validate → authorize → write → persist
 app/editor     The workspace (diagram sidebar, canvas)
-lib/           Prisma client, access control, Liveblocks server helpers
+lib/           Prisma client, access control, canvas persistence
 components/    canvas/ (React Flow surface), editor/ (panels & dialogs), ui/ (shadcn)
 prisma/        Schema, split models, migrations, seed
 context/       Product, architecture, UI, and standards docs — read these first

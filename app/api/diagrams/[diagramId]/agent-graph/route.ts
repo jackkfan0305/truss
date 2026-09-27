@@ -18,7 +18,7 @@ export async function GET(
     // Closes over `request` so a `trs_agent_...` bearer token resolves the
     // same as the browser session did, without changing
     // AgentGraphReadDependencies' own signature or its verifier.
-    authorizeDiagram: (id, options) => authorizeDiagram(request, id, options),
+    authorizeDiagram: (id) => authorizeDiagram(request, id),
     readCanvas,
   });
 }

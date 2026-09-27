@@ -1,12 +1,12 @@
 /**
- * Builds the identifier a diagram is created with. It is one value doing three
- * jobs: the Prisma `Diagram.id`, the `/editor/[roomId]` segment, and the
- * Liveblocks room ID (10-liveblocks-setup). Kept free of React and Prisma
- * imports so both the create dialog and the API route can validate against it.
+ * Builds the identifier a diagram is created with. It is one value doing two
+ * jobs: the Prisma `Diagram.id` and the `/editor/[diagramId]` segment.
+ * Kept free of React and Prisma imports so both the create dialog and the
+ * API route can validate against it.
  */
 
 /**
- * Room-ID-safe slug. NFKD splits accented letters into base + combining mark,
+ * Diagram-ID-safe slug. NFKD splits accented letters into base + combining mark,
  * and the non-alphanumeric collapse below drops the mark, so "Café Service"
  * becomes "cafe-service".
  */

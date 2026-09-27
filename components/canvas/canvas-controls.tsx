@@ -1,11 +1,5 @@
 "use client";
 
-import {
-  useCanRedo,
-  useCanUndo,
-  useRedo,
-  useUndo,
-} from "@liveblocks/react/suspense";
 import { useReactFlow } from "@xyflow/react";
 import {
   Maximize,
@@ -17,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { type CanvasHistoryControls } from "@/hooks/use-canvas-history";
 import {
   VIEWPORT_TRANSITION_MS,
   type CanvasEdge,
@@ -52,23 +47,20 @@ function ControlButton({
   );
 }
 
+interface CanvasControlsProps {
+  history: Pick<CanvasHistoryControls, "undo" | "redo" | "canUndo" | "canRedo">;
+}
+
 /**
- * The floating zoom and history bar (17-canvas-ergonomics).
- *
- * Undo/redo are Liveblocks room history rather than a local stack: every canvas
- * edit is a Storage mutation, so the room is the only place that knows what the
- * last one was. It is per-client — undo takes back *your* last change, not a
- * collaborator's.
+ * The floating zoom and history bar (17-canvas-ergonomics). History is this
+ * tab's own stack (`useCanvasHistory`): undo takes back your last change here.
  *
  * The keyboard shortcuts are registered here because this is the one component
  * that already holds all four handlers.
  */
-export function CanvasControls() {
+export function CanvasControls({ history }: CanvasControlsProps) {
   const flow = useReactFlow<CanvasNode, CanvasEdge>();
-  const undo = useUndo();
-  const redo = useRedo();
-  const canUndo = useCanUndo();
-  const canRedo = useCanRedo();
+  const { undo, redo, canUndo, canRedo } = history;
 
   useKeyboardShortcuts({ flow, undo, redo });
 

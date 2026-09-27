@@ -1,14 +1,22 @@
-/// A system architecture graph in its own Liveblocks room. Valid on its own
-/// with no storyboard pointing at it (see CONTEXT.md), which is what every
-/// diagram the MCP tools create starts out as.
+/// A system architecture graph stored as one versioned snapshot. Valid on
+/// its own with no storyboard pointing at it (see CONTEXT.md), which is what
+/// every diagram the MCP tools create starts out as.
 ///
-/// `id` is one value doing three jobs: this primary key, the
-/// `/editor/[roomId]` segment, and the Liveblocks room ID.
+/// `id` is one value doing two jobs: this primary key and the
+/// `/editor/[roomId]` segment.
 model Diagram {
   id             String  @id @default(cuid())
   ownerId        String
   name           String
   canvasJsonPath String?
+
+  /// Bumped on every canvas write. A writer sends the version it read, and a
+  /// write against a version that has moved is refused with 409.
+  canvasVersion Int @default(0)
+
+  /// Whether the latest canvas write came from an agent-token route, so an
+  /// open editor replays it with the agent cursor instead of snapping to it.
+  canvasWrittenByAgent Boolean @default(false)
 
   /// The storyboard this diagram is a panel on, or `null` for a standalone
   /// one. `SetNull` rather than `Cascade`: deleting the plan a diagram was
@@ -18,12 +26,8 @@ model Diagram {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  /// Deletion tombstone. A diagram ID is never reused, so deletion stamps
-  /// `deletingAt`, deletes the Liveblocks room, then stamps `deletedAt`.
-  /// Either stamp makes the diagram inaccessible and excludes it from lists;
-  /// a `deletingAt` without a `deletedAt` is a cleanup the owner may retry.
-  /// Timestamps rather than a lifecycle enum: they say *when*, which a
-  /// `DELETING` state never could.
+  /// Deletion tombstone. A diagram ID is never reused. Either stamp makes the
+  /// diagram inaccessible and excludes it from lists.
   deletingAt DateTime?
   deletedAt  DateTime?
 

@@ -1,5 +1,7 @@
 # A diagram keeps its own Liveblocks room
 
+> Superseded by ADR 0005: there are no rooms.
+
 A diagram panel sits on a storyboard, but its graph lives in a separate
 Liveblocks room rather than inside the storyboard's room. Every diagram tool,
 the paced draw, the fingerprint concurrency check, and `readCanvas` address a

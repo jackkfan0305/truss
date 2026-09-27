@@ -91,12 +91,6 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "2449db6ab1ded9581f69fcc56c1f64818112d05e271fd4c5da23c6523f9d3d9d"
     },
-    "liveblocks-best-practices": {
-      "source": "liveblocks/skills",
-      "sourceType": "github",
-      "skillPath": "skills/liveblocks-best-practices/SKILL.md",
-      "computedHash": "2b3daf7dda490867910431e73bc782b167159be668ac658977cc1fe5464d1d96"
-    },
     "loop-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -234,12 +228,6 @@
       "sourceType": "github",
       "skillPath": "skills/in-progress/writing-shape/SKILL.md",
       "computedHash": "0d0ac1150c4d65f8370ad194fc097ee17855247f6e5943d05f075806980e7401"
-    },
-    "yjs-best-practices": {
-      "source": "liveblocks/skills",
-      "sourceType": "github",
-      "skillPath": "skills/yjs-best-practices/SKILL.md",
-      "computedHash": "c140ed344e2a321d5b59196f1e50cb9d96db36e3da566993ad4ada409fb67ef9"
     }
   }
 }

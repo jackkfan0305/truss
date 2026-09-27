@@ -372,9 +372,9 @@ function postGraphEdit(baseUrl, diagramId, token, fingerprint, graph) {
 }
 
 // Mirrors lib/room-id.ts. The diagram ID doubles as the /editor/[roomId]
-// segment and the Liveblocks room ID, so a headless create has to build the
-// same readable `<slug>-<suffix>` the create dialog does rather than let the
-// schema's cuid() default produce an opaque one.
+// segment, so a headless create has to build the same readable `<slug>-<suffix>`
+// the create dialog does rather than let the schema's cuid() default produce an
+// opaque one.
 export function slugifyTitle(name) {
   return name
     .normalize("NFKD")

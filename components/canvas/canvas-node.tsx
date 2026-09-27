@@ -89,7 +89,7 @@ function NodeResizeFrame({ accent }: { accent: string }) {
  *
  * The shape itself lives in `NodeShapeFrame`; this adds the resize frame and
  * inline label editing. Both write through React Flow's controlled flow, so
- * every change lands in Liveblocks Storage via `onNodesChange`.
+ * every change lands in the stored snapshot via `onNodesChange`.
  */
 export function CanvasNodeRenderer({
   id,

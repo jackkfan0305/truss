@@ -5,7 +5,11 @@ import {
   handleAgentGraphEditPost,
   type AgentGraphEditDependencies,
 } from "../lib/agent-graph-edit-server";
-import type { AgentCanvasFlow } from "../lib/agent-canvas-write";
+import {
+  createSnapshotFlow,
+  type SnapshotFlow,
+} from "../lib/agent-canvas-write";
+import { CanvasVersionConflictError } from "../lib/canvas-snapshot";
 import type { CanvasEdge, CanvasNode } from "../types/canvas";
 
 function n(id: string, label = "Node", x = 0, y = 0) {
@@ -13,64 +17,29 @@ function n(id: string, label = "Node", x = 0, y = 0) {
 }
 
 function makeFlow(nodes: CanvasNode[], edges: CanvasEdge[]) {
-  const state = { nodes: [...nodes], edges: [...edges] };
-  const flow: AgentCanvasFlow = {
+  let flow = createSnapshotFlow({ nodes, edges });
+  const state = {
     get nodes() {
-      return state.nodes;
+      return flow.nodes;
     },
     get edges() {
-      return state.edges;
-    },
-    addNodes: (added) => {
-      state.nodes = [...state.nodes, ...added];
-    },
-    addEdges: (added) => {
-      state.edges = [...state.edges, ...added];
-    },
-    updateNode: (id, partial) => {
-      state.nodes = state.nodes.map((node) =>
-        node.id === id ? ({ ...node, ...partial } as CanvasNode) : node,
-      );
-    },
-    updateEdge: (id, partial) => {
-      state.edges = state.edges.map((edge) =>
-        edge.id === id ? ({ ...edge, ...partial } as CanvasEdge) : edge,
-      );
-    },
-    removeNodes: (ids) => {
-      state.nodes = state.nodes.filter((node) => !ids.includes(node.id));
-    },
-    removeEdges: (ids) => {
-      state.edges = state.edges.filter((edge) => !ids.includes(edge.id));
+      return flow.edges;
     },
   };
-
-  return { flow, state };
+  return { flow, state, reset: (next: SnapshotFlow) => (flow = next) };
 }
 
 function deps(
-  flow: AgentCanvasFlow,
+  flow: SnapshotFlow,
   saved: { snapshot?: unknown },
 ): AgentGraphEditDependencies {
   return {
-    authorizeDiagram: async () => ({
-      ok: true as const,
-      role: "owner" as const,
-      userId: "u1",
-      ownerId: "u1",
-    }),
-    mutateFlow: async (
-      _diagramId: string,
-      callback: (f: AgentCanvasFlow) => void | Promise<void>,
-    ) => {
+    authorizeDiagram: async () => ({ ok: true as const, userId: "u1" }),
+    mutateCanvas: async (_diagramId, callback) => {
       await callback(flow);
+      // Mirrors `mutateStoredCanvas`: only a changed canvas is written.
+      if (flow.hasChanged) saved.snapshot = flow.toSnapshot();
     },
-    saveCanvasSnapshot: async (_diagramId: string, snapshot: unknown) => {
-      saved.snapshot = snapshot;
-    },
-    setAiPresence: async () => {},
-    clearAiPresence: async () => {},
-    sleep: async () => {},
   };
 }
 
@@ -328,13 +297,13 @@ async function checkMalformedBodyIs400(): Promise<void> {
   assert.equal(response.status, 400);
 }
 
-async function checkMutateFlowFailureIs502(): Promise<void> {
+async function checkStoreFailureIs502(): Promise<void> {
   const start = materializeAgentGraph({ version: 1, nodes: [n("web")], edges: [] });
   const { flow } = makeFlow([...start.nodes], [...start.edges]);
   const dependencies: AgentGraphEditDependencies = {
     ...deps(flow, {}),
-    mutateFlow: async () => {
-      throw new Error("Liveblocks write failed");
+    mutateCanvas: async () => {
+      throw new Error("blob unavailable");
     },
   };
 
@@ -350,31 +319,25 @@ async function checkMutateFlowFailureIs502(): Promise<void> {
   assert.equal(response.status, 502);
 }
 
-async function checkPersistenceFailureAfterApplyIs502(): Promise<void> {
+async function checkVersionConflictIs409(): Promise<void> {
   const start = materializeAgentGraph({ version: 1, nodes: [n("web")], edges: [] });
-  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
-  const dependencies: AgentGraphEditDependencies = {
-    ...deps(flow, {}),
-    saveCanvasSnapshot: async () => {
-      throw new Error("Blob upload failed");
-    },
-  };
-
+  const { flow } = makeFlow([...start.nodes], [...start.edges]);
   const response = await handleAgentGraphEditPost(
     request({
       fingerprint: canvasFingerprint(start),
-      graph: { version: 1, nodes: [n("web"), n("db")], edges: [] },
+      graph: { version: 1, nodes: [n("web"), n("db", "DB", 280, 0)], edges: [] },
     }),
     "p1",
-    dependencies,
+    {
+      ...deps(flow, {}),
+      mutateCanvas: async () => {
+        throw new CanvasVersionConflictError("p1");
+      },
+    },
   );
 
-  assert.equal(response.status, 502);
-  assert.deepEqual(
-    state.nodes.map((node) => node.id).sort(),
-    ["db", "web"],
-    "the flow write already landed even though persistence failed",
-  );
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), { error: "The canvas changed since it was read" });
 }
 
 /**
@@ -508,8 +471,8 @@ async function main(): Promise<void> {
   await checkReusingAnOpaqueIdIsRefusedAndNothingMutates();
   await checkNonCollidingIdAlongsideOpaqueNodeStillSucceeds();
   await checkMalformedBodyIs400();
-  await checkMutateFlowFailureIs502();
-  await checkPersistenceFailureAfterApplyIs502();
+  await checkStoreFailureIs502();
+  await checkVersionConflictIs409();
 
   console.log("verify-agent-graph-edit: ok");
 }

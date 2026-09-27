@@ -8,14 +8,15 @@
  */
 
 /**
- * The agent's identity in the room's presence.
- *
- * Deliberately not a Clerk ID — `useCollaborators` filters the current user out
- * by Clerk ID, and this must never match anyone.
+ * The agent's identity on the canvas. Deliberately not a Clerk ID, so it can
+ * never match a user.
  */
 export const AI_USER_ID = "truss-ai-architect";
 
 export const AI_USER_NAME = "AI Architect";
+
+/** `--accent-ai`, as a raw hex because inline styles need a value, not a token. */
+export const AI_USER_COLOR = "#6457f9";
 
 /**
  * How long the agent cursor takes to travel to its next target, in
@@ -33,9 +34,9 @@ export const AI_CURSOR_SWEEP_MS = 420;
  * Padding between the cursor arriving and the node landing.
  *
  * Deliberately asymmetric. A node that lands slightly late reads as "the cursor
- * placed that"; one that lands early reads as broken. This absorbs the
- * variability in a presence write plus Liveblocks' 200ms storage flush
- * debounce, so it is a floor rather than a delay to minimise.
+ * placed that"; one that lands early reads as broken. This absorbs React batching
+ * the cursor move and the node landing, so it is a floor rather than a delay to
+ * minimise.
  */
 export const AI_CURSOR_ARRIVAL_PAD_MS = 120;
 
@@ -54,9 +55,7 @@ const MAX_BUILD_STEP_MS = 900;
 /**
  * The delay between one action landing and the next cursor move.
  *
- * Floored at `MIN_BUILD_STEP_MS` because Liveblocks flushes storage ops on a
- * 200ms debounce: below that, several actions coalesce into one broadcast and
- * the reveal stops being per-action no matter what this returns.
+ * Floored at `MIN_BUILD_STEP_MS` so each action stays visible as its own step.
  */
 export function getBuildStepMs(actionCount: number): number {
   if (actionCount <= 0) {

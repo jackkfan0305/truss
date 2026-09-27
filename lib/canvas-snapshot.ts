@@ -42,7 +42,10 @@ export interface CanvasSnapshot {
 export const MAX_SNAPSHOT_NODES = 2000;
 export const MAX_SNAPSHOT_EDGES = 4000;
 
-/** Snapshots are keyed by diagram, so a save overwrites its own predecessor. */
+/**
+ * The stable prefix for a diagram's snapshots. Each write adds a random
+ * suffix, so a pointer never names a file that a later write overwrote.
+ */
 export function canvasBlobPath(diagramId: string): string {
   return `canvas/${diagramId}.json`;
 }
@@ -202,4 +205,46 @@ export function parseCanvasSnapshot(value: unknown): CanvasSnapshot | null {
  */
 export function serializeCanvasSnapshot(snapshot: CanvasSnapshot): string {
   return JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges });
+}
+
+/** A write carried a version the stored canvas has already moved past. */
+export class CanvasVersionConflictError extends Error {
+  constructor(diagramId: string) {
+    super(`Canvas for ${diagramId} changed since it was read`);
+    this.name = "CanvasVersionConflictError";
+  }
+}
+
+/** A non-negative integer, from JSON or from a query string. */
+export function parseCanvasVersion(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  return typeof value === "string" && /^\d+$/.test(value)
+    ? parseCanvasVersion(Number(value))
+    : null;
+}
+
+/** The PUT body: the version the client read, plus the snapshot to store. */
+export function parseCanvasWrite(
+  body: unknown,
+): { version: number; snapshot: CanvasSnapshot } | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const version = parseCanvasVersion(body.version);
+  const snapshot = parseCanvasSnapshot(body.canvas);
+
+  return version === null || !snapshot ? null : { version, snapshot };
+}
+
+/**
+ * The snapshot exactly as it would be stored. React Flow adds `measured`,
+ * `selected` and `dragging` to nodes it renders; comparing raw state would
+ * treat opening an editor as an edit.
+ */
+export function canonicalCanvasPayload(snapshot: CanvasSnapshot): string {
+  return serializeCanvasSnapshot(parseCanvasSnapshot(snapshot) ?? snapshot);
 }

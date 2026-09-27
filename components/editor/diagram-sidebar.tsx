@@ -1,17 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { FolderOpen, Pencil, Plus, Trash2, Users } from "lucide-react"
+import { FolderOpen, Pencil, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { DiagramSummary } from "@/types/diagram"
 
 interface DiagramSidebarProps {
   isOpen: boolean
   ownedDiagrams: DiagramSummary[]
-  sharedDiagrams: DiagramSummary[]
   onCreateDiagram: () => void
   onRenameDiagram: (diagram: DiagramSummary) => void
   onDeleteDiagram: (diagram: DiagramSummary) => void
@@ -23,7 +21,6 @@ interface DiagramSidebarProps {
 export function DiagramSidebar({
   isOpen,
   ownedDiagrams,
-  sharedDiagrams,
   onCreateDiagram,
   onRenameDiagram,
   onDeleteDiagram,
@@ -47,43 +44,22 @@ export function DiagramSidebar({
         <h2 className="text-sm font-medium text-copy-primary">Diagrams</h2>
       </div>
 
-      <Tabs defaultValue="mine" className="min-h-0 flex-1 max-sm:pt-8">
-        <TabsList className="w-full">
-          <TabsTrigger value="mine">My Diagrams</TabsTrigger>
-          <TabsTrigger value="shared">Shared</TabsTrigger>
-        </TabsList>
-        <TabsContent value="mine">
-          {ownedDiagrams.length === 0 ? (
-            <EmptyState
-              icon={<FolderOpen className="h-8 w-8 text-copy-faint" />}
-              message="No diagrams yet"
-            />
-          ) : (
-            <DiagramList
-              label="My diagrams"
-              diagrams={ownedDiagrams}
-              activeDiagramId={activeDiagramId}
-              onRename={onRenameDiagram}
-              onDelete={onDeleteDiagram}
-            />
-          )}
-        </TabsContent>
-        <TabsContent value="shared">
-          {sharedDiagrams.length === 0 ? (
-            <EmptyState
-              icon={<Users className="h-8 w-8 text-copy-faint" />}
-              message="Nothing shared with you"
-            />
-          ) : (
-            // No rename/delete: collaborators do not own these diagrams.
-            <DiagramList
-              label="Shared with me"
-              diagrams={sharedDiagrams}
-              activeDiagramId={activeDiagramId}
-            />
-          )}
-        </TabsContent>
-      </Tabs>
+      <div className="min-h-0 flex-1 max-sm:pt-8">
+        {ownedDiagrams.length === 0 ? (
+          <EmptyState
+            icon={<FolderOpen className="h-8 w-8 text-copy-faint" />}
+            message="No diagrams yet"
+          />
+        ) : (
+          <DiagramList
+            label="My diagrams"
+            diagrams={ownedDiagrams}
+            activeDiagramId={activeDiagramId}
+            onRename={onRenameDiagram}
+            onDelete={onDeleteDiagram}
+          />
+        )}
+      </div>
 
       <Button className="w-full" onClick={onCreateDiagram}>
         <Plus className="h-4 w-4" />

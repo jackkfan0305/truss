@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { getSmoothStepPath, Position } from "@xyflow/react";
 
 import {
   SHAPE_DRAG_MIME,
@@ -20,6 +21,11 @@ import {
 import { resolveShortcut, type ShortcutKeys } from "../lib/canvas-shortcuts";
 import { dedupeByUser, getInitials } from "../lib/presence";
 import {
+  getParallelEdgeLabelOffset,
+  positionParallelEdgeLabel,
+} from "../lib/edge-label-layout";
+import { computeEdgeRoutes } from "../lib/canvas-edge-route";
+import {
   MAX_SNAPSHOT_NODES,
   canvasBlobPath,
   parseCanvasSnapshot,
@@ -35,6 +41,7 @@ import {
   NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
   NODE_SHAPES,
+  type NodeShape,
 } from "../types/canvas";
 
 /**
@@ -239,6 +246,375 @@ function checkEdgeDefaultsAreConsistent() {
 }
 
 /**
+ * The arrowhead survives a server-side write.
+ *
+ * `types/canvas.ts` is imported by the AI write path, which runs in a server
+ * bundle. @xyflow/react carries "use client", so any *value* read from it there
+ * is a client reference rather than the real export: `MarkerType.ArrowClosed`
+ * came back `undefined`, every generated edge stored a marker with no `type`,
+ * and React Flow built no arrowhead symbol for it. Only a type-only import is
+ * safe in this module.
+ */
+function checkMarkerSurvivesServerBundling() {
+  assert.equal(
+    CANVAS_EDGE_MARKER.type,
+    "arrowclosed",
+    "generated edges carry a marker type React Flow can resolve",
+  );
+
+  const source = readFileSync(
+    new URL("../types/canvas.ts", import.meta.url),
+    "utf8",
+  );
+
+  for (const line of source.split("\n")) {
+    if (!line.includes('from "@xyflow/react"')) {
+      continue;
+    }
+
+    assert.match(
+      line,
+      /^import type /,
+      "types/canvas.ts reads no runtime value from the client-only React Flow package",
+    );
+  }
+}
+
+/** Parallel relationships keep every label visible, including reverse flows. */
+function checkParallelEdgeLabelsUseSeparateLanes() {
+  const edges = [
+    { id: "request", source: "client", target: "api" },
+    { id: "response", source: "api", target: "client" },
+    { id: "security", source: "client", target: "api" },
+  ];
+  const offsets = edges
+    .map((edge) => getParallelEdgeLabelOffset(edge, edges))
+    .toSorted((a, b) => a - b);
+
+  assert.equal(
+    new Set(offsets).size,
+    edges.length,
+    "labels between the same two nodes occupy separate lanes",
+  );
+
+  for (let index = 1; index < offsets.length; index += 1) {
+    assert.ok(
+      offsets[index] - offsets[index - 1] >= 24,
+      "adjacent lanes clear the measured height of an edge-label pill",
+    );
+  }
+}
+
+/** Route lanes and label lanes must reinforce each other after rendering. */
+function checkParallelEdgeRenderedLabelsStayClear() {
+  const nodes = [node("client", 0, 0), node("api", 600, 0)];
+  const edges = [
+    { id: "z", source: "client", target: "api" },
+    { id: "m", source: "api", target: "client" },
+    { id: "a", source: "client", target: "api" },
+  ];
+  const routes = computeEdgeRoutes(nodes as never, edges as never);
+  const renderedLabelYs = edges
+    .map((edge) => {
+      const route = routes.get(edge.id)!;
+      const [, , labelY] = getSmoothStepPath({
+        sourceX: route.source.x,
+        sourceY: route.source.y,
+        sourcePosition:
+          route.source.side === "right" ? Position.Right : Position.Left,
+        targetX: route.target.x,
+        targetY: route.target.y,
+        targetPosition:
+          route.target.side === "right" ? Position.Right : Position.Left,
+        centerX: route.centerX,
+        centerY: route.centerY,
+      });
+
+      return labelY + getParallelEdgeLabelOffset(edge, edges);
+    })
+    .toSorted((a, b) => a - b);
+
+  for (let index = 1; index < renderedLabelYs.length; index += 1) {
+    assert.ok(
+      renderedLabelYs[index] - renderedLabelYs[index - 1] >= 24,
+      "shuffled and reverse parallel edges keep rendered label pills clear",
+    );
+  }
+}
+
+/** Narrow vertical routes stagger by pill height, not by unknown label width. */
+function checkVerticalParallelEdgeLabelsStayClear() {
+  const nodes = [
+    { ...node("top", 0, 0), width: 72, height: 48 },
+    { ...node("bottom", 0, 400), width: 72, height: 48 },
+  ];
+  const edges = [
+    { id: "z", source: "top", target: "bottom" },
+    { id: "m", source: "bottom", target: "top" },
+    { id: "a", source: "top", target: "bottom" },
+  ];
+  const routes = computeEdgeRoutes(nodes as never, edges as never);
+  const renderedLabelYs = edges
+    .map((edge) => {
+      const route = routes.get(edge.id)!;
+      const [, labelX, labelY] = getSmoothStepPath({
+        sourceX: route.source.x,
+        sourceY: route.source.y,
+        sourcePosition:
+          route.source.side === "bottom" ? Position.Bottom : Position.Top,
+        targetX: route.target.x,
+        targetY: route.target.y,
+        targetPosition:
+          route.target.side === "bottom" ? Position.Bottom : Position.Top,
+        centerX: route.centerX,
+        centerY: route.centerY,
+      });
+
+      return positionParallelEdgeLabel({
+        labelX,
+        labelY,
+        offset: getParallelEdgeLabelOffset(edge, edges),
+      }).y;
+    })
+    .toSorted((a, b) => a - b);
+
+  for (let index = 1; index < renderedLabelYs.length; index += 1) {
+    assert.ok(
+      renderedLabelYs[index] - renderedLabelYs[index - 1] >= 24,
+      "vertical edge labels clear each other by the pill height",
+    );
+  }
+}
+
+/** Generated edge lanes meet the visible outline of every supported shape. */
+function checkGeneratedEdgesMeetEveryShapeOutline() {
+  for (const shape of NODE_SHAPES) {
+    const edges = ["a", "m", "z"].map((id) => ({
+      id,
+      source: "source",
+      target: "target",
+    }));
+    const horizontalNodes = [
+      resizedShapeNode("source", shape, 0, 0),
+      resizedShapeNode("target", shape, 500, 0),
+    ];
+    const horizontal = computeEdgeRoutes(
+      horizontalNodes as never,
+      edges as never,
+    ).get("a")!;
+
+    assertEndpointOnShape(horizontal.source, horizontalNodes[0], "right");
+    assertEndpointOnShape(horizontal.target, horizontalNodes[1], "left");
+
+    const verticalNodes = [
+      resizedShapeNode("source", shape, 0, 0),
+      resizedShapeNode("target", shape, 0, 500),
+    ];
+    const vertical = computeEdgeRoutes(
+      verticalNodes as never,
+      edges as never,
+    ).get("a")!;
+
+    assertEndpointOnShape(vertical.source, verticalNodes[0], "bottom");
+    assertEndpointOnShape(vertical.target, verticalNodes[1], "top");
+  }
+}
+
+function assertEndpointOnShape(
+  endpoint: { x: number; y: number; side: string },
+  shapeNode: ReturnType<typeof resizedShapeNode>,
+  side: "top" | "right" | "bottom" | "left",
+) {
+  const centerX = shapeNode.position.x + shapeNode.width / 2;
+  const centerY = shapeNode.position.y + shapeNode.height / 2;
+  const offset =
+    side === "left" || side === "right"
+      ? endpoint.y - centerY
+      : endpoint.x - centerX;
+  const radius = expectedShapeRadius(
+    shapeNode.data.shape,
+    shapeNode,
+    side,
+    offset,
+  );
+  const expected =
+    side === "left"
+      ? { x: centerX - radius, y: centerY + offset }
+      : side === "right"
+        ? { x: centerX + radius, y: centerY + offset }
+        : side === "top"
+          ? { x: centerX + offset, y: centerY - radius }
+          : { x: centerX + offset, y: centerY + radius };
+
+  assert.equal(endpoint.side, side, `${shapeNode.data.shape} uses ${side}`);
+  assert.ok(
+    Math.abs(endpoint.x - expected.x) < 0.001 &&
+      Math.abs(endpoint.y - expected.y) < 0.001,
+    `${shapeNode.data.shape} ${side} endpoint meets its resized outline`,
+  );
+}
+
+function expectedShapeRadius(
+  shape: NodeShape,
+  box: { width: number; height: number },
+  side: "top" | "right" | "bottom" | "left",
+  offset: number,
+): number {
+  const horizontalSide = side === "left" || side === "right";
+  const alongRadius = horizontalSide ? box.width / 2 : box.height / 2;
+  const crossRadius = horizontalSide ? box.height / 2 : box.width / 2;
+  const distance = Math.abs(offset);
+  const ellipseFactor = (radius: number) =>
+    Math.sqrt(Math.max(0, 1 - (distance / radius) ** 2));
+
+  switch (shape) {
+    case "rectangle":
+      return alongRadius;
+    case "diamond":
+      return alongRadius * (1 - distance / crossRadius);
+    case "circle":
+      return alongRadius * ellipseFactor(crossRadius);
+    case "pill": {
+      const radius = Math.min(box.width / 2, box.height / 2);
+      const cornerDistance = Math.max(0, distance - (crossRadius - radius));
+
+      return (
+        alongRadius -
+        radius +
+        Math.sqrt(Math.max(0, radius ** 2 - cornerDistance ** 2))
+      );
+    }
+    case "hexagon": {
+      const notch = box.width * 0.2;
+
+      if (horizontalSide) {
+        return alongRadius - notch * (distance / crossRadius);
+      }
+
+      return distance <= crossRadius - notch
+        ? alongRadius
+        : alongRadius * ((crossRadius - distance) / notch);
+    }
+    case "cylinder": {
+      const capRadius = Math.min(box.height * 0.16, box.height / 2);
+
+      if (!horizontalSide) {
+        return alongRadius - capRadius + capRadius * ellipseFactor(crossRadius);
+      }
+
+      const capDistance = Math.max(0, distance - (crossRadius - capRadius));
+
+      return (
+        alongRadius * Math.sqrt(Math.max(0, 1 - (capDistance / capRadius) ** 2))
+      );
+    }
+  }
+}
+
+/**
+ * A fan-out is the case the fixed top-handle default handles worst: one node
+ * feeding a column of others sends every line out of, and into, the same point.
+ */
+function checkFanOutEdgesLeaveOnSeparateLanes() {
+  const nodes = [
+    node("web", 0, 300),
+    node("catalog", 600, 0),
+    node("uploads", 600, 300),
+    node("content", 600, 600),
+  ];
+  const edges = ["catalog", "uploads", "content"].map((target) => ({
+    id: `web-${target}`,
+    source: "web",
+    target,
+  }));
+  const routes = computeEdgeRoutes(nodes as never, edges as never);
+  const fanOut = edges.map((edge) => routes.get(edge.id)!);
+
+  assert.equal(fanOut.length, 3);
+
+  for (const route of fanOut) {
+    assert.equal(
+      route.source.side,
+      "right",
+      "a target to the right is reached sideways",
+    );
+    assert.equal(route.target.side, "left", "and arrives on the target's left");
+  }
+
+  assert.equal(
+    new Set(fanOut.map((route) => route.source.y)).size,
+    fanOut.length,
+    "each line leaves the source on its own lane",
+  );
+  assert.equal(
+    new Set(fanOut.map((route) => route.centerX)).size,
+    fanOut.length,
+    "and turns in its own corridor, so the lanes do not merge again",
+  );
+
+  // Lanes run in the order the targets are stacked, so no two lines swap places
+  // between leaving and arriving.
+  const byTarget = [...fanOut].sort((a, b) => a.target.y - b.target.y);
+  assert.deepEqual(
+    byTarget.map((route) => route.source.y),
+    [...byTarget.map((route) => route.source.y)].sort((a, b) => a - b),
+    "lanes keep the order of the column they run to",
+  );
+}
+
+/** A hand-drawn edge names its handles, and that choice outranks the router. */
+function checkHandPickedHandlesAreLeftAlone() {
+  const routes = computeEdgeRoutes(
+    [node("a", 0, 0), node("b", 400, 0)] as never,
+    [
+      {
+        id: "chosen",
+        source: "a",
+        target: "b",
+        sourceHandle: "bottom",
+        targetHandle: "top",
+      },
+      { id: "auto", source: "a", target: "b" },
+    ] as never,
+  );
+
+  assert.equal(routes.get("chosen"), undefined);
+  assert.ok(routes.get("auto"));
+}
+
+function node(id: string, x: number, y: number) {
+  return {
+    id,
+    type: CANVAS_NODE_TYPE,
+    position: { x, y },
+    width: 180,
+    height: 100,
+    data: { label: id, color: DEFAULT_NODE_COLOR, shape: DEFAULT_NODE_SHAPE },
+  };
+}
+
+function shapedNode(id: string, shape: NodeShape, x: number, y: number) {
+  const { width, height } = NODE_DEFAULT_SIZES[shape];
+
+  return {
+    id,
+    type: CANVAS_NODE_TYPE,
+    position: { x, y },
+    width,
+    height,
+    data: { label: id, color: DEFAULT_NODE_COLOR, shape },
+  };
+}
+
+function resizedShapeNode(id: string, shape: NodeShape, x: number, y: number) {
+  return {
+    ...shapedNode(id, shape, x, y),
+    width: 120,
+    height: 72,
+  };
+}
+
+/**
  * The connection snap radius (16-edge-behavior). Handles sit at the midpoint of
  * each side, so the furthest a release inside a node can be from its nearest
  * handle is `min(width, height) / 2` — from the dead centre to whichever pair
@@ -336,7 +712,11 @@ function checkTemplatesAreWellFormed() {
     for (const edge of template.edges) {
       assert.ok(ids.has(edge.source), `${edge.id} has a real source`);
       assert.ok(ids.has(edge.target), `${edge.id} has a real target`);
-      assert.notEqual(edge.source, edge.target, `${edge.id} is not a self-loop`);
+      assert.notEqual(
+        edge.source,
+        edge.target,
+        `${edge.id} is not a self-loop`,
+      );
     }
 
     const edgeIds = template.edges.map((edge) => edge.id);
@@ -440,7 +820,11 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
     ),
   );
 
-  assert.equal(roundTripped?.nodes.length, 1, "a valid node survives a round trip");
+  assert.equal(
+    roundTripped?.nodes.length,
+    1,
+    "a valid node survives a round trip",
+  );
   assert.deepEqual(
     roundTripped?.nodes[0]?.data,
     { label: "API", color: "blue", shape: "rectangle" },
@@ -448,7 +832,16 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
   );
 
   // Anything that is not a `{ nodes, edges }` envelope is rejected outright.
-  for (const junk of [null, undefined, 42, "{}", [], {}, { nodes: [] }, { edges: [] }]) {
+  for (const junk of [
+    null,
+    undefined,
+    42,
+    "{}",
+    [],
+    {},
+    { nodes: [] },
+    { edges: [] },
+  ]) {
     assert.equal(
       parseCanvasSnapshot(junk),
       null,
@@ -469,12 +862,25 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
     edges: [],
   });
 
-  assert.equal(partial?.nodes.length, 1, "malformed and duplicate nodes are dropped");
-  assert.equal(partial?.nodes[0]?.data.label, "API", "the first node of an ID wins");
+  assert.equal(
+    partial?.nodes.length,
+    1,
+    "malformed and duplicate nodes are dropped",
+  );
+  assert.equal(
+    partial?.nodes[0]?.data.label,
+    "API",
+    "the first node of an ID wins",
+  );
 
   // An unknown colour or shape degrades rather than failing the snapshot.
   const degraded = parseCanvasSnapshot({
-    nodes: [{ ...validNode, data: { label: "x", color: "chartreuse", shape: "blob" } }],
+    nodes: [
+      {
+        ...validNode,
+        data: { label: "x", color: "chartreuse", shape: "blob" },
+      },
+    ],
     edges: [],
   });
 
@@ -485,7 +891,12 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
   const withEdges = parseCanvasSnapshot({
     nodes: [validNode, { ...validNode, id: "node-2" }],
     edges: [
-      { id: "edge-1", source: "node-1", target: "node-2", data: { label: "calls" } },
+      {
+        id: "edge-1",
+        source: "node-1",
+        target: "node-2",
+        data: { label: "calls" },
+      },
       { id: "edge-2", source: "node-1", target: "missing" },
       { id: "edge-3", source: "ghost", target: "node-2" },
     ],
@@ -572,6 +983,13 @@ function main() {
   checkMimeTypeIsSpecific();
   checkShapeGeometryStaysInsideTheNode();
   checkEdgeDefaultsAreConsistent();
+  checkMarkerSurvivesServerBundling();
+  checkFanOutEdgesLeaveOnSeparateLanes();
+  checkHandPickedHandlesAreLeftAlone();
+  checkParallelEdgeLabelsUseSeparateLanes();
+  checkParallelEdgeRenderedLabelsStayClear();
+  checkVerticalParallelEdgeLabelsStayClear();
+  checkGeneratedEdgesMeetEveryShapeOutline();
   checkSnapRadiusCoversEveryNodeCentre();
   checkShortcutsMatchTheSpecTable();
   checkTemplatesAreWellFormed();

@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "pretest": "npm run generate",
     "test": "npm run verify:unit",
-    "verify:unit": "tsx scripts/verify-env-keys.ts && tsx scripts/verify-canvas.ts && tsx scripts/verify-canvas-drawing.ts && tsx scripts/verify-diagram-api.ts && tsx scripts/verify-editor-controls.tsx && tsx scripts/verify-agent-graph.ts && tsx scripts/verify-agent-graph-read.ts && tsx scripts/verify-agent-graph-diff.ts && tsx scripts/verify-agent-graph-import.ts && tsx scripts/verify-agent-graph-edit.ts && tsx scripts/verify-agent-launch.ts && tsx scripts/verify-agent-launch-page.tsx && tsx scripts/verify-agent-launch-editor.tsx && tsx scripts/verify-agent-pick-page.tsx && tsx scripts/verify-agent-link-page.tsx && node scripts/verify-agent-loopback.mjs && node scripts/verify-truss-diagram-core.mjs && node scripts/verify-truss-diagram-mcp-server.mjs",
+    "verify:unit": "tsx scripts/verify-env-keys.ts && tsx scripts/verify-canvas.ts && tsx scripts/verify-canvas-drawing.ts && tsx scripts/verify-diagram-layout.ts && tsx scripts/verify-diagram-api.ts && tsx scripts/verify-editor-controls.tsx && tsx scripts/verify-diagram-rendering.tsx && tsx scripts/verify-agent-graph.ts && tsx scripts/verify-agent-graph-read.ts && tsx scripts/verify-agent-graph-diff.ts && tsx scripts/verify-agent-graph-import.ts && tsx scripts/verify-agent-graph-edit.ts && tsx scripts/verify-agent-launch.ts && tsx scripts/verify-agent-launch-page.tsx && tsx scripts/verify-agent-launch-editor.tsx && tsx scripts/verify-agent-pick-page.tsx && tsx scripts/verify-agent-link-page.tsx && node scripts/verify-agent-loopback.mjs && node scripts/verify-truss-diagram-core.mjs && node scripts/verify-truss-diagram-mcp-server.mjs",
     "verify:integration": "tsx scripts/verify-liveblocks.ts && tsx scripts/verify-prisma.ts && tsx scripts/verify-diagram-data.ts && tsx scripts/verify-agent-token.ts",
     "doctor": "npx react-doctor@latest",
     "skills:link": "mkdir -p .claude/skills && for s in .agents/skills/*/; do ln -sfn \"../../$s\" \".claude/skills/$(basename \"$s\")\"; done"
@@ -35,6 +35,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
+    "elkjs": "0.12.0",
     "lucide-react": "^1.27.0",
     "markdown-it": "^15.0.0",
     "next": "16.2.12",

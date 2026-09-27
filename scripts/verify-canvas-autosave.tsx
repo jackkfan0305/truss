@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { JSDOM } from "jsdom";
-import { act, useState } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { useCanvasAutosave, type CanvasAutosave } from "../hooks/use-canvas-autosave";
@@ -21,8 +21,15 @@ const A = JSON.stringify({ nodes: [{ id: "a" }], edges: [] });
 const B = JSON.stringify({ nodes: [{ id: "b" }], edges: [] });
 const C = JSON.stringify({ nodes: [{ id: "c" }], edges: [] });
 
+function ignoreStatus() {}
+
 let autosave!: CanvasAutosave;
 let setPayload!: (payload: string) => void;
+
+function expose(nextAutosave: CanvasAutosave, nextSetPayload: (payload: string) => void) {
+  autosave = nextAutosave;
+  setPayload = nextSetPayload;
+}
 
 function Harness({
   expose,
@@ -30,19 +37,17 @@ function Harness({
   expose: (autosave: CanvasAutosave, setPayload: (payload: string) => void) => void;
 }) {
   const [payload, setPayload] = useState(A);
-  expose(useCanvasAutosave("diagram", payload, 1, () => {}), setPayload);
+  const autosave = useCanvasAutosave("diagram", payload, 1, ignoreStatus);
+
+  useEffect(() => expose(autosave, setPayload), [autosave, expose]);
+
   return null;
 }
 
 async function main() {
   const root = createRoot(document.getElementById("root")!);
   await act(async () => root.render(
-      <Harness
-        expose={(nextAutosave, nextSetPayload) => {
-          autosave = nextAutosave;
-          setPayload = nextSetPayload;
-        }}
-      />,
+      <Harness expose={expose} />,
     ));
 
   // An agent edit that only updates existing items replays nothing, so `run`

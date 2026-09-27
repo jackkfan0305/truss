@@ -82,13 +82,6 @@ function parentDivContaining(html: string, text: string): string {
   return html.slice(tagStart, tagEnd + 1)
 }
 
-function assertFloatingChrome(button: string): void {
-  assert.match(button, /border-surface-border/)
-  assert.match(button, /bg-surface\/80/)
-  assert.match(button, /shadow-lg/)
-  assert.match(button, /backdrop-blur-xl/)
-}
-
 const closedDiagramsToggle = controlledButton(closedHtml, "diagrams-sidebar")
 const openDiagramsToggle = controlledButton(
   diagramsOpenHtml,
@@ -104,7 +97,8 @@ const closedDiagramSidebar = controlledRegion(
 )
 const closedDiagramTitle = parentDivContaining(closedHtml, "Checkout API")
 
-assertFloatingChrome(closedDiagramsToggle)
+// The sidebar toggle is a plain icon button, not a floating chip.
+assert.doesNotMatch(closedDiagramsToggle, /border-surface-border|backdrop-blur-xl/)
 assert.doesNotMatch(
   closedHtml,
   /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="diagrams-sidebar"/
@@ -113,15 +107,17 @@ assert.match(closedDiagramsToggle, /top-3/)
 assert.match(closedDiagramsToggle, /left-3/)
 assert.ok(
   openDiagramsToggle.includes(
-    "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
-  )
+    "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)]"
+  ),
+  "the open toggle slides to the panel's inner edge on a transform"
 )
 assert.match(closedDiagramsToggle, /aria-expanded="false"/)
 assert.match(closedDiagramsToggle, /aria-label="Open diagrams sidebar"/)
 assert.match(openDiagramsToggle, /aria-expanded="true"/)
 assert.match(openDiagramsToggle, /aria-label="Close diagrams sidebar"/)
-assert.match(closedHtml, /lucide-panel-left-open/)
-assert.match(diagramsOpenHtml, /lucide-panel-left-close/)
+// Hugeicons SidebarLeftIcon, the same glyph open or closed (shadcn's pattern).
+assert.match(closedHtml, /d="M9\.5 3L9\.5 21"/)
+assert.match(diagramsOpenHtml, /d="M9\.5 3L9\.5 21"/)
 
 // No right-hand toggle survives the AI removal (ADR 0001).
 assert.doesNotMatch(closedHtml, /lucide-panel-right-open|lucide-panel-right-close/)

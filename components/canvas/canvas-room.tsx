@@ -9,6 +9,7 @@ import {
 } from "@liveblocks/react/suspense";
 
 import { Canvas } from "@/components/canvas/canvas";
+import { TrussLoader } from "@/components/ui/truss-loader";
 
 interface CanvasRoomProps {
   /**
@@ -69,7 +70,11 @@ export function CanvasSurface({
     // permanent rather than an error.
     <ConnectionGuard>
       <ClientSideSuspense
-        fallback={<CanvasStatus>Connecting to the canvas…</CanvasStatus>}
+        fallback={
+          <div className="flex h-full w-full items-center justify-center">
+            <TrussLoader label="Connecting to the canvas" />
+          </div>
+        }
       >
         <Canvas
           diagramId={diagramId}

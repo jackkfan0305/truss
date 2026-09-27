@@ -8,6 +8,14 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Editor UI polish merged onto main (2026-09-24). `TrussLoader` replaces
+  the text-only app boot, canvas connect and agent entry states and backs
+  `app/editor/[roomId]/loading.tsx`. The diagrams sidebar and the top chips
+  share a solid `bg-elevated` surface, the sidebar slides on `ease-smooth-out`
+  (400ms open, 350ms close), its toggle is a plain Hugeicons button that rides
+  with the panel, and diagram row actions reveal on hover. Agent pages show a
+  check when done. This branch's AI chat overhaul and its in-route
+  orchestrator were dropped in the merge, per ADR 0001 (#39).
 - `readable-diagrams` complete. Generated diagrams are laid out on the server by
   ELK and rendered from saved geometry. `layoutDiagram` sizes every block from
   its own label (the shape's default size is a floor, since the prompts now ask

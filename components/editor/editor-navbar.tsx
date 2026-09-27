@@ -1,12 +1,9 @@
 "use client"
 
 import type { ReactNode } from "react"
-import {
-  LayoutTemplate,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Share2,
-} from "lucide-react"
+import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
+import { HugeiconsIcon } from "@hugeicons/react"
+import { LayoutTemplate, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -37,10 +34,14 @@ interface EditorNavbarProps {
   className?: string
 }
 
+/** The sidebar's own surface, so the chrome reads as one family. */
 const FLOATING_SURFACE =
-  "rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
-const FLOATING_CONTROL =
-  "pointer-events-auto absolute top-3 z-10 rounded-xl border border-surface-border bg-surface/80 shadow-lg shadow-page/40 backdrop-blur-xl"
+  "rounded-xl border border-surface-border bg-elevated shadow-lg shadow-page/60"
+/**
+ * A plain icon button at the canvas corner. `top-3.5` centres the 36px button
+ * on the 40px chips beside it.
+ */
+const SIDEBAR_TOGGLE = "pointer-events-auto absolute top-3.5 z-10 rounded-lg"
 
 export function EditorNavbar({
   isSidebarOpen,
@@ -53,8 +54,6 @@ export function EditorNavbar({
   profile,
   className,
 }: EditorNavbarProps) {
-  const LeftToggleIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen
-
   return (
     <header
       className={cn(
@@ -71,24 +70,31 @@ export function EditorNavbar({
         aria-label={
           isSidebarOpen ? "Close diagrams sidebar" : "Open diagrams sidebar"
         }
+        // Rides along with the panel on a transform, on the panel's own
+        // timing, so it slides instead of jumping to the panel's inner edge.
         className={cn(
-          FLOATING_CONTROL,
+          SIDEBAR_TOGGLE,
+          "left-3 transition-transform ease-smooth-out motion-reduce:transition-none",
           isSidebarOpen
-            ? "left-[calc(min(18rem,calc(100vw-1.5rem))-3rem)]"
-            : "left-3"
+            ? "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)] duration-400"
+            : "translate-x-0 duration-350"
         )}
       >
-        <LeftToggleIcon className="size-5 text-copy-secondary" />
+        <HugeiconsIcon
+          icon={SidebarLeftIcon}
+          aria-hidden
+          className="size-5 text-copy-secondary"
+        />
       </Button>
 
       {diagramName && !isSidebarOpen ? (
         <div
           className={cn(
             FLOATING_SURFACE,
-            "pointer-events-auto absolute top-3 left-14 flex h-9 min-w-0 max-w-[calc(100%-7rem)] items-center px-3 sm:max-w-sm"
+            "pointer-events-auto absolute top-3 left-14 flex h-10 min-w-0 max-w-[calc(100%-7rem)] items-center px-4 sm:max-w-sm"
           )}
         >
-          <p className="min-w-0 truncate pr-2 text-sm font-medium text-copy-primary">
+          <p className="min-w-0 truncate text-sm font-medium text-copy-primary">
             {diagramName}
           </p>
         </div>
@@ -97,10 +103,11 @@ export function EditorNavbar({
       <div
         className={cn(
           FLOATING_SURFACE,
-          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-1 px-1 sm:top-3"
+          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 sm:top-3"
         )}
       >
         {saveStatus}
+        {saveStatus && (onOpenTemplates || onShare) ? <GroupDivider /> : null}
         {onOpenTemplates ? (
           <Button variant="ghost" size="sm" onClick={onOpenTemplates}>
             <LayoutTemplate className="size-4" />
@@ -113,9 +120,19 @@ export function EditorNavbar({
             <span className="hidden sm:inline">Share</span>
           </Button>
         ) : null}
-        {presence}
-        {profile}
+        {(saveStatus || onOpenTemplates || onShare) && (presence || profile) ? (
+          <GroupDivider />
+        ) : null}
+        <div className="flex items-center gap-2 pr-0.5 pl-1">
+          {presence}
+          {profile}
+        </div>
       </div>
     </header>
   )
+}
+
+/** Separates the save state, the actions and the people in the utility chip. */
+function GroupDivider() {
+  return <span aria-hidden className="mx-1 h-4 w-px bg-surface-border-subtle" />
 }

@@ -72,11 +72,13 @@ export function createSnapshotFlow(snapshot: CanvasSnapshot): SnapshotFlow {
       touch();
     },
     removeNodes: (ids) => {
-      nodes = nodes.filter((node) => !ids.includes(node.id));
+      const removed = new Set(ids);
+      nodes = nodes.filter((node) => !removed.has(node.id));
       touch();
     },
     removeEdges: (ids) => {
-      edges = edges.filter((edge) => !ids.includes(edge.id));
+      const removed = new Set(ids);
+      edges = edges.filter((edge) => !removed.has(edge.id));
       touch();
     },
     toSnapshot: () => ({ nodes, edges }),

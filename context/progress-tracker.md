@@ -74,6 +74,16 @@ Update this file whenever the current phase, active feature, or implementation s
   `scripts/verify-canvas-history.ts` added and registered in `package.json`.
   All gates pass: `typecheck`, `lint`, `verify:unit`.
 
+- Merged main (2026-09-27): agent edits and imports now run
+  `resolveAgentGraphLayout` inside `mutateCanvas`, the canvas renders through
+  `CanvasEdgeRouteProvider`, and the stored-canvas loading state uses
+  `TrussLoader`. Codex review fix: after an agent replay, `whilePaused` flushed
+  before React committed the restored snapshot. An update-only agent edit
+  therefore saved the pre-agent canvas under the adopted version and reverted
+  the edit on the server. The flush now runs in an effect after the resume
+  render. `scripts/verify-canvas-autosave.tsx` covers both the empty replay and
+  a local edit made during a replay.
+
 - Editor UI polish merged onto main (2026-09-24). `TrussLoader` replaces
   the text-only app boot, canvas connect and agent entry states and backs
   `app/editor/[roomId]/loading.tsx`. The diagrams sidebar and the top chips

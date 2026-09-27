@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { putCanvas } from "@/lib/canvas-client";
 
@@ -57,6 +57,8 @@ export function useCanvasAutosave(
   const isPaused = useRef(false);
   const hasConflict = useRef(false);
   const saveRef = useRef<((body: string) => Promise<void>) | null>(null);
+  const isFlushPending = useRef(false);
+  const [resumeCount, setResumeCount] = useState(0);
 
   useEffect(() => {
     latestPayload.current = payload;
@@ -118,6 +120,22 @@ export function useCanvasAutosave(
     }
   }, [save]);
 
+  /**
+   * The flush after a pause waits for the render `setResumeCount` triggers.
+   * `run` can resolve before React commits the canvas it applied, and flushing
+   * then would send the pre-agent payload under the adopted version, reverting
+   * the agent's edit on the server. That render includes every update queued
+   * before it, so `latestPayload` (set by the effect above) is current here.
+   */
+  useEffect(() => {
+    if (!isFlushPending.current) {
+      return;
+    }
+
+    isFlushPending.current = false;
+    saveNow();
+  }, [resumeCount, saveNow]);
+
   useEffect(() => {
     if (payload === savedPayload.current) {
       return;
@@ -145,7 +163,8 @@ export function useCanvasAutosave(
           await run();
         } finally {
           isPaused.current = false;
-          saveNow();
+          isFlushPending.current = true;
+          setResumeCount((count) => count + 1);
         }
       },
     }),

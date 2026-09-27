@@ -1,5 +1,6 @@
-import { MarkerType, type Edge, type EdgeMarker, type Node } from "@xyflow/react";
+import type { Edge, EdgeMarker, MarkerType, Node } from "@xyflow/react";
 import type { CSSProperties } from "react";
+import type { DiagramEdgeLayout } from "@/lib/diagram-route";
 
 /**
  * Shared canvas schema (11-base-canvas).
@@ -130,6 +131,7 @@ export type CanvasNodeData = {
  * Flow's `Edge<…>` constraint needs; an `interface` does not. */
 export type CanvasEdgeData = {
   label: string;
+  layout?: DiagramEdgeLayout;
 };
 
 export const CANVAS_NODE_TYPE = "canvasNode";
@@ -153,8 +155,15 @@ export const CANVAS_EDGE_STYLE: CSSProperties = {
   strokeLinecap: "round",
 };
 
+/*
+ * The literal, not `MarkerType.ArrowClosed`. @xyflow/react is a "use client"
+ * package, so in a server bundle every one of its exports is a client
+ * reference and reading the enum member yields `undefined` — which is how AI
+ * writes ended up storing a marker with no `type`, leaving React Flow with no
+ * symbol to build and every generated edge without an arrowhead.
+ */
 export const CANVAS_EDGE_MARKER: EdgeMarker = {
-  type: MarkerType.ArrowClosed,
+  type: "arrowclosed" as MarkerType,
   width: 16,
   height: 16,
   color: "var(--canvas-edge)",

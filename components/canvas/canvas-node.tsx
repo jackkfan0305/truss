@@ -174,7 +174,7 @@ export function CanvasNodeRenderer({
            */}
           <div className="relative w-full">
             <span
-              className={`line-clamp-3 break-words ${isEditing ? "invisible" : ""} ${data.label ? "" : "opacity-50"}`}
+              className={`break-words ${isEditing ? "invisible" : ""} ${data.label ? "" : "opacity-50"}`}
             >
               {data.label || LABEL_PLACEHOLDER}
             </span>

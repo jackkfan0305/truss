@@ -31,6 +31,7 @@ import {
 
 import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
+import { CanvasEdgeRouteProvider } from "@/components/canvas/canvas-edge-routes";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
@@ -312,7 +313,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       const payload = parseShapeDragPayload(
-        event.dataTransfer.getData(SHAPE_DRAG_MIME)
+        event.dataTransfer.getData(SHAPE_DRAG_MIME),
       );
 
       if (!payload) {
@@ -322,7 +323,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
       event.preventDefault();
       addNode(
         payload,
-        screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        screenToFlowPosition({ x: event.clientX, y: event.clientY }),
       );
     },
     [addNode, screenToFlowPosition],
@@ -345,7 +346,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
         screenToFlowPosition({
           x: bounds.left + bounds.width / 2,
           y: bounds.top + bounds.height / 2,
-        })
+        }),
       );
     },
     [addNode, screenToFlowPosition],
@@ -359,51 +360,53 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <ReactFlow<CanvasNode, CanvasEdge>
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        // Handles are drawn on all four sides, so a connection must be allowed to
-        // land on any of them rather than only on a declared target handle.
-        connectionMode={ConnectionMode.Loose}
-        // Release anywhere on a target node and the connection lands on that
-        // node's nearest handle. The default (20) is "release on the dot", which
-        // silently discarded any connection dropped on a node's body.
-        connectionRadius={CONNECTION_SNAP_RADIUS}
-        isValidConnection={isConnectionBetweenNodes}
-        // The line dragged out of a handle defaults to a bezier, which would not
-        // resemble the right-angle edge it is about to become.
-        connectionLineType={ConnectionLineType.SmoothStep}
-        // Programmatically focusable, but kept out of the tab order: closing the
-        // label editor hands focus back here (14-node-editing), and without a
-        // tabIndex the wrapper cannot take it and the browser drops focus on
-        // <body> instead. Nodes are still individually tab-reachable.
-        tabIndex={-1}
-        fitView
-        minZoom={MIN_ZOOM}
-        proOptions={{ hideAttribution: true }}
-        // Themes React Flow's remaining chrome (the minimap) to match the dark
-        // workspace without restyling its internals.
-        colorMode="dark"
-      >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={22}
-          size={1}
-          color="var(--border-subtle)"
-        />
-        <MiniMap pannable zoomable />
-        <Panel position="bottom-center">
-          <ShapePanel onAddShape={handleAddShape} />
-        </Panel>
-        <Panel position="bottom-left">
-          <CanvasControls history={history} />
-        </Panel>
-      </ReactFlow>
+      <CanvasEdgeRouteProvider nodes={nodes} edges={edges}>
+        <ReactFlow<CanvasNode, CanvasEdge>
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          // Handles are drawn on all four sides, so a connection must be allowed to
+          // land on any of them rather than only on a declared target handle.
+          connectionMode={ConnectionMode.Loose}
+          // Release anywhere on a target node and the connection lands on that
+          // node's nearest handle. The default (20) is "release on the dot", which
+          // silently discarded any connection dropped on a node's body.
+          connectionRadius={CONNECTION_SNAP_RADIUS}
+          isValidConnection={isConnectionBetweenNodes}
+          // The line dragged out of a handle defaults to a bezier, which would not
+          // resemble the right-angle edge it is about to become.
+          connectionLineType={ConnectionLineType.SmoothStep}
+          // Programmatically focusable, but kept out of the tab order: closing the
+          // label editor hands focus back here (14-node-editing), and without a
+          // tabIndex the wrapper cannot take it and the browser drops focus on
+          // <body> instead. Nodes are still individually tab-reachable.
+          tabIndex={-1}
+          fitView
+          minZoom={MIN_ZOOM}
+          proOptions={{ hideAttribution: true }}
+          // Themes React Flow's remaining chrome (the minimap) to match the dark
+          // workspace without restyling its internals.
+          colorMode="dark"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={22}
+            size={1}
+            color="var(--border-subtle)"
+          />
+          <MiniMap pannable zoomable />
+          <Panel position="bottom-center">
+            <ShapePanel onAddShape={handleAddShape} />
+          </Panel>
+          <Panel position="bottom-left">
+            <CanvasControls history={history} />
+          </Panel>
+        </ReactFlow>
+      </CanvasEdgeRouteProvider>
 
       <LiveCursors />
 

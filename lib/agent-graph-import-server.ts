@@ -1,8 +1,9 @@
 import {
   canonicalCanvasSnapshotsEqual,
-  materializeAgentGraph,
-  parseAgentGraph,
+  parseAgentGraphInput,
+  type AgentGraphInput,
 } from "@/lib/agent-graph";
+import { resolveAgentGraphLayout } from "@/lib/agent-graph-layout";
 import { CanvasVersionConflictError, type CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { AgentCanvasWriteDependencies } from "@/lib/agent-canvas-write";
 import { isAgentLaunchId } from "@/lib/agent-launch";
@@ -13,7 +14,7 @@ export type AgentGraphImportDependencies = AgentCanvasWriteDependencies;
 
 type ImportDecision = "empty" | "exact" | "resume" | "conflict";
 
-function parseImportRequest(value: unknown): CanvasSnapshot | null {
+function parseImportRequest(value: unknown): AgentGraphInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
@@ -30,8 +31,7 @@ function parseImportRequest(value: unknown): CanvasSnapshot | null {
     return null;
   }
 
-  const parsedGraph = parseAgentGraph(graph);
-  return parsedGraph ? materializeAgentGraph(parsedGraph) : null;
+  return parseAgentGraphInput(graph);
 }
 
 function isExactNode(
@@ -115,15 +115,15 @@ export async function handleAgentGraphImportPost(
     return access.response;
   }
 
-  const requestedSnapshot = parseImportRequest(await readJsonBody(request));
+  const graph = parseImportRequest(await readJsonBody(request));
 
-  if (!requestedSnapshot) {
+  if (!graph) {
     return jsonError("Invalid graph import request", 400);
   }
 
   let decision: ImportDecision = "conflict";
-
   try {
+    const requestedSnapshot = await resolveAgentGraphLayout(graph);
     await dependencies.mutateCanvas(diagramId, (flow) => {
       const existingSnapshot: CanvasSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
       const missingItems = findMissingCanonicalItems(existingSnapshot, requestedSnapshot);

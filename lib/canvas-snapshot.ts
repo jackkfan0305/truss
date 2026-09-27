@@ -1,3 +1,5 @@
+import { parseDiagramEdgeLayout } from "@/lib/diagram-route";
+
 /**
  * The canvas persistence contract (21-canvas-autosave).
  *
@@ -128,6 +130,7 @@ function parseEdge(value: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | n
   }
 
   const edgeData = isRecord(data) ? data : {};
+  const layout = parseDiagramEdgeLayout(edgeData.layout);
 
   return {
     id,
@@ -136,7 +139,10 @@ function parseEdge(value: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | n
     target,
     ...(typeof sourceHandle === "string" ? { sourceHandle } : {}),
     ...(typeof targetHandle === "string" ? { targetHandle } : {}),
-    data: { label: typeof edgeData.label === "string" ? edgeData.label : "" },
+    data: {
+      label: typeof edgeData.label === "string" ? edgeData.label : "",
+      ...(layout ? { layout } : {}),
+    },
     // Reapplied from the constants rather than trusted from the blob: they are
     // the same for every edge, so storing them would only create a way for a
     // stored value to drift from the palette or to carry arbitrary CSS.

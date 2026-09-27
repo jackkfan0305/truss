@@ -5,6 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    /* Motion: panel and surface open/close (transitions.dev token scale). */
+    --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+
     /* Typography */
     --font-sans: var(--font-geist-sans);
     --font-mono: var(--font-geist-mono);
@@ -358,6 +361,66 @@
 }
 
 /*
+ * The loading mark: a truss triangle that builds itself the way the AI builds a
+ * diagram, edge by edge, each joint lighting as its edge reaches it, then fades
+ * and starts again. All three parts share one period, so the per-part delays
+ * are a fixed phase offset that holds on every loop.
+ */
+@keyframes truss-loader-edge {
+    0% {
+        stroke-dashoffset: 1;
+        opacity: 1;
+    }
+    28%,
+    72% {
+        stroke-dashoffset: 0;
+        opacity: 1;
+    }
+    92%,
+    100% {
+        stroke-dashoffset: 0;
+        opacity: 0;
+    }
+}
+
+@keyframes truss-loader-joint {
+    0%,
+    8% {
+        opacity: 0.35;
+        transform: scale(0.7);
+        fill: var(--bg-base);
+    }
+    22% {
+        opacity: 1;
+        transform: scale(1.15);
+        fill: var(--accent-primary);
+    }
+    36%,
+    72% {
+        opacity: 1;
+        transform: scale(1);
+        fill: var(--accent-primary);
+    }
+    92%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.7);
+        fill: var(--bg-base);
+    }
+}
+
+.truss-loader-edge {
+    stroke-dasharray: 1;
+    animation: truss-loader-edge 2.4s var(--ease-smooth-out) infinite both;
+}
+
+.truss-loader-joint {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: truss-loader-joint 2.4s var(--ease-smooth-out) infinite both;
+}
+
+/*
  * Arrival is decoration: the node and the edge are already in shared state, so
  * skipping the motion loses nothing but the flourish.
  */
@@ -371,6 +434,20 @@
         stroke-dasharray: none;
     }
 
+    /* The loader keeps its finished triangle and only breathes. */
+    .truss-loader-edge {
+        stroke-dasharray: none;
+    }
+
+    .truss-loader-edge,
+    .truss-loader-joint {
+        animation: none;
+    }
+
+    .truss-loader {
+        animation: truss-loader-breathe 2.4s ease-in-out infinite;
+    }
+
     /*
      * The sweep *is* the liveness cue here, so this cannot just drop the
      * animation and leave transparent text: the gradient goes too, and the
@@ -380,6 +457,12 @@
         animation: none;
         background-image: none;
         color: var(--text-secondary);
+    }
+}
+
+@keyframes truss-loader-breathe {
+    50% {
+        opacity: 0.5;
     }
 }
 

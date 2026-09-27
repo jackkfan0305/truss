@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { Canvas } from "@/components/canvas/canvas";
+import { TrussLoader } from "@/components/ui/truss-loader";
 import { useStoredCanvas } from "@/hooks/use-stored-canvas";
 
 interface CanvasSurfaceProps {
@@ -24,7 +25,11 @@ export function CanvasSurface({
   const stored = useStoredCanvas(diagramId);
 
   if (stored.status === "loading") {
-    return <CanvasStatus>Connecting to the canvas…</CanvasStatus>;
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <TrussLoader label="Loading the canvas" />
+      </div>
+    );
   }
 
   if (stored.status === "error") {

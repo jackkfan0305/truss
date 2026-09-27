@@ -1,10 +1,10 @@
 import {
   canvasFingerprint,
-  materializeAgentGraph,
-  parseAgentGraphAllowingEmpty,
   canvasToAgentGraph,
-  type AgentGraphView,
+  parseAgentGraphInput,
+  type AgentGraphInput,
 } from "@/lib/agent-graph";
+import { resolveAgentGraphLayout } from "@/lib/agent-graph-layout";
 import {
   collidesWithOpaque,
   diffAgentGraph,
@@ -20,7 +20,7 @@ export type AgentGraphEditDependencies = AgentCanvasWriteDependencies;
 
 interface EditRequest {
   fingerprint: string;
-  graph: AgentGraphView["graph"];
+  graph: AgentGraphInput;
 }
 
 function parseEditRequest(value: unknown): EditRequest | null {
@@ -40,7 +40,7 @@ function parseEditRequest(value: unknown): EditRequest | null {
     return null;
   }
 
-  const parsedGraph = parseAgentGraphAllowingEmpty(graph);
+  const parsedGraph = parseAgentGraphInput(graph, true);
 
   return parsedGraph ? { fingerprint, graph: parsedGraph } : null;
 }
@@ -147,12 +147,10 @@ export async function handleAgentGraphEditPost(
     return jsonError("Invalid graph edit request", 400);
   }
 
-  const desiredSnapshot = materializeAgentGraph(parsed.graph);
-
   let decision: EditDecision = "stale";
 
   try {
-    await dependencies.mutateCanvas(diagramId, (flow) => {
+    await dependencies.mutateCanvas(diagramId, async (flow) => {
       const liveSnapshot: CanvasSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
 
       if (canvasFingerprint(liveSnapshot) !== parsed.fingerprint) {
@@ -161,13 +159,15 @@ export async function handleAgentGraphEditPost(
       }
 
       const live = canvasToAgentGraph(liveSnapshot);
+      const desiredSnapshot = await resolveAgentGraphLayout(parsed.graph, liveSnapshot);
+      const desiredGraph = canvasToAgentGraph(desiredSnapshot).graph;
 
-      if (collidesWithOpaque(live, parsed.graph)) {
+      if (collidesWithOpaque(live, desiredGraph)) {
         decision = "collision";
         return;
       }
 
-      applyDiff(flow, diffAgentGraph(live, parsed.graph), desiredSnapshot, liveSnapshot);
+      applyDiff(flow, diffAgentGraph(live, desiredGraph), desiredSnapshot, liveSnapshot);
       decision = "applied";
     });
   } catch (error: unknown) {

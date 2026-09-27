@@ -944,22 +944,22 @@ for (const status of [204, 403, 404, 500]) {
     const token = mintToken();
     let deleteCalls = 0;
     const stub = await createStubServer(new Map([
-      ["DELETE /api/projects/p1", [({ headers }) => {
+      ["DELETE /api/diagrams/p1", [({ headers }) => {
         deleteCalls += 1;
         assert.equal(headers.authorization, `Bearer ${token}`);
         return { status, body: status === 204 ? null : { error: "failed" } };
       }]],
     ]));
-    seedCredentialWithProjects(homeDir, stub.origin, token,
+    seedCredentialWithDiagrams(homeDir, stub.origin, token,
       [{ id: "p1", name: "Payments" }, { id: "p2", name: "Other" }], Date.now());
     if (status === 204) {
-      assert.deepEqual(await deleteDiagram(stub.origin, "p1"), { projectId: "p1", deleted: true });
-      assert.deepEqual(await listDiagrams(stub.origin), { projects: [{ id: "p2", name: "Other" }] });
+      assert.deepEqual(await deleteDiagram(stub.origin, "p1"), { diagramId: "p1", deleted: true });
+      assert.deepEqual(await listDiagrams(stub.origin), { diagrams: [{ id: "p2", name: "Other" }] });
     } else {
       await assert.rejects(deleteDiagram(stub.origin, "p1"), /couldn't delete/);
     }
     assert.equal(deleteCalls, 1);
-    await assert.rejects(deleteDiagram(stub.origin, ""), /project id is required/);
+    await assert.rejects(deleteDiagram(stub.origin, ""), /diagram id is required/);
     await stub.close();
   });
 }

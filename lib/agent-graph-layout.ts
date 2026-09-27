@@ -1,6 +1,6 @@
 import {
   materializeAgentGraph,
-  projectCanvasToAgentGraph,
+  canvasToAgentGraph,
   type AgentGraphInput,
 } from "@/lib/agent-graph";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
@@ -38,7 +38,7 @@ export async function resolveAgentGraphLayout(
       } : edge;
     }),
   };
-  const opaqueIds = new Set(projectCanvasToAgentGraph(existing).opaqueNodeIds);
+  const opaqueIds = new Set(canvasToAgentGraph(existing).opaqueNodeIds);
   const desiredIds = new Set(desired.nodes.map((node) => node.id));
   const obstacles = existing.nodes.filter((node) => opaqueIds.has(node.id) && !desiredIds.has(node.id));
   const result = await layoutDiagramAdditions({ ...desired, nodes: [...desired.nodes, ...obstacles] }, addedIds);

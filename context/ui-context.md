@@ -9,6 +9,31 @@ of the page. The user can keep building without signing in. If sign-in is
 cancelled or fails, the page returns to the same temporary storyboard. After a
 successful save, `Sign in to save` disappears.
 
+### Assistant side chat
+
+The side chat is monochrome. It uses only the page/surface, border and copy
+tokens, with one exception: the composer's border beam and the thinking orb may
+use `--accent-ai` and `--accent-ai-text`. State is carried by icons and words,
+never colour alone; the beam and the orb annotate a state the running task
+already states in words.
+
+- The panel sits under the floating navbar with no header. Disconnect
+  OpenRouter lives in the Clerk profile menu while a key is stored. The model
+  picker is the composer's settings pill.
+- Not connected, the panel shows a Connect OpenRouter screen: the OpenRouter
+  mark and name, a heading, one short paragraph, and one primary button.
+- Messages share one reading edge. Your prompts sit in a `bg-subtle` bubble;
+  replies render as markdown with no bubble.
+- Each turn is a stack of tasks, one per tool call, with the model's visible
+  reasoning inside the task it followed. A tool row with nothing inside is a
+  plain row, not a disclosure. The running task is the turn's single live
+  region. Live reasoning opens with a 20px thinking orb beside a shimmering
+  "Thinking" label; the waiting state uses the same orb and label.
+- Errors show verbatim under the reply with an icon. A stopped turn says it
+  stopped rather than failed and keeps its partial work.
+- The transcript follows new lines until the reader scrolls up, then offers
+  Jump to latest.
+
 ## Typography
 
 | Role      | Font       | CSS Variable        |

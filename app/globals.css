@@ -93,6 +93,9 @@
  * truth documented in context/ui-context.md.
  */
 :root {
+    /* Sidebar widths; SidebarResizeHandle overrides them on <html>. */
+    --diagrams-sidebar-w: 18rem;
+    --assistant-sidebar-w: 26rem;
     --bg-base: #080809;
     --bg-surface: #111114;
     --bg-elevated: #18181c;
@@ -307,6 +310,35 @@
 }
 
 /*
+ * The agent's current edit (lib/canvas-replay.ts): one glow pulse that lasts
+ * `AI_EDIT_HOLD_MS`. `drop-shadow` follows the drawn outline, so diamonds and
+ * cylinders glow in their own shape, and edges glow along their path.
+ *
+ * Listed alongside the arrival animation rather than replacing it: an element
+ * that arrived earlier keeps `canvas-node-arrive`, and dropping that name from
+ * the list would restart it.
+ */
+@keyframes canvas-agent-editing {
+    0%,
+    100% {
+        filter: drop-shadow(0 0 0 transparent);
+    }
+    50% {
+        filter: drop-shadow(0 0 8px var(--accent-ai));
+    }
+}
+
+.canvas-agent-editing {
+    animation: canvas-agent-editing 200ms ease-in-out both;
+}
+
+.canvas-node-arrive.canvas-agent-editing {
+    animation:
+        canvas-node-arrive 260ms cubic-bezier(0.33, 1, 0.68, 1) both,
+        canvas-agent-editing 200ms ease-in-out both;
+}
+
+/*
  * `pathLength="1"` on the path normalises its geometry, so a single dash of
  * length 1 covers any route regardless of how long the edge actually is —
  * without it every edge would need its own measured length in the dash array.
@@ -426,8 +458,15 @@
  */
 @media (prefers-reduced-motion: reduce) {
     .canvas-node-arrive,
-    .canvas-edge-draw {
+    .canvas-edge-draw,
+    .canvas-agent-editing,
+    .canvas-node-arrive.canvas-agent-editing {
         animation: none;
+    }
+
+    /* Still marked, just without the pulse. */
+    .canvas-agent-editing {
+        filter: drop-shadow(0 0 6px var(--accent-ai));
     }
 
     .canvas-edge-draw {
@@ -475,5 +514,12 @@
     }
   html {
     @apply font-sans;
+    }
+  /* While a sidebar edge is dragged, nothing animates behind the pointer. */
+  html[data-resizing],
+  html[data-resizing] * {
+    cursor: col-resize !important;
+    user-select: none;
+    transition: none !important;
     }
 }

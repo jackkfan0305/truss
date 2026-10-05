@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type DragEvent,
 } from "react";
 import {
@@ -46,7 +47,7 @@ import { useCanvasRemoteSync } from "@/hooks/use-canvas-remote-sync";
 import { isCanvasHistoryCommit } from "@/lib/canvas-history";
 import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { RemoteCanvas } from "@/lib/canvas-client";
-import { drawNodesThenEdges, planCanvasReplay } from "@/lib/canvas-replay";
+import { planCanvasEdits, playCanvasEdits } from "@/lib/canvas-replay";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -150,6 +151,8 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
   const { fitView, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const isAwaitingImportedNodes = useRef(false);
+  const replaying = useRef(false);
+  const [isReplaying, setIsReplaying] = useState(false);
 
   const current = useMemo(() => ({ nodes, edges }), [nodes, edges]);
   const payload = useMemo(() => canonicalCanvasPayload(current), [current]);
@@ -161,10 +164,17 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
     },
     [setEdges, setNodes],
   );
-  const history = useCanvasHistory(current, restore);
+  const restoreLocal = useCallback((snapshot: CanvasSnapshot) => {
+    if (!replaying.current) restore(snapshot);
+  }, [restore]);
+  const history = useCanvasHistory(current, restoreLocal);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
+      if (replaying.current) {
+        applyNodeChanges(changes.filter((change) => change.type === "dimensions"));
+        return;
+      }
       if (changes.some((change) => isCanvasHistoryCommit(change, nodes))) {
         history.checkpoint();
       }
@@ -176,6 +186,9 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<CanvasEdge>[]) => {
+      if (replaying.current) {
+        return;
+      }
       if (changes.some((change) => isCanvasHistoryCommit(change, nodes))) {
         history.checkpoint();
       }
@@ -187,6 +200,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      if (replaying.current) return;
       history.checkpoint();
       setEdges((existing) => addEdge(createCanvasEdge(connection), existing));
     },
@@ -195,6 +209,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
 
   const addNode = useCallback(
     ({ shape, width, height }: ShapeDragPayload, center: XYPosition) => {
+      if (replaying.current) return;
       history.checkpoint();
       setNodes((existing) => [
         ...existing,
@@ -218,6 +233,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
    */
   const handleImportTemplate = useCallback(
     (template: CanvasTemplate) => {
+      if (replaying.current) return;
       history.checkpoint();
       setNodes(template.nodes.map((node) => ({ ...node, data: { ...node.data } })));
       setEdges(
@@ -271,23 +287,25 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
         return;
       }
 
-      const plan = planCanvasReplay(latest.current, remote.snapshot);
+      const edits = planCanvasEdits(latest.current, remote.snapshot);
 
-      restore(plan.base);
-      await autosave.whilePaused(() =>
-        drawNodesThenEdges(
-          plan,
-          {
-            addNodes: (added) => setNodes((existing) => [...existing, ...added]),
-            addEdges: (added) => setEdges((existing) => [...existing, ...added]),
-          },
-          {
-            moveCursor: (cursor) => setAgentPresence({ cursor }),
-            clearCursor: () => setAgentPresence(null),
+      replaying.current = true;
+      setIsReplaying(true);
+      try {
+        await autosave.whilePaused(async () => {
+          await playCanvasEdits(edits, { setNodes, setEdges }, {
+            showAgent: (cursor, editing) => setAgentPresence({ cursor, editing }),
+            clearAgent: () => setAgentPresence(null),
             sleep: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
-          },
-        ),
-      );
+          });
+          // Edits append and replace in place, so order can differ from the
+          // stored snapshot; landing on it exactly keeps autosave clean.
+          restore(remote.snapshot);
+        });
+      } finally {
+        replaying.current = false;
+        setIsReplaying(false);
+      }
     },
     [autosave, history, restore, setAgentPresence, setEdges, setNodes],
   );
@@ -355,6 +373,8 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
   return (
     <div
       ref={wrapperRef}
+      inert={isReplaying}
+      aria-busy={isReplaying}
       // `relative` anchors the agent cursor overlay to the canvas.
       className="relative h-full w-full"
       onDragOver={handleDragOver}
@@ -411,7 +431,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
       <LiveCursors />
 
       <StarterTemplatesModal
-        open={isTemplatesOpen}
+        open={isTemplatesOpen && !isReplaying}
         onOpenChange={onTemplatesOpenChange}
         onImport={handleImportTemplate}
       />

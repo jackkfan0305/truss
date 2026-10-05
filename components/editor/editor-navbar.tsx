@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
+import { SidebarLeftIcon, SidebarRightIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { LayoutTemplate } from "lucide-react"
 
@@ -15,6 +15,9 @@ interface EditorNavbarProps {
   diagramName?: string
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
+  /** Workspace only — opens the browser assistant panel. */
+  isAssistantOpen?: boolean
+  onToggleAssistant?: () => void
   /**
    * Workspace only — metadata for the active diagram. A slot rather than a
    * component so the navbar stays decoupled from flow state: the editor home
@@ -46,6 +49,8 @@ export function EditorNavbar({
   onToggleSidebar,
   diagramName,
   onOpenTemplates,
+  isAssistantOpen,
+  onToggleAssistant,
   presence,
   saveStatus,
   profile,
@@ -73,7 +78,7 @@ export function EditorNavbar({
           SIDEBAR_TOGGLE,
           "left-3 transition-transform ease-smooth-out motion-reduce:transition-none",
           isSidebarOpen
-            ? "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)] duration-400"
+            ? "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-3.75rem)] duration-400"
             : "translate-x-0 duration-350"
         )}
       >
@@ -100,7 +105,11 @@ export function EditorNavbar({
       <div
         className={cn(
           FLOATING_SURFACE,
-          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 sm:top-3"
+          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 transition-transform ease-smooth-out motion-reduce:transition-none sm:top-3",
+          // Slides clear of the open assistant panel (--assistant-sidebar-w), mirroring how
+          // the left toggle follows the diagrams sidebar. Below md the panel
+          // spans nearly the full width, so there is no room to move into.
+          isAssistantOpen ? "duration-400 md:-translate-x-(--assistant-sidebar-w)" : "translate-x-0 duration-350"
         )}
       >
         {saveStatus}
@@ -118,6 +127,27 @@ export function EditorNavbar({
           {presence}
           {profile}
         </div>
+        {onToggleAssistant ? (
+          <>
+            <GroupDivider />
+            {/* The mirror of the diagrams toggle: same ghost icon button, mirrored glyph. */}
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              onClick={onToggleAssistant}
+              aria-controls="assistant-sidebar"
+              aria-expanded={isAssistantOpen}
+              aria-label={isAssistantOpen ? "Close assistant" : "Open assistant"}
+              className="rounded-lg"
+            >
+              <HugeiconsIcon
+                icon={SidebarRightIcon}
+                aria-hidden
+                className="size-5 text-copy-secondary"
+              />
+            </Button>
+          </>
+        ) : null}
       </div>
     </header>
   )

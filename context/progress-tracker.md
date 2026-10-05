@@ -8,6 +8,75 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Side chat UI restored onto the browser assistant. The agent-chat-overhaul
+  panel (3c7c0b6) is back: AI Elements, the Metal FX composer with border beam
+  and model pill, the orb empty state, the task stack, markdown replies through
+  `components/chat/response.tsx`, and the follow-and-jump transcript.
+  `components/editor/ai-sidebar.tsx` replaces `assistant-sidebar.tsx` and keeps
+  every behavior it had. The not-connected state is a Connect OpenRouter screen
+  with the OpenRouter mark. `runAssistantTurn` now forwards reasoning and gives
+  tool events an id and outcome.
+  - Dropped: collaborator avatars and identity rail (Liveblocks), spec
+    attachments, older-history paging, the remote run status line, the
+    design-run observer, and the thinking-effort pill. None has a
+    browser-assistant equivalent.
+  - New dependencies: metal-fx, border-beam, thinking-orbs, motion, shiki,
+    cmdk, nanoid, streamdown, @streamdown/cjk, @streamdown/code,
+    @streamdown/math, @streamdown/mermaid, tokenlens, use-stick-to-bottom,
+    @radix-ui/react-use-controllable-state (versions as 3c7c0b6 pinned).
+  - Verifiers: `verify-assistant-turn.ts` plus the overhaul's adapted UI
+    verifiers (chat response, composer, composer interaction, thinking and
+    answer streams, scroll, chat UI, markdown tokens, streaming markdown, AI
+    Elements markdown), all in `verify:unit`.
+- `browser-openrouter-assistant` complete. The editor has an Assistant panel
+  that connects the user's own OpenRouter account (OAuth PKCE, callback at
+  `/openrouter/callback`) and runs `streamText` in the browser. Its tools call
+  the existing agent endpoints. See ADR 0006, which narrows ADR 0001. No new
+  routes, server env vars or server-side model calls.
+  - Models: `anthropic/claude-sonnet-5.5`, `openai/gpt-6.1-sol`,
+    `google/gemini-3.8-flash`, `google/gemma-4-31b-it:free`,
+    `qwen/qwen3.8-27b:free`, `nvidia/nemotron-3-super-120b-a12b:free`. On
+    2026-10-04 all six were present in `GET https://openrouter.ai/api/v1/models`
+    and all list `tools`.
+  - Verifiers: `scripts/verify-openrouter-auth.ts`, `verify-assistant-models.ts`,
+    `verify-assistant-tools.ts`, `verify-assistant-chat.ts`, plus new cases in
+    `verify-editor-controls.tsx`.
+  - Decisions: OpenRouter calls use `maxRetries: 0`, so a 429 ends the turn at
+    once. The 401 "OpenRouter disconnected" notice shows above the Connect
+    button. Disconnect (in the Clerk profile menu) and unmount abort a running turn. The tools validate
+    each graph with the server's own zod schemas (moved to the client-safe
+    `lib/agent-graph-schema.ts`) before any write, so a bad graph returns
+    path-level issues to the model and never leaves an empty diagram behind.
+    The sidebar is not keyed by diagram; the `/editor/[roomId]` page likely
+    remounts on a switch anyway, which resets the chat (unverified live).
+  - Gates: `verify:unit`, `typecheck`, `lint`, `build` all exit 0, and
+    `grep -rlE "elkjs|node:crypto" .next/static` prints nothing.
+  - Live check, 2026-10-04, signed in by hand, with the dev database migrated
+    (it was missing four migrations from `main`, so `/editor` failed for every
+    branch). The OpenRouter key was seeded into localStorage to skip the
+    consent screen.
+    1. Connect: lands on `openrouter.ai/auth` with
+       `callback_url=http://localhost:3000/openrouter/callback`, `S256` and a
+       43-character challenge. OpenRouter then asks this browser to sign up, so
+       the return trip with a real code is unchecked. The callback shows
+       "OpenRouter refused the connection" for a bad code and the "expired"
+       message on a second visit.
+    2. Ask about the diagram (Nemotron 3 Super): a grounded answer naming the
+       real blocks. Partial text showed while the turn ran.
+    3. Add a cache: Cache block and three edges replayed onto the open canvas.
+    4. Create a checkout flow: "Created Checkout Flow" link to
+       `/editor/checkout-flow-...`; the panel stayed on the open diagram.
+    5. Gemma 4 31B: rate limited each try, and the panel showed the 429 copy.
+       Qwen 3.8 was also rate limited after one edit.
+    6. Stop mid-stream: the reply stopped at 738 characters, Send came back,
+       and no error notice showed.
+    7. Disconnect: Connect returned and `truss.openrouter.key` was removed.
+    - Claude Sonnet 5.5 returned 402 (the account has no credits) and the panel
+      showed the credits copy. Paid models are otherwise unchecked.
+    - Seen: the SDK logs each failed call with `console.error`, which raises
+      the Next.js dev "Issues" badge; free models reply in markdown, which
+      shows as literal `**`; the feed does not scroll to the newest entry.
+
 - Task 1 complete: Remove the Share dialog and the storyboard member routes.
   The Share button no longer appears in the navbar. Deleted: share-dialog
   component, use-storyboard-members hook, member API routes, storyboard-access
@@ -1793,3 +1862,45 @@ result is observed.
   **Verification notes:**
   - Manual browser checks in Tasks 8 and 9 unverified (no signed-in Clerk session in dev environment)
   - All automated gates pass: typecheck, lint, verify:unit, build
+
+- Agent edits replay edit by edit (2026-10-05). `lib/canvas-replay.ts` now
+  plans every change between the open canvas and the agent's write (edge
+  removals, node removals, node updates, node additions, edge updates, edge
+  additions) and plays each one behind the agent cursor: a 540ms sweep, then
+  the item glows for `AI_EDIT_HOLD_MS` (200ms) before the next. Updates and
+  removals used to land at once with only additions animated. Removed
+  `lib/canvas-drawing.ts`, `getBuildStepMs` and `verify-canvas-drawing.ts`.
+  The assistant panel calls `syncNow` after each applied edit, so the replay
+  starts at once instead of on the next 4s poll. Gates pass: typecheck, lint,
+  `verify:unit`. Live browser check pending a signed-in session.
+
+- Assistant chat persists across reloads (2026-10-05). It used to live only in
+  `AiSidebar` state, so a reload wiped it. `lib/assistant-history.ts` saves the
+  transcript and model history per diagram in localStorage after each turn,
+  not on every token. A turn cut off by a reload comes back as stopped.
+  `AiSidebar` is now keyed by diagram id, so switching diagrams loads that
+  diagram's chat instead of carrying the last one over. Past the localStorage
+  quota, saving stops silently. `scripts/verify-assistant-history.ts` is in
+  `verify:unit`. Typecheck and lint pass. Live browser check pending a
+  signed-in session.
+- `/clear` in the assistant composer empties that diagram's chat, both the
+  transcript and the model history, and the save effect overwrites the stored
+  copy. It does nothing while a turn runs, like any other send.
+- Assistant panel header removed (2026-10-05). Disconnect OpenRouter moved to
+  the Clerk profile menu (`ProfileButton` in `ai-sidebar.tsx`), shown only
+  while a key is stored.
+- Resizable sidebars (2026-10-05). `SidebarResizeHandle` sits on the inner
+  edge of the diagrams sidebar (224-512px) and the assistant panel
+  (320-768px), drag or arrow keys, md and up. Widths live in
+  `--diagrams-sidebar-w` and `--assistant-sidebar-w` on `<html>` so the navbar
+  chips follow, and in localStorage. Gates pass; live browser check pending a
+  signed-in session.
+
+- PR 47 review fixes, 2026-10-05. Agent replay blocks local canvas edits,
+  template imports and undo until the final remote snapshot lands. Assistant
+  cancellation reaches the initial diagram read and a stopped turn never
+  starts its model stream. Chat persistence now runs when sending, clearing
+  and settling turns. OAuth completion navigation uses an Effect Event.
+  Replay removal planning uses one pass per collection. React Doctor reports
+  no new issues against main. Added cancellation regression coverage.
+  Full unit suite, typecheck and lint pass. CI validation pending.

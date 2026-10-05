@@ -23,8 +23,8 @@ export const AI_USER_COLOR = "#6457f9";
  * milliseconds.
  *
  * Shared rather than duplicated because it is one behaviour split across two
- * processes: the server waits this out before writing the node
- * (`lib/canvas-drawing.ts`), and the browser spends it animating the cursor
+ * processes: the replay waits this out before applying an edit
+ * (`lib/canvas-replay.ts`), and the browser spends it animating the cursor
  * there (`components/canvas/live-cursors.tsx`). If the two drift, nodes appear
  * before the cursor arrives — precisely the effect this pacing exists to avoid.
  */
@@ -41,28 +41,7 @@ export const AI_CURSOR_SWEEP_MS = 420;
 export const AI_CURSOR_ARRIVAL_PAD_MS = 120;
 
 /**
- * The whole draw's time budget, spread across however many actions it has. A
- * large graph is more than half a minute of watching at a comfortable pace, so
- * pace is derived from the action count rather than fixed, and a big graph
- * simply moves faster.
- *
- * Calibration values, not derived truths: tune them by watching a real draw.
+ * How long each agent edit stays lit on the canvas before the next one starts.
+ * The highlight animation in `globals.css` runs for the same time.
  */
-const AI_BUILD_BUDGET_MS = 15_000;
-const MIN_BUILD_STEP_MS = 220;
-const MAX_BUILD_STEP_MS = 900;
-
-/**
- * The delay between one action landing and the next cursor move.
- *
- * Floored at `MIN_BUILD_STEP_MS` so each action stays visible as its own step.
- */
-export function getBuildStepMs(actionCount: number): number {
-  if (actionCount <= 0) {
-    return MIN_BUILD_STEP_MS;
-  }
-
-  const step = AI_BUILD_BUDGET_MS / actionCount;
-
-  return Math.min(Math.max(step, MIN_BUILD_STEP_MS), MAX_BUILD_STEP_MS);
-}
+export const AI_EDIT_HOLD_MS = 200;

@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { EditorNavbar } from "../components/editor/editor-navbar"
 import { DiagramSidebar } from "../components/editor/diagram-sidebar"
+import { AiSidebar } from "../components/editor/ai-sidebar"
+import { ChatEntry } from "../components/editor/chat-entry"
 
 const baseNavbarProps = {
   isSidebarOpen: false,
@@ -95,7 +97,7 @@ assert.match(closedDiagramsToggle, /top-3/)
 assert.match(closedDiagramsToggle, /left-3/)
 assert.ok(
   openDiagramsToggle.includes(
-    "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)]"
+    "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-3.75rem)]"
   ),
   "the open toggle slides to the panel's inner edge on a transform"
 )
@@ -126,7 +128,7 @@ assert.match(homeHtml, /Profile/)
 
 assert.match(openDiagramSidebar, /inset-y-0/)
 assert.match(openDiagramSidebar, /left-0/)
-assert.match(openDiagramSidebar, /w-72/)
+assert.match(openDiagramSidebar, /w-\(--diagrams-sidebar-w\)/)
 assert.match(openDiagramSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
 assert.match(openDiagramSidebar, /translate-x-0/)
 assert.match(openDiagramSidebarHtml, /max-sm:pt-8/)
@@ -138,5 +140,54 @@ assert.match(
   /-translate-x-\[calc\(100%\+2rem\)\]/
 )
 
+
+// Signed out of OpenRouter on the server render: Connect, no composer.
+const assistantHtml = renderToStaticMarkup(
+  <AiSidebar isOpen diagramId="checkout-abc123" />
+)
+assert.match(assistantHtml, /id="assistant-sidebar"/)
+assert.match(assistantHtml, /Connect OpenRouter/)
+assert.match(assistantHtml, /Connect with OpenRouter/)
+assert.doesNotMatch(assistantHtml, /<textarea/)
+
+// Review focus 5: model text renders as markdown elements, never as raw HTML.
+const feedHtml = renderToStaticMarkup(
+  <ol>
+    <ChatEntry
+      message={{
+        id: "assistant-1",
+        role: "assistant",
+        sentAt: 0,
+        turn: {
+          phase: "complete",
+          notice: null,
+          text: "<img src=x onerror=alert(1)>\n\n**Done** [bad](javascript:alert(1))",
+          parts: [
+            { type: "tool", id: "call-1", label: "Created Checkout", href: "/editor/checkout-abc123", status: "complete" },
+          ],
+        },
+      }}
+    />
+  </ol>
+)
+assert.doesNotMatch(feedHtml, /<img/)
+assert.match(feedHtml, /&lt;img src=x onerror=alert\(1\)&gt;/)
+assert.match(feedHtml, /<strong[^>]*>Done<\/strong>/)
+assert.doesNotMatch(feedHtml, /href="javascript:/)
+assert.match(feedHtml, /href="\/editor\/checkout-abc123"/)
+
+// The navbar exposes the assistant toggle in the workspace.
+const assistantNavbarHtml = renderToStaticMarkup(
+  <EditorNavbar {...baseNavbarProps} isAssistantOpen={false} onToggleAssistant={() => undefined} />
+)
+assert.match(assistantNavbarHtml, /aria-controls="assistant-sidebar"/)
+assert.match(assistantNavbarHtml, /aria-label="Open assistant"/)
+assert.doesNotMatch(assistantNavbarHtml, />Assistant</, "the toggle is icon-only")
+assert.match(
+  renderToStaticMarkup(
+    <EditorNavbar {...baseNavbarProps} isAssistantOpen onToggleAssistant={() => undefined} />
+  ),
+  /aria-expanded="true"[^>]*aria-label="Close assistant"|aria-label="Close assistant"[^>]*aria-expanded="true"/
+)
 
 console.info("Editor floating-control checks passed")

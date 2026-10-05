@@ -89,4 +89,10 @@ _Avoid_: Author, creator, Collaborator (removed, ADR 0005)
 The terminal agent holding an agent token, present on the canvas under the
 owner's name plus a suffix. It authors panels and answers threads; it never
 queues and never picks.
-_Avoid_: AI, assistant, bot
+_Avoid_: AI, bot
+
+**Assistant**:
+The in-editor model a signed-in owner connects with their own OpenRouter
+account. It runs in the browser and writes diagrams through the same endpoints
+as the terminal agent. See ADR 0006.
+_Avoid_: AI sidebar, copilot, bot

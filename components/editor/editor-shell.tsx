@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { UserButton } from "@clerk/nextjs"
 import { Plus } from "lucide-react"
 
 import { CanvasSurface } from "@/components/canvas/canvas-surface"
@@ -9,6 +8,7 @@ import { AgentPresenceProvider } from "@/components/canvas/agent-presence"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
+import { AiSidebar, ProfileButton } from "@/components/editor/ai-sidebar"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { DiagramDialogs } from "@/components/editor/diagram-dialogs"
 import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
@@ -70,10 +70,19 @@ export function EditorShell({
             onOpenTemplates={
               activeDiagram ? () => setIsTemplatesOpen(true) : undefined
             }
+            isAssistantOpen={openSidebar === "assistant"}
+            onToggleAssistant={
+              activeDiagram
+                ? () =>
+                    setOpenSidebar((current) =>
+                      current === "assistant" ? null : "assistant"
+                    )
+                : undefined
+            }
             // Only the workspace shows the agent avatar; the home page has no canvas for it to draw on.
             presence={activeDiagram ? <PresenceAvatars /> : undefined}
             saveStatus={activeDiagram ? <SaveStatusButton /> : undefined}
-            profile={<UserButton />}
+            profile={<ProfileButton />}
           />
 
           <DiagramSidebar
@@ -129,6 +138,14 @@ export function EditorShell({
               </div>
             </main>
           )}
+          {/* Stays mounted while closed so the conversation survives toggling. */}
+          {activeDiagram ? (
+            <AiSidebar
+              key={activeDiagram.id}
+              isOpen={openSidebar === "assistant"}
+              diagramId={activeDiagram.id}
+            />
+          ) : null}
           <DiagramDialogs actions={actions} />
         </div>
       </CanvasSaveProvider>

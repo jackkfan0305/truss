@@ -4,7 +4,7 @@
 
 Truss is a system design workspace. A terminal agent maps a system onto a canvas through the `truss-diagram` skill.
 
-Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
+Truss runs no server-side model and holds no model key (ADR 0001, narrowed by ADR 0006). Models are the terminal agent and the optional browser assistant, and both write through the agent endpoints.
 
 ## Goals
 
@@ -75,7 +75,7 @@ Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`.
 ### Out Of Scope
 
 - Billing and subscription systems
-- Any server-side model call — see `docs/adr/0001-no-server-side-ai.md`
+- Any server-side model call (ADR 0001, narrowed by ADR 0006)
 - Production object storage migration
 - Mobile-native applications
 

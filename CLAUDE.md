@@ -1,5 +1,7 @@
 @AGENTS.md
 
+Do not commit plan or spec files.
+
 ## Agent skills
 
 ### Issue tracker

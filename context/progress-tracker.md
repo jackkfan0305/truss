@@ -31,12 +31,31 @@ Update this file whenever the current phase, active feature, or implementation s
     remounts on a switch anyway, which resets the chat (unverified live).
   - Gates: `verify:unit`, `typecheck`, `lint`, `build` all exit 0, and
     `grep -rlE "elkjs|node:crypto" .next/static` prints nothing.
-  - Live check not done. Clerk sign-in blocks it: `/editor` and
-    `/openrouter/callback` both redirect to `/sign-in`, and the saved
-    `~/.truss-auth.json` session has expired. Unchecked: all seven steps (Connect
-    and return to the diagram, ask about the diagram, add a cache, create a
-    checkout diagram, switch to Gemma 4 31B, Stop mid-stream, Disconnect). They
-    also need the user's own OpenRouter login to approve OAuth.
+  - Live check, 2026-10-04, signed in by hand, with the dev database migrated
+    (it was missing four migrations from `main`, so `/editor` failed for every
+    branch). The OpenRouter key was seeded into localStorage to skip the
+    consent screen.
+    1. Connect: lands on `openrouter.ai/auth` with
+       `callback_url=http://localhost:3000/openrouter/callback`, `S256` and a
+       43-character challenge. OpenRouter then asks this browser to sign up, so
+       the return trip with a real code is unchecked. The callback shows
+       "OpenRouter refused the connection" for a bad code and the "expired"
+       message on a second visit.
+    2. Ask about the diagram (Nemotron 3 Super): a grounded answer naming the
+       real blocks. Partial text showed while the turn ran.
+    3. Add a cache: Cache block and three edges replayed onto the open canvas.
+    4. Create a checkout flow: "Created Checkout Flow" link to
+       `/editor/checkout-flow-...`; the panel stayed on the open diagram.
+    5. Gemma 4 31B: rate limited each try, and the panel showed the 429 copy.
+       Qwen 3.8 was also rate limited after one edit.
+    6. Stop mid-stream: the reply stopped at 738 characters, Send came back,
+       and no error notice showed.
+    7. Disconnect: Connect returned and `truss.openrouter.key` was removed.
+    - Claude Sonnet 5.5 returned 402 (the account has no credits) and the panel
+      showed the credits copy. Paid models are otherwise unchecked.
+    - Seen: the SDK logs each failed call with `console.error`, which raises
+      the Next.js dev "Issues" badge; free models reply in markdown, which
+      shows as literal `**`; the feed does not scroll to the newest entry.
 
 - Task 1 complete: Remove the Share dialog and the storyboard member routes.
   The Share button no longer appears in the navbar. Deleted: share-dialog

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react"
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { LayoutTemplate } from "lucide-react"
+import { LayoutTemplate, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -15,6 +15,9 @@ interface EditorNavbarProps {
   diagramName?: string
   /** Workspace only — opens the starter template picker. */
   onOpenTemplates?: () => void
+  /** Workspace only — opens the browser assistant panel. */
+  isAssistantOpen?: boolean
+  onToggleAssistant?: () => void
   /**
    * Workspace only — metadata for the active diagram. A slot rather than a
    * component so the navbar stays decoupled from flow state: the editor home
@@ -46,6 +49,8 @@ export function EditorNavbar({
   onToggleSidebar,
   diagramName,
   onOpenTemplates,
+  isAssistantOpen,
+  onToggleAssistant,
   presence,
   saveStatus,
   profile,
@@ -111,7 +116,20 @@ export function EditorNavbar({
             <span className="hidden sm:inline">Templates</span>
           </Button>
         ) : null}
-        {(saveStatus || onOpenTemplates) && (presence || profile) ? (
+        {onToggleAssistant ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onToggleAssistant}
+            aria-controls="assistant-sidebar"
+            aria-expanded={isAssistantOpen}
+            aria-label={isAssistantOpen ? "Close assistant" : "Open assistant"}
+          >
+            <Sparkles className="size-4" />
+            <span className="hidden sm:inline">Assistant</span>
+          </Button>
+        ) : null}
+        {(saveStatus || onOpenTemplates || onToggleAssistant) && (presence || profile) ? (
           <GroupDivider />
         ) : null}
         <div className="flex items-center gap-2 pr-0.5 pl-1">

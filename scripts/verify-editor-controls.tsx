@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { EditorNavbar } from "../components/editor/editor-navbar"
 import { DiagramSidebar } from "../components/editor/diagram-sidebar"
+import { AssistantFeed, AssistantSidebar } from "../components/editor/assistant-sidebar"
 
 const baseNavbarProps = {
   isSidebarOpen: false,
@@ -138,5 +139,32 @@ assert.match(
   /-translate-x-\[calc\(100%\+2rem\)\]/
 )
 
+
+// Signed out of OpenRouter on the server render: Connect, no composer.
+const assistantHtml = renderToStaticMarkup(
+  <AssistantSidebar isOpen diagramId="checkout-abc123" />
+)
+assert.match(assistantHtml, /Connect OpenRouter/)
+assert.doesNotMatch(assistantHtml, /<textarea/)
+
+// Review focus 5: model text renders as text.
+const feedHtml = renderToStaticMarkup(
+  <AssistantFeed
+    entries={[
+      { kind: "assistant", text: "<img src=x onerror=alert(1)>" },
+      { kind: "tool", text: "Created Checkout", href: "/editor/checkout-abc123" },
+    ]}
+  />
+)
+assert.doesNotMatch(feedHtml, /<img/)
+assert.match(feedHtml, /&lt;img src=x onerror=alert\(1\)&gt;/)
+assert.match(feedHtml, /href="\/editor\/checkout-abc123"/)
+
+// The navbar exposes the assistant toggle in the workspace.
+const assistantNavbarHtml = renderToStaticMarkup(
+  <EditorNavbar {...baseNavbarProps} isAssistantOpen={false} onToggleAssistant={() => undefined} />
+)
+assert.match(assistantNavbarHtml, /aria-controls="assistant-sidebar"/)
+assert.match(assistantNavbarHtml, /Open assistant/)
 
 console.info("Editor floating-control checks passed")

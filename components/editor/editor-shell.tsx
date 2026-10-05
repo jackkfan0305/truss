@@ -1,38 +1,39 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { UserButton } from "@clerk/nextjs"
-import { Plus } from "lucide-react"
+import { useState } from "react";
+import { UserButton } from "@clerk/nextjs";
+import { Plus } from "lucide-react";
 
-import { CanvasSurface } from "@/components/canvas/canvas-surface"
-import { AgentPresenceProvider } from "@/components/canvas/agent-presence"
-import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
-import { PresenceAvatars } from "@/components/canvas/presence-avatars"
-import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
-import { EditorNavbar } from "@/components/editor/editor-navbar"
-import { DiagramDialogs } from "@/components/editor/diagram-dialogs"
-import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
-import { SaveStatusButton } from "@/components/editor/save-status-button"
-import { Button } from "@/components/ui/button"
-import { useDiagramActions } from "@/hooks/use-diagram-actions"
+import { CanvasSurface } from "@/components/canvas/canvas-surface";
+import { AgentPresenceProvider } from "@/components/canvas/agent-presence";
+import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context";
+import { PresenceAvatars } from "@/components/canvas/presence-avatars";
+import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status";
+import { AssistantSidebar } from "@/components/editor/assistant-sidebar";
+import { EditorNavbar } from "@/components/editor/editor-navbar";
+import { DiagramDialogs } from "@/components/editor/diagram-dialogs";
+import { DiagramSidebar } from "@/components/editor/diagram-sidebar";
+import { SaveStatusButton } from "@/components/editor/save-status-button";
+import { Button } from "@/components/ui/button";
+import { useDiagramActions } from "@/hooks/use-diagram-actions";
 import {
   initialEditorSidebar,
   type EditorSidebar,
-} from "@/lib/editor-sidebar-state"
-import type { DiagramSummary } from "@/types/diagram"
+} from "@/lib/editor-sidebar-state";
+import type { DiagramSummary } from "@/types/diagram";
 
 interface EditorShellProps {
-  ownedDiagrams: DiagramSummary[]
+  ownedDiagrams: DiagramSummary[];
   /**
    * Set on `/editor/[roomId]`, absent on the editor home. Its presence is what
    * switches the shell from the create prompt to the workspace layout.
    */
-  activeDiagram?: DiagramSummary
+  activeDiagram?: DiagramSummary;
   /** An opaque launch UUID, only accepted for an already-authorized diagram. */
-  launchId?: string
+  launchId?: string;
 }
 
-type OpenSidebar = EditorSidebar
+type OpenSidebar = EditorSidebar;
 
 /**
  * Owns the sidebar open/close state for the editor workspace and the diagram
@@ -44,12 +45,12 @@ export function EditorShell({
   activeDiagram,
   launchId,
 }: EditorShellProps) {
-  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
-    () => initialEditorSidebar()
-  )
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
-  const actions = useDiagramActions()
-  const isSidebarOpen = openSidebar === "diagrams"
+  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(() =>
+    initialEditorSidebar(),
+  );
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const actions = useDiagramActions();
+  const isSidebarOpen = openSidebar === "diagrams";
 
   return (
     <AgentPresenceProvider>
@@ -63,12 +64,21 @@ export function EditorShell({
             isSidebarOpen={isSidebarOpen}
             onToggleSidebar={() =>
               setOpenSidebar((current) =>
-                current === "diagrams" ? null : "diagrams"
+                current === "diagrams" ? null : "diagrams",
               )
             }
             diagramName={activeDiagram?.name}
             onOpenTemplates={
               activeDiagram ? () => setIsTemplatesOpen(true) : undefined
+            }
+            isAssistantOpen={openSidebar === "assistant"}
+            onToggleAssistant={
+              activeDiagram
+                ? () =>
+                    setOpenSidebar((current) =>
+                      current === "assistant" ? null : "assistant",
+                    )
+                : undefined
             }
             // Only the workspace shows the agent avatar; the home page has no canvas for it to draw on.
             presence={activeDiagram ? <PresenceAvatars /> : undefined}
@@ -98,20 +108,26 @@ export function EditorShell({
           ) : null}
 
           {activeDiagram ? (
-            /* React Flow needs a sized parent, so the canvas fills `main`. */
-            <main aria-label="Canvas" className="relative flex-1 bg-page">
-              <CanvasSurface
-                key={activeDiagram.id}
+            <>
+              {/* React Flow needs a sized parent, so the canvas fills `main`. */}
+              <main aria-label="Canvas" className="relative flex-1 bg-page">
+                <CanvasSurface
+                  key={activeDiagram.id}
+                  diagramId={activeDiagram.id}
+                  isTemplatesOpen={isTemplatesOpen}
+                  onTemplatesOpenChange={setIsTemplatesOpen}
+                >
+                  <AgentLaunchImportController
+                    launchId={launchId}
+                    roomId={activeDiagram.id}
+                  />
+                </CanvasSurface>
+              </main>
+              <AssistantSidebar
+                isOpen={openSidebar === "assistant"}
                 diagramId={activeDiagram.id}
-                isTemplatesOpen={isTemplatesOpen}
-                onTemplatesOpenChange={setIsTemplatesOpen}
-              >
-                <AgentLaunchImportController
-                  launchId={launchId}
-                  roomId={activeDiagram.id}
-                />
-              </CanvasSurface>
-            </main>
+              />
+            </>
           ) : (
             <main className="flex flex-1 items-center justify-center bg-page px-6">
               <div className="flex max-w-md flex-col items-center gap-3 text-center">
@@ -133,5 +149,5 @@ export function EditorShell({
         </div>
       </CanvasSaveProvider>
     </AgentPresenceProvider>
-  )
+  );
 }

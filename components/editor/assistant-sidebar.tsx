@@ -61,6 +61,8 @@ export function AssistantSidebar({
   const [entries, setEntries] = useState<FeedEntry[]>([])
   const [draft, setDraft] = useState("")
   const [isRunning, setIsRunning] = useState(false)
+  // The feed is hidden once the key is gone, so a 401 notice lives here.
+  const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null)
   const history = useRef<ModelMessage[]>([])
   const controller = useRef<AbortController | null>(null)
 
@@ -103,6 +105,7 @@ export function AssistantSidebar({
       const { message, clearKey } = result.error
       setEntries((current) => [...current, { kind: "notice", text: message }])
       if (clearKey) {
+        setDisconnectNotice(message)
         disconnect()
         window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
       }
@@ -117,6 +120,7 @@ export function AssistantSidebar({
   }
 
   function disconnectOpenRouter() {
+    setDisconnectNotice(null)
     disconnect()
     window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
   }
@@ -203,6 +207,11 @@ export function AssistantSidebar({
         </>
       ) : (
         <div className="flex flex-1 flex-col items-start gap-3">
+          {disconnectNotice ? (
+            <p role="alert" className="text-xs text-state-error">
+              {disconnectNotice}
+            </p>
+          ) : null}
           <p className="text-sm text-copy-muted">
             Connect your OpenRouter account to create and discuss diagrams here. Your
             key stays in this browser and your OpenRouter account pays for the calls.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { APICallError } from "ai";
+import { APICallError, RetryError } from "ai";
 
 import { buildAssistantInstructions, describeAssistantError } from "../lib/assistant-chat";
 import { AssistantStopError } from "../lib/assistant-tools";
@@ -27,6 +27,16 @@ assert.deepEqual(describeAssistantError(apiError(429)), {
   message: "Rate limited by OpenRouter. Free models have tight limits, try again or pick a paid model.",
   clearKey: false,
 });
+// The SDK wraps retried failures in RetryError.
+assert.deepEqual(
+  describeAssistantError(
+    new RetryError({ message: "x", reason: "maxRetriesExceeded", errors: [apiError(429)] }),
+  ),
+  {
+    message: "Rate limited by OpenRouter. Free models have tight limits, try again or pick a paid model.",
+    clearKey: false,
+  },
+);
 assert.deepEqual(describeAssistantError(new AssistantStopError("Sign in again to edit this diagram.")), {
   message: "Sign in again to edit this diagram.",
   clearKey: false,

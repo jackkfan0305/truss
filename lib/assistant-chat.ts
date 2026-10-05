@@ -1,5 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { APICallError, stepCountIs, streamText, type ModelMessage } from "ai";
+import { APICallError, RetryError, stepCountIs, streamText, type ModelMessage } from "ai";
 
 import {
   AssistantStopError,
@@ -30,6 +30,7 @@ function isAbort(error: unknown): boolean {
 }
 
 export function describeAssistantError(error: unknown): AssistantError | null {
+  if (RetryError.isInstance(error)) error = error.lastError;
   if (isAbort(error)) return null;
   if (error instanceof AssistantStopError) return { message: error.message, clearKey: false };
   if (APICallError.isInstance(error)) {
@@ -97,6 +98,7 @@ export async function runAssistantTurn(options: {
     tools: createAssistantTools(options.actions),
     stopWhen: stepCountIs(MAX_ASSISTANT_STEPS),
     abortSignal: controller.signal,
+    maxRetries: 0,
   });
 
   let text = "";

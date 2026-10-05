@@ -23,10 +23,14 @@ Update this file whenever the current phase, active feature, or implementation s
     `verify-editor-controls.tsx`.
   - Decisions: OpenRouter calls use `maxRetries: 0`, so a 429 ends the turn at
     once. The 401 "OpenRouter disconnected" notice shows above the Connect
-    button. The conversation carries across a diagram switch, because the
-    sidebar is not keyed by diagram.
+    button. Disconnect and unmount abort a running turn. The tools validate
+    each graph with the server's own zod schemas (moved to the client-safe
+    `lib/agent-graph-schema.ts`) before any write, so a bad graph returns
+    path-level issues to the model and never leaves an empty diagram behind.
+    The sidebar is not keyed by diagram; the `/editor/[roomId]` page likely
+    remounts on a switch anyway, which resets the chat (unverified live).
   - Gates: `verify:unit`, `typecheck`, `lint`, `build` all exit 0, and
-    `grep -rl elkjs .next/static` prints nothing.
+    `grep -rlE "elkjs|node:crypto" .next/static` prints nothing.
   - Live check not done. Clerk sign-in blocks it: `/editor` and
     `/openrouter/callback` both redirect to `/sign-in`, and the saved
     `~/.truss-auth.json` session has expired. Unchecked: all seven steps (Connect

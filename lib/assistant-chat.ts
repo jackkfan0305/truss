@@ -27,6 +27,12 @@ const TOOL_LABELS: Record<string, string> = {
   create_diagram: "Creating diagram",
 };
 
+/** A tool result that reports an error or an edit conflict did not do its job. */
+export function isToolOutputOk(output: unknown): boolean {
+  if (output === null || typeof output !== "object") return true;
+  return !("error" in output && output.error) && !("conflict" in output && output.conflict);
+}
+
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -124,7 +130,7 @@ export async function runAssistantTurn(options: {
         });
       } else if (part.type === "tool-result") {
         const output = part.output as { url?: string; error?: string } | undefined;
-        const ok = !output?.error;
+        const ok = isToolOutputOk(output);
         // A create whose import failed carries a url too; only a clean result is "Created".
         if (part.toolName === "create_diagram" && ok && output?.url) {
           const title = (part.input as { title?: string }).title ?? "diagram";

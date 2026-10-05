@@ -58,12 +58,13 @@ async function main() {
 
   await act(async () => root.render(<AiRunTasks turn={{ ...state(""), parts: [] }} />))
   assert.match(container.textContent ?? "", /Thinking/)
-  assert.ok(container.querySelector('canvas[role="img"]'), "the waiting label has a thinking orb")
+  assert.ok(container.querySelector('canvas[aria-hidden="true"]'), "the waiting label has a thinking orb")
+  assert.ok(!container.querySelector('[role="img"]'), "an unlabelled orb is not an unnamed image")
 
   await act(async () => root.render(<AiRunTasks turn={state("I found three services.")} />))
   assert.match(container.innerHTML, /Thinking/)
   assert.match(container.innerHTML, /data-open="" data-slot="collapsible" class="not-prose/)
-  assert.ok(container.querySelector('button canvas[role="img"]'), "live reasoning has a thinking orb beside its label")
+  assert.ok(container.querySelector('button canvas[aria-hidden="true"]'), "live reasoning has a thinking orb beside its label")
   await advanceFrame()
   assert.match(container.textContent ?? "", /I found/, "the first streaming frame reveals text")
 

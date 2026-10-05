@@ -9,7 +9,7 @@ export interface ThinkingOrbProps {
   state: OrbState
   /** The package ships exactly two tuned presets; they are separate designs. */
   size: 64 | 20
-  /** What the orb is saying, for a reader who cannot see it. */
+  /** What the orb is saying, for a reader who cannot see it. Empty hides it from assistive tech. */
   label: string
   className?: string
 }
@@ -48,8 +48,9 @@ export function ThinkingOrb({ state, size, label, className }: ThinkingOrbProps)
         // The app is dark only, so the palette is pinned rather than detected.
         theme="dark"
         paused={prefersReducedMotion}
-        role="img"
-        aria-label={label}
+        // An empty label means the words beside the orb already say it. The
+        // package defaults to role="img" with its own label, so clear the role.
+        {...(label ? { role: "img", "aria-label": label } : { role: undefined, "aria-hidden": true })}
         className="relative"
       />
     </span>

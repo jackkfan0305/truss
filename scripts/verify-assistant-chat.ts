@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { APICallError, RetryError } from "ai";
 
-import { buildAssistantInstructions, describeAssistantError } from "../lib/assistant-chat";
+import { buildAssistantInstructions, describeAssistantError, isToolOutputOk } from "../lib/assistant-chat";
 import { AssistantStopError } from "../lib/assistant-tools";
 
 function apiError(statusCode: number): APICallError {
@@ -59,5 +59,12 @@ assert.equal(describeAssistantError(apiError(500))?.clearKey, false);
   assert.doesNotMatch(withGraph, /no markdown/);
   assert.match(withGraph, /concise markdown/);
 }
+
+// A failed or conflicted tool result marks its task row failed, not done.
+assert.equal(isToolOutputOk({ applied: true, url: "/editor/x" }), true);
+assert.equal(isToolOutputOk({ diagramId: "x", url: "/editor/x" }), true);
+assert.equal(isToolOutputOk({ error: "Truss rejected the request." }), false);
+assert.equal(isToolOutputOk({ conflict: "Stale fingerprint. Read the diagram again." }), false);
+assert.equal(isToolOutputOk(undefined), true);
 
 console.log("verify-assistant-chat: ok");

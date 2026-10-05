@@ -55,6 +55,9 @@ assert.equal(describeAssistantError(apiError(500))?.clearKey, false);
   assert.match(withGraph, /f1/);
   const withoutGraph = buildAssistantInstructions("checkout-abc123", { error: "x" });
   assert.match(withoutGraph, /could not be read/);
+  // Replies render as sanitized markdown, so the prompt allows it.
+  assert.doesNotMatch(withGraph, /no markdown/);
+  assert.match(withGraph, /concise markdown/);
 }
 
 console.log("verify-assistant-chat: ok");

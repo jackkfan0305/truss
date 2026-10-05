@@ -9,7 +9,7 @@ import { AgentPresenceProvider } from "@/components/canvas/agent-presence"
 import { CanvasSaveProvider } from "@/components/canvas/canvas-save-context"
 import { PresenceAvatars } from "@/components/canvas/presence-avatars"
 import { AgentLaunchImportController } from "@/components/editor/agent-launch-import-status"
-import { AssistantSidebar } from "@/components/editor/assistant-sidebar"
+import { AiSidebar } from "@/components/editor/ai-sidebar"
 import { EditorNavbar } from "@/components/editor/editor-navbar"
 import { DiagramDialogs } from "@/components/editor/diagram-dialogs"
 import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
@@ -141,7 +141,7 @@ export function EditorShell({
           )}
           {/* Stays mounted while closed so the conversation survives toggling. */}
           {activeDiagram ? (
-            <AssistantSidebar
+            <AiSidebar
               isOpen={openSidebar === "assistant"}
               diagramId={activeDiagram.id}
             />

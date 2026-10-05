@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { EditorNavbar } from "../components/editor/editor-navbar"
 import { DiagramSidebar } from "../components/editor/diagram-sidebar"
-import { AssistantFeed, AssistantSidebar } from "../components/editor/assistant-sidebar"
+import { AiSidebar } from "../components/editor/ai-sidebar"
+import { ChatEntry } from "../components/editor/chat-entry"
 
 const baseNavbarProps = {
   isSidebarOpen: false,
@@ -142,22 +143,37 @@ assert.match(
 
 // Signed out of OpenRouter on the server render: Connect, no composer.
 const assistantHtml = renderToStaticMarkup(
-  <AssistantSidebar isOpen diagramId="checkout-abc123" />
+  <AiSidebar isOpen diagramId="checkout-abc123" />
 )
+assert.match(assistantHtml, /id="assistant-sidebar"/)
 assert.match(assistantHtml, /Connect OpenRouter/)
+assert.match(assistantHtml, /Connect with OpenRouter/)
 assert.doesNotMatch(assistantHtml, /<textarea/)
 
-// Review focus 5: model text renders as text.
+// Review focus 5: model text renders as markdown elements, never as raw HTML.
 const feedHtml = renderToStaticMarkup(
-  <AssistantFeed
-    entries={[
-      { kind: "assistant", text: "<img src=x onerror=alert(1)>" },
-      { kind: "tool", text: "Created Checkout", href: "/editor/checkout-abc123" },
-    ]}
-  />
+  <ol>
+    <ChatEntry
+      message={{
+        id: "assistant-1",
+        role: "assistant",
+        sentAt: 0,
+        turn: {
+          phase: "complete",
+          notice: null,
+          text: "<img src=x onerror=alert(1)>\n\n**Done** [bad](javascript:alert(1))",
+          parts: [
+            { type: "tool", id: "call-1", label: "Created Checkout", href: "/editor/checkout-abc123", status: "complete" },
+          ],
+        },
+      }}
+    />
+  </ol>
 )
 assert.doesNotMatch(feedHtml, /<img/)
 assert.match(feedHtml, /&lt;img src=x onerror=alert\(1\)&gt;/)
+assert.match(feedHtml, /<strong[^>]*>Done<\/strong>/)
+assert.doesNotMatch(feedHtml, /href="javascript:/)
 assert.match(feedHtml, /href="\/editor\/checkout-abc123"/)
 
 // The navbar exposes the assistant toggle in the workspace.

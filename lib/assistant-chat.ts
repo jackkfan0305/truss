@@ -16,7 +16,9 @@ export interface AssistantError {
 
 export type AssistantEvent =
   | { type: "text"; text: string }
-  | { type: "tool"; label: string; href?: string };
+  | { type: "reasoning"; text: string }
+  | { type: "tool-start"; id: string; label: string }
+  | { type: "tool-end"; id: string; ok: boolean; label?: string; href?: string };
 
 const TOOL_LABELS: Record<string, string> = {
   list_diagrams: "Listing diagrams",
@@ -59,7 +61,7 @@ export function buildAssistantInstructions(diagramId: string, current: unknown):
     current !== null && typeof current === "object" && "fingerprint" in current;
   return [
     "You are the Truss assistant. You explain and draw system diagrams.",
-    "Answer questions about the open diagram from its graph below. Use plain text, no markdown.",
+    "Answer questions about the open diagram from its graph below. Keep replies short. Use concise markdown (short paragraphs, lists, inline code) only when it helps.",
     "To change the open diagram, call apply_diagram_edit with the full desired graph and the fingerprint you read. If it returns a conflict, call get_diagram again and reapply.",
     "To make a new diagram, call create_diagram. Default to an overview of four to eight blocks that explains the main flow. Add detail only when asked.",
     "Omit x and y for new blocks. Keep x and y unchanged for blocks you are not moving.",
@@ -99,6 +101,9 @@ export async function runAssistantTurn(options: {
     stopWhen: stepCountIs(MAX_ASSISTANT_STEPS),
     abortSignal: controller.signal,
     maxRetries: 0,
+    // The loop below reports every failure; the default handler would also
+    // console.error it, which raises the Next.js dev Issues badge.
+    onError: () => {},
   });
 
   let text = "";
@@ -109,14 +114,26 @@ export async function runAssistantTurn(options: {
       if (part.type === "text-delta") {
         text += part.text;
         options.onEvent({ type: "text", text: part.text });
+      } else if (part.type === "reasoning-delta") {
+        options.onEvent({ type: "reasoning", text: part.text });
       } else if (part.type === "tool-call") {
-        options.onEvent({ type: "tool", label: TOOL_LABELS[part.toolName] ?? part.toolName });
-      } else if (part.type === "tool-result" && part.toolName === "create_diagram") {
-        const output = part.output as { url?: string; error?: string };
-        const title = (part.input as { title?: string }).title ?? "diagram";
+        options.onEvent({
+          type: "tool-start",
+          id: part.toolCallId,
+          label: TOOL_LABELS[part.toolName] ?? part.toolName,
+        });
+      } else if (part.type === "tool-result") {
+        const output = part.output as { url?: string; error?: string } | undefined;
+        const ok = !output?.error;
         // A create whose import failed carries a url too; only a clean result is "Created".
-        if (output.url && !output.error) options.onEvent({ type: "tool", label: `Created ${title}`, href: output.url });
+        if (part.toolName === "create_diagram" && ok && output?.url) {
+          const title = (part.input as { title?: string }).title ?? "diagram";
+          options.onEvent({ type: "tool-end", id: part.toolCallId, ok, label: `Created ${title}`, href: output.url });
+        } else {
+          options.onEvent({ type: "tool-end", id: part.toolCallId, ok });
+        }
       } else if (part.type === "tool-error") {
+        options.onEvent({ type: "tool-end", id: part.toolCallId, ok: false });
         if (part.error instanceof AssistantStopError) {
           error = describeAssistantError(part.error);
           controller.abort();

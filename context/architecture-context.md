@@ -248,9 +248,8 @@ stacks; the one that saves second gets a conflict and is told to reload.
 
 ## Agent Canvas Writes
 
-Truss runs no model of its own — see `docs/adr/0001-no-server-side-ai.md`. The
-terminal agent is the only model in the system, and every canvas write arrives
-through the graph import and edit routes it calls.
+Truss runs no server-side model and holds no model key (ADR 0001, narrowed by ADR 0006). Models are the terminal agent and the optional browser assistant, and both write through the agent endpoints.
+Every canvas write arrives through the graph import and edit routes they call.
 
 - A diagram ID belongs to exactly one owner. Authorization is checked against
   the diagram's owner before any write.
@@ -273,7 +272,7 @@ through the graph import and edit routes it calls.
 
 ## Invariants
 
-1. Truss holds no model key and never interprets a user's intent — the calling agent does.
+1. Truss runs no server-side model and holds no model key (ADR 0001, narrowed by ADR 0006). Models are the terminal agent and the optional browser assistant, and both write through the agent endpoints. Truss never interprets a user's intent. The calling agent does.
 2. Metadata and large generated artifacts are stored in separate layers.
 3. Auth and ownership are enforced at every mutation boundary.
 4. Client components are used only where browser interactivity or real-time state requires them.

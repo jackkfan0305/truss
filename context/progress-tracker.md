@@ -8,6 +8,32 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- `browser-openrouter-assistant` complete. The editor has an Assistant panel
+  that connects the user's own OpenRouter account (OAuth PKCE, callback at
+  `/openrouter/callback`) and runs `streamText` in the browser. Its tools call
+  the existing agent endpoints. See ADR 0006, which narrows ADR 0001. No new
+  routes, server env vars or server-side model calls.
+  - Models: `anthropic/claude-sonnet-5.5`, `openai/gpt-6.1-sol`,
+    `google/gemini-3.8-flash`, `google/gemma-4-31b-it:free`,
+    `qwen/qwen3.8-27b:free`, `nvidia/nemotron-3-super-120b-a12b:free`. On
+    2026-10-04 all six were present in `GET https://openrouter.ai/api/v1/models`
+    and all list `tools`.
+  - Verifiers: `scripts/verify-openrouter-auth.ts`, `verify-assistant-models.ts`,
+    `verify-assistant-tools.ts`, `verify-assistant-chat.ts`, plus new cases in
+    `verify-editor-controls.tsx`.
+  - Decisions: OpenRouter calls use `maxRetries: 0`, so a 429 ends the turn at
+    once. The 401 "OpenRouter disconnected" notice shows above the Connect
+    button. The conversation carries across a diagram switch, because the
+    sidebar is not keyed by diagram.
+  - Gates: `verify:unit`, `typecheck`, `lint`, `build` all exit 0, and
+    `grep -rl elkjs .next/static` prints nothing.
+  - Live check not done. Clerk sign-in blocks it: `/editor` and
+    `/openrouter/callback` both redirect to `/sign-in`, and the saved
+    `~/.truss-auth.json` session has expired. Unchecked: all seven steps (Connect
+    and return to the diagram, ask about the diagram, add a cache, create a
+    checkout diagram, switch to Gemma 4 31B, Stop mid-stream, Disconnect). They
+    also need the user's own OpenRouter login to approve OAuth.
+
 - Task 1 complete: Remove the Share dialog and the storyboard member routes.
   The Share button no longer appears in the navbar. Deleted: share-dialog
   component, use-storyboard-members hook, member API routes, storyboard-access

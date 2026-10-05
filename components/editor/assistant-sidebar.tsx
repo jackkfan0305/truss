@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react"
 import Link from "next/link"
 import { Square, Send } from "lucide-react"
 import type { ModelMessage } from "ai"
@@ -65,6 +65,17 @@ export function AssistantSidebar({
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null)
   const history = useRef<ModelMessage[]>([])
   const controller = useRef<AbortController | null>(null)
+  const isMounted = useRef(false)
+
+  // Leaving the editor (a "Created" link, another diagram) stops the turn so it
+  // spends no more credits and writes nothing more to the canvas.
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+      controller.current?.abort()
+    }
+  }, [])
 
   function appendEvent(event: AssistantEvent) {
     setEntries((current) => {
@@ -99,6 +110,7 @@ export function AssistantSidebar({
       signal: controller.current.signal,
       onEvent: appendEvent,
     })
+    if (!isMounted.current) return
 
     history.current = result.history
     if (result.error) {
@@ -120,6 +132,7 @@ export function AssistantSidebar({
   }
 
   function disconnectOpenRouter() {
+    controller.current?.abort()
     setDisconnectNotice(null)
     disconnect()
     window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))

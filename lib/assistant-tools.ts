@@ -1,13 +1,15 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+import { agentGraphEditInputSchema, agentGraphInputSchema } from "@/lib/agent-graph-schema";
 import { buildRoomId, createRoomIdSuffix } from "@/lib/room-id";
 import { NODE_COLORS, NODE_SHAPES, type NodeColor } from "@/types/canvas";
 
 /**
  * The browser assistant's diagram tools. Each one calls the same endpoint the
  * terminal agent's MCP uses, with the signed-in session cookie, so the server
- * stays the only place a graph is validated, laid out and written.
+ * stays the only place a graph is laid out and written. Graphs are checked
+ * against the server's own schemas first, so a bad graph makes no request.
  */
 
 export type AssistantFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -21,8 +23,8 @@ const MAX_TITLE_LENGTH = 120;
 
 const nodeColorValues = Object.keys(NODE_COLORS) as [NodeColor, ...NodeColor[]];
 
-// Loose on purpose, like the MCP's schema: the server's agent-graph contract
-// is the authority and returns a reason the model can act on.
+// Loose on purpose, like the MCP's schema: refinements do not survive the
+// JSON schema the model sees. The actions validate against the real contract.
 const graphSchema = z.object({
   version: z.literal(1),
   nodes: z.array(
@@ -80,6 +82,18 @@ function diagramPath(diagramId: string, suffix: string): string {
 
 function reason(body: CallResult["body"]): string {
   return typeof body?.error === "string" ? body.error : "Truss rejected the request.";
+}
+
+const MAX_LISTED_ISSUES = 10;
+
+/** The schema's issues with their paths, so the model can fix its graph. */
+function graphIssues(schema: z.ZodType, graph: unknown): string | null {
+  const parsed = schema.safeParse(graph);
+  if (parsed.success) return null;
+  const issues = parsed.error.issues
+    .slice(0, MAX_LISTED_ISSUES)
+    .map((issue) => `${issue.path.join(".") || "graph"}: ${issue.message}`);
+  return `The graph is invalid. Fix it and try again. ${issues.join("; ")}`;
 }
 
 function jsonPost(body: unknown): RequestInit {
@@ -148,6 +162,8 @@ export function createAssistantActions(
     },
 
     async applyDiagramEdit({ diagramId, fingerprint, graph }) {
+      const invalid = graphIssues(agentGraphEditInputSchema, graph);
+      if (invalid) return { error: invalid };
       const result = await call(
         diagramPath(diagramId, "agent-graph-edit"),
         jsonPost({ fingerprint, graph }),
@@ -162,6 +178,8 @@ export function createAssistantActions(
     },
 
     async createDiagram({ title, graph }) {
+      const invalid = graphIssues(agentGraphInputSchema, graph);
+      if (invalid) return { error: invalid };
       let diagramId = "";
       for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS && !diagramId; attempt += 1) {
         const candidate = buildRoomId(title, createSuffix());

@@ -112,9 +112,10 @@ export async function runAssistantTurn(options: {
       } else if (part.type === "tool-call") {
         options.onEvent({ type: "tool", label: TOOL_LABELS[part.toolName] ?? part.toolName });
       } else if (part.type === "tool-result" && part.toolName === "create_diagram") {
-        const output = part.output as { url?: string };
+        const output = part.output as { url?: string; error?: string };
         const title = (part.input as { title?: string }).title ?? "diagram";
-        if (output.url) options.onEvent({ type: "tool", label: `Created ${title}`, href: output.url });
+        // A create whose import failed carries a url too; only a clean result is "Created".
+        if (output.url && !output.error) options.onEvent({ type: "tool", label: `Created ${title}`, href: output.url });
       } else if (part.type === "tool-error") {
         if (part.error instanceof AssistantStopError) {
           error = describeAssistantError(part.error);

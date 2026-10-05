@@ -142,6 +142,26 @@ async function main() {
     assert.ok("error" in result && result.url === "/editor/x-cccccc");
   }
 
+  // An invalid graph is rejected with its paths before any request, so no empty diagram is left behind.
+  {
+    const { fetch, calls } = stubFetch([]);
+    const badGraph = { ...graph, nodes: [{ ...graph.nodes[0], id: "Web App" }] };
+    const result = await createAssistantActions({ fetch }).createDiagram({ title: "Checkout", graph: badGraph });
+    assert.ok("error" in result && result.error.includes("nodes.0.id"), JSON.stringify(result));
+    assert.equal(calls.length, 0);
+  }
+  {
+    const { fetch, calls } = stubFetch([]);
+    const badGraph = { ...graph, edges: [{ id: "web-to-api", source: "web", target: "api", label: "" }] };
+    const result = await createAssistantActions({ fetch }).applyDiagramEdit({
+      diagramId: "a-1",
+      fingerprint: "f1",
+      graph: badGraph,
+    });
+    assert.ok("error" in result && result.error.includes("edges.0.target"), JSON.stringify(result));
+    assert.equal(calls.length, 0);
+  }
+
   console.log("verify-assistant-tools: ok");
 }
 

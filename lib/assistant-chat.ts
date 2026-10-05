@@ -90,14 +90,19 @@ export async function runAssistantTurn(options: {
   onEvent: (event: AssistantEvent) => void;
 }): Promise<{ history: ModelMessage[]; error: AssistantError | null }> {
   const userMessage: ModelMessage = { role: "user", content: options.userText };
-  const current = await options.actions
-    .getDiagram({ diagramId: options.diagramId })
-    .catch(() => null);
-
-  // A tool failure that should end the turn aborts the stream itself.
+  if (options.signal.aborted) {
+    return { history: [...options.history, userMessage], error: null };
+  }
   const controller = new AbortController();
   const stopWithUser = () => controller.abort();
   options.signal.addEventListener("abort", stopWithUser, { once: true });
+  const current = await options.actions
+    .getDiagram({ diagramId: options.diagramId, signal: controller.signal })
+    .catch(() => null);
+  if (controller.signal.aborted) {
+    options.signal.removeEventListener("abort", stopWithUser);
+    return { history: [...options.history, userMessage], error: null };
+  }
 
   const result = streamText({
     model: createOpenRouter({ apiKey: options.apiKey })(options.modelId),

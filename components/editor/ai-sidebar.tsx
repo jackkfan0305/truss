@@ -124,6 +124,7 @@ export function AiSidebar({
       : readAssistantChat(window.localStorage, diagramId)
   )
   const [messages, setMessages] = useState<ChatMessage[]>(saved.messages)
+  const transcript = useRef<ChatMessage[]>(saved.messages)
   const [draft, setDraft] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   // The transcript is hidden once the key is gone, so a 401 notice lives here.
@@ -142,43 +143,46 @@ export function AiSidebar({
     }
   }, [])
 
-  // Saved between turns, not on every streamed token.
-  useEffect(() => {
-    if (!isRunning) {
-      writeAssistantChat(window.localStorage, diagramId, { messages, history: history.current })
-    }
-  }, [diagramId, messages, isRunning])
+  function saveChat() {
+    writeAssistantChat(window.localStorage, diagramId, {
+      messages: transcript.current,
+      history: history.current,
+    })
+  }
 
   function updateTurn(turnId: string, update: (turn: AssistantTurn) => AssistantTurn) {
-    setMessages((current) =>
-      current.map((message) =>
-        message.id === turnId && message.role === "assistant"
-          ? { ...message, turn: update(message.turn) }
-          : message
-      )
+    transcript.current = transcript.current.map((message) =>
+      message.id === turnId && message.role === "assistant"
+        ? { ...message, turn: update(message.turn) }
+        : message
     )
+    setMessages(transcript.current)
   }
 
   async function send(text: string) {
     const userText = text.trim()
     if (!userText || !apiKey || isRunning) return
 
-    // The save effect then writes the empty chat over the stored one.
+    // Clear this diagram's saved transcript together with model history.
     if (userText === "/clear") {
       setDraft("")
       history.current = []
+      transcript.current = []
       setMessages([])
+      saveChat()
       return
     }
 
     const sentAt = Date.now()
     const turnId = `assistant-${sentAt}`
     setDraft("")
-    setMessages((current) => [
-      ...current,
+    transcript.current = [
+      ...transcript.current,
       { id: `user-${sentAt}`, role: "user", content: userText, sentAt },
       { id: turnId, role: "assistant", turn: startAssistantTurn(), sentAt },
-    ])
+    ]
+    setMessages(transcript.current)
+    saveChat()
     setIsRunning(true)
     const turnController = new AbortController()
     controller.current = turnController
@@ -207,6 +211,7 @@ export function AiSidebar({
       disconnect()
       window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
     }
+    saveChat()
     controller.current = null
     setIsRunning(false)
   }

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 
 import { APICallError, RetryError } from "ai";
 
-import { buildAssistantInstructions, describeAssistantError, isToolOutputOk } from "../lib/assistant-chat";
-import { AssistantStopError } from "../lib/assistant-tools";
+import { buildAssistantInstructions, describeAssistantError, isToolOutputOk, runAssistantTurn } from "../lib/assistant-chat";
+import { AssistantStopError, type AssistantActions } from "../lib/assistant-tools";
 
 function apiError(statusCode: number): APICallError {
   return new APICallError({
@@ -67,4 +67,37 @@ assert.equal(isToolOutputOk({ error: "Truss rejected the request." }), false);
 assert.equal(isToolOutputOk({ conflict: "Stale fingerprint. Read the diagram again." }), false);
 assert.equal(isToolOutputOk(undefined), true);
 
-console.log("verify-assistant-chat: ok");
+async function checkAbortDuringInitialRead() {
+  const controller = new AbortController();
+  let finishRead!: () => void;
+  let readSignal: AbortSignal | undefined;
+  let reads = 0;
+  const actions: AssistantActions = {
+    getDiagram: async ({ signal }) => {
+      reads++;
+      readSignal = signal;
+      await new Promise<void>((resolve) => { finishRead = resolve; });
+      return { error: "unavailable" };
+    },
+    listDiagrams: async () => { throw new Error("Stopped turn called a tool"); },
+    applyDiagramEdit: async () => { throw new Error("Stopped turn edited a diagram"); },
+    createDiagram: async () => { throw new Error("Stopped turn created a diagram"); },
+  };
+  const options = {
+    apiKey: "unused", modelId: "unused", diagramId: "test", history: [],
+    userText: "Draw a queue", actions, signal: controller.signal,
+    onEvent: () => { throw new Error("Stopped turn started streaming"); },
+  };
+  const pending = runAssistantTurn(options);
+  assert.equal(reads, 1);
+  controller.abort();
+  assert.equal(readSignal?.aborted, true);
+  finishRead();
+  assert.deepEqual(await pending, {
+    history: [{ role: "user", content: "Draw a queue" }], error: null,
+  });
+  await runAssistantTurn(options);
+  assert.equal(reads, 1, "An already stopped turn must not even read the diagram");
+}
+
+checkAbortDuringInitialRead().then(() => console.log("verify-assistant-chat: ok"));

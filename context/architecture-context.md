@@ -240,6 +240,8 @@ canvas change is replayed (detected through polling), the undo stack is
 cleared. This prevents undo from resurrecting nodes the agent removed or
 deleting nodes the agent added. Two tabs on the same diagram keep separate
 stacks; the one that saves second gets a conflict and is told to reload.
+The canvas blocks local mutations during agent replay, including template
+imports and undo, until the remote snapshot has landed.
 
 ## Starter System Designs
 

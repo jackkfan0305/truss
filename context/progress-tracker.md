@@ -1895,3 +1895,12 @@ result is observed.
   `--diagrams-sidebar-w` and `--assistant-sidebar-w` on `<html>` so the navbar
   chips follow, and in localStorage. Gates pass; live browser check pending a
   signed-in session.
+
+- PR 47 review fixes, 2026-10-05. Agent replay blocks local canvas edits,
+  template imports and undo until the final remote snapshot lands. Assistant
+  cancellation reaches the initial diagram read and a stopped turn never
+  starts its model stream. Chat persistence now runs when sending, clearing
+  and settling turns. OAuth completion navigation uses an Effect Event.
+  Replay removal planning uses one pass per collection. React Doctor reports
+  no new issues against main. Added cancellation regression coverage.
+  Full unit suite, typecheck and lint pass. CI validation pending.

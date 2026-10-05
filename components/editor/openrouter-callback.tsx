@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
@@ -18,15 +18,17 @@ export function OpenRouterCallback({ code }: { code: string }) {
   // exchange would replace a successful connect with an "expired" error.
   const hasStarted = useRef(false)
 
+  const onConnected = useEffectEvent((returnTo: string) => {
+    window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
+    router.replace(returnTo)
+  })
+
   useEffect(() => {
     if (hasStarted.current) return
     hasStarted.current = true
 
     completeConnect(code).then(
-      (returnTo) => {
-        window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
-        router.replace(returnTo)
-      },
+      onConnected,
       (caught: unknown) => {
         setError(
           caught instanceof OpenRouterConnectError
@@ -35,7 +37,7 @@ export function OpenRouterCallback({ code }: { code: string }) {
         )
       }
     )
-  }, [code, router])
+  }, [code])
 
   return (
     <main className="flex flex-1 items-center justify-center bg-page px-6">

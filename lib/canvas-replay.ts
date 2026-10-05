@@ -73,24 +73,20 @@ export function planCanvasEdits(current: CanvasSnapshot, remote: CanvasSnapshot)
   });
 
   return [
-    ...current.edges
-      .filter((edge) => !remoteEdges.has(edge.id))
-      .map((edge): CanvasEdit => ({
-        kind: "edge",
-        id: edge.id,
-        at: positionOf(edge.target),
-        removes: true,
-        apply: ({ setEdges }) => setEdges((edges) => edges.filter((e) => e.id !== edge.id)),
-      })),
-    ...current.nodes
-      .filter((node) => !remoteNodes.has(node.id))
-      .map((node): CanvasEdit => ({
-        kind: "node",
-        id: node.id,
-        at: node.position,
-        removes: true,
-        apply: ({ setNodes }) => setNodes((nodes) => nodes.filter((n) => n.id !== node.id)),
-      })),
+    ...current.edges.flatMap((edge): CanvasEdit[] => remoteEdges.has(edge.id) ? [] : [{
+      kind: "edge",
+      id: edge.id,
+      at: positionOf(edge.target),
+      removes: true,
+      apply: ({ setEdges }) => setEdges((edges) => edges.filter((e) => e.id !== edge.id)),
+    }]),
+    ...current.nodes.flatMap((node): CanvasEdit[] => remoteNodes.has(node.id) ? [] : [{
+      kind: "node",
+      id: node.id,
+      at: node.position,
+      removes: true,
+      apply: ({ setNodes }) => setNodes((nodes) => nodes.filter((n) => n.id !== node.id)),
+    }]),
     ...remote.nodes.flatMap((node) => {
       const before = currentNodes.get(node.id);
       if (!before) return [putNode(node, true)];

@@ -55,6 +55,7 @@ export interface AssistantActions {
   listDiagrams(): Promise<{ diagrams: { id: string; name: string }[] } | ErrorResult>;
   getDiagram(input: {
     diagramId: string;
+    signal?: AbortSignal;
   }): Promise<{ graph: unknown; opaqueNodeIds: string[]; fingerprint: string } | ErrorResult>;
   applyDiagramEdit(input: {
     diagramId: string;
@@ -147,8 +148,8 @@ export function createAssistantActions(
       };
     },
 
-    async getDiagram({ diagramId }) {
-      const result = await call(diagramPath(diagramId, "agent-graph"));
+    async getDiagram({ diagramId, signal }) {
+      const result = await call(diagramPath(diagramId, "agent-graph"), { signal });
       if (result.status !== 200 || typeof result.body?.fingerprint !== "string") {
         return { error: reason(result.body) };
       }

@@ -92,7 +92,7 @@ export function AiRunTasks({ turn }: { turn: AssistantTurn }) {
             >
               <StatusIcon status={group.status} />
               {title}
-              <ChevronDown aria-hidden className="size-3.5 shrink-0 transition-transform group-data-[state=open]/task:rotate-180 motion-reduce:transition-none" />
+              <ChevronDown aria-hidden className="size-3.5 shrink-0 transition-transform group-data-open/task:rotate-180 motion-reduce:transition-none" />
             </TaskTrigger>
             <TaskContent className="motion-reduce:animate-none [&>div]:mt-0 [&>div]:space-y-2 [&>div]:border-surface-border [&>div]:pl-6">
               <ReasoningItems group={group} streamingPartId={streamingPartId} />

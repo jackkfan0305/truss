@@ -13,7 +13,6 @@ import {
 import { AiInputSettings } from "@/components/chat/ai-input-settings"
 import { ComposerBeam } from "@/components/chat/border-beam"
 import { useReducedMotion } from "@/hooks/use-reduced-motion"
-import { cn } from "@/lib/utils"
 
 /** Long enough for a paragraph, short enough that one message can't flood the panel. */
 const MAX_CHAT_CONTENT_LENGTH = 2000
@@ -45,10 +44,7 @@ export function AiChatComposer({
       <PromptInput
         aria-busy={isWorking}
         maxFiles={0}
-        className={cn(
-          "ai-chat-composer w-auto overflow-hidden rounded-[1.625rem] border border-surface-border/50 bg-subtle px-2 pt-1 transition-colors focus-within:border-copy-secondary",
-          !isWorking && className
-        )}
+        className="ai-chat-composer w-auto overflow-hidden rounded-[1.625rem] border border-surface-border/50 bg-subtle px-2 pt-1 transition-colors focus-within:border-copy-secondary"
         onSubmit={({ text }) => {
           if (isWorking || !text.trim()) return
           onSubmit(text)
@@ -109,9 +105,11 @@ export function AiChatComposer({
       </PromptInput>
   )
 
-  return isWorking ? (
-    <ComposerBeam isActive className={className}>
+  // The beam stays mounted and only lights while working: swapping the wrapper
+  // in and out remounted the Metal FX ring, which then stayed invisible.
+  return (
+    <ComposerBeam isActive={isWorking} className={className}>
       {promptInput}
     </ComposerBeam>
-  ) : promptInput
+  )
 }

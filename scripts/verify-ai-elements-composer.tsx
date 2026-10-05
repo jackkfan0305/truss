@@ -30,8 +30,9 @@ const ready = composer("Build a queue");
 const working = composer("Build a queue", true);
 const empty = composer("");
 
-assert.doesNotMatch(ready, /data-beam=/, "idle composer has no outer beam container");
-assert.match(working, /data-beam=/, "working composer retains the border beam");
+// The beam wrapper is always mounted so the Metal FX ring is never remounted.
+assert.match(ready, /data-beam=/);
+assert.match(working, /data-beam=/);
 assert.match(ready, /aria-label="Send message"/);
 assert.match(working, /aria-busy="true"/);
 // While a turn runs, the send button becomes an enabled Stop button.

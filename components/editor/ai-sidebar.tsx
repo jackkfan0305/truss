@@ -165,7 +165,7 @@ export function AiSidebar({
       aria-label="Assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl md:pt-3.5 shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
         isOpen ? "translate-x-0 duration-400" : "translate-x-[calc(100%+2rem)] duration-350"
       )}
     >

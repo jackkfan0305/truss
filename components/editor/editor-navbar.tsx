@@ -105,7 +105,11 @@ export function EditorNavbar({
       <div
         className={cn(
           FLOATING_SURFACE,
-          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 sm:top-3"
+          "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 transition-transform ease-smooth-out motion-reduce:transition-none sm:top-3",
+          // Slides clear of the open assistant panel (w-[26rem]), mirroring how
+          // the left toggle follows the diagrams sidebar. Below md the panel
+          // spans nearly the full width, so there is no room to move into.
+          isAssistantOpen ? "duration-400 md:-translate-x-[26rem]" : "translate-x-0 duration-350"
         )}
       >
         {saveStatus}

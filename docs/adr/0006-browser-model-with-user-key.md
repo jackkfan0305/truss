@@ -18,6 +18,7 @@ user's, paid for by the user, running in the user's browser.
 
 The server stays the only place a graph is validated, laid out and written, so
 the two agents cannot drift apart on the contract. A key in localStorage can be
-read by any script on our origin, so the assistant renders model output as
-plain text only, and Disconnect deletes the key. A server-side proxy would
+read by any script on our origin, so the assistant renders model output only
+as sanitized markdown made of React elements: raw HTML never becomes markup
+and unsafe links never become anchors. Disconnect deletes the key. A server-side proxy would
 reintroduce the tier ADR 0001 removed and is out of scope.

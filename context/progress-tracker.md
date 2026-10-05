@@ -8,6 +8,26 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Goal
 
+- Side chat UI restored onto the browser assistant. The agent-chat-overhaul
+  panel (3c7c0b6) is back: AI Elements, the Metal FX composer with border beam
+  and model pill, the orb empty state, the task stack, markdown replies through
+  `components/chat/response.tsx`, and the follow-and-jump transcript.
+  `components/editor/ai-sidebar.tsx` replaces `assistant-sidebar.tsx` and keeps
+  every behavior it had. The not-connected state is a Connect OpenRouter screen
+  with the OpenRouter mark. `runAssistantTurn` now forwards reasoning and gives
+  tool events an id and outcome.
+  - Dropped: collaborator avatars and identity rail (Liveblocks), spec
+    attachments, older-history paging, the remote run status line, the
+    design-run observer, and the thinking-effort pill. None has a
+    browser-assistant equivalent.
+  - New dependencies: metal-fx, border-beam, thinking-orbs, motion, shiki,
+    cmdk, nanoid, streamdown, @streamdown/cjk, @streamdown/code,
+    @streamdown/math, @streamdown/mermaid, tokenlens, use-stick-to-bottom,
+    @radix-ui/react-use-controllable-state (versions as 3c7c0b6 pinned).
+  - Verifiers: `verify-assistant-turn.ts` plus the overhaul's adapted UI
+    verifiers (chat response, composer, composer interaction, thinking and
+    answer streams, scroll, chat UI, markdown tokens, streaming markdown, AI
+    Elements markdown), all in `verify:unit`.
 - `browser-openrouter-assistant` complete. The editor has an Assistant panel
   that connects the user's own OpenRouter account (OAuth PKCE, callback at
   `/openrouter/callback`) and runs `streamText` in the browser. Its tools call

@@ -44,7 +44,9 @@ export function AiChatComposer({
       <PromptInput
         aria-busy={isWorking}
         maxFiles={0}
-        className="ai-chat-composer w-auto overflow-hidden rounded-[1.625rem] border border-surface-border/50 bg-subtle px-2 pt-1 transition-colors focus-within:border-copy-secondary"
+        // The form is the only frame: PromptInput's inner InputGroup would
+        // otherwise draw a second, smaller-radius border and focus ring.
+        className="ai-chat-composer w-auto overflow-hidden rounded-[1.625rem] border border-surface-border/50 bg-subtle px-2 pt-1 transition-colors focus-within:border-copy-secondary [&_[data-slot=input-group]]:rounded-none! [&_[data-slot=input-group]]:border-0! [&_[data-slot=input-group]]:bg-transparent! [&_[data-slot=input-group]]:ring-0!"
         onSubmit={({ text }) => {
           if (isWorking || !text.trim()) return
           onSubmit(text)

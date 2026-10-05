@@ -176,7 +176,7 @@ export function AiSidebar({
             variant="ghost"
             size="sm"
             onClick={disconnectOpenRouter}
-            className="text-copy-muted hover:text-copy-primary"
+            className="-mr-2.5 text-copy-muted hover:text-copy-primary"
           >
             Disconnect
           </Button>
@@ -199,7 +199,7 @@ export function AiSidebar({
 
           {/* No bar behind the composer: the box hangs on the panel and the
               transcript scrolls up to meet it. */}
-          <div className="p-3">
+          <div className="px-4 py-3">
             <AiChatComposer
               draft={draft}
               isWorking={isRunning}

@@ -18,7 +18,7 @@ import {
 } from "@/lib/assistant-turn"
 
 const ROW_CLASS =
-  "flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-copy-secondary"
+  "-mx-2 flex min-h-9 w-[calc(100%+1rem)] items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-copy-secondary"
 
 /**
  * A turn's work log: one task per tool call, with the reasoning that followed
@@ -76,7 +76,7 @@ export function AiRunTasks({ turn }: { turn: AssistantTurn }) {
                 {title}
               </div>
               {group.reasoning.length > 0 ? (
-                <div className="space-y-2 border-l border-surface-border pl-6">
+                <div className="ml-1.5 space-y-2 border-l border-surface-border pl-2.5">
                   <ReasoningItems group={group} streamingPartId={streamingPartId} />
                 </div>
               ) : null}
@@ -94,7 +94,7 @@ export function AiRunTasks({ turn }: { turn: AssistantTurn }) {
               {title}
               <ChevronDown aria-hidden className="size-3.5 shrink-0 transition-transform group-data-open/task:rotate-180 motion-reduce:transition-none" />
             </TaskTrigger>
-            <TaskContent className="motion-reduce:animate-none [&>div]:mt-0 [&>div]:space-y-2 [&>div]:border-surface-border [&>div]:pl-6">
+            <TaskContent className="motion-reduce:animate-none [&>div]:mt-0 [&>div]:ml-1.5 [&>div]:space-y-2 [&>div]:border-l [&>div]:border-surface-border [&>div]:pl-2.5">
               <ReasoningItems group={group} streamingPartId={streamingPartId} />
             </TaskContent>
           </Task>

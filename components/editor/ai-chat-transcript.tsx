@@ -173,7 +173,7 @@ export function AiChatTranscript({ messages, emptyState }: AiChatTranscriptProps
           }
         }}
         onScroll={resumeFollowAtBottom}
-        className="h-full overflow-y-auto overscroll-contain pr-1"
+        className="-mr-1 h-full overflow-y-auto overscroll-contain pr-1"
       >
         {hasMessages ? (
           <ol className="flex flex-col gap-5 pb-3">

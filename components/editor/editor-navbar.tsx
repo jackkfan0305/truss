@@ -1,9 +1,9 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { SidebarLeftIcon } from "@hugeicons/core-free-icons"
+import { SidebarLeftIcon, SidebarRightIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { LayoutTemplate, Sparkles } from "lucide-react"
+import { LayoutTemplate } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -116,26 +116,34 @@ export function EditorNavbar({
             <span className="hidden sm:inline">Templates</span>
           </Button>
         ) : null}
-        {onToggleAssistant ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onToggleAssistant}
-            aria-controls="assistant-sidebar"
-            aria-expanded={isAssistantOpen}
-            aria-label={isAssistantOpen ? "Close assistant" : "Open assistant"}
-          >
-            <Sparkles className="size-4" />
-            <span className="hidden sm:inline">Assistant</span>
-          </Button>
-        ) : null}
-        {(saveStatus || onOpenTemplates || onToggleAssistant) && (presence || profile) ? (
+        {(saveStatus || onOpenTemplates) && (presence || profile) ? (
           <GroupDivider />
         ) : null}
         <div className="flex items-center gap-2 pr-0.5 pl-1">
           {presence}
           {profile}
         </div>
+        {onToggleAssistant ? (
+          <>
+            <GroupDivider />
+            {/* The mirror of the diagrams toggle: same ghost icon button, mirrored glyph. */}
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              onClick={onToggleAssistant}
+              aria-controls="assistant-sidebar"
+              aria-expanded={isAssistantOpen}
+              aria-label={isAssistantOpen ? "Close assistant" : "Open assistant"}
+              className="rounded-lg"
+            >
+              <HugeiconsIcon
+                icon={SidebarRightIcon}
+                aria-hidden
+                className="size-5 text-copy-secondary"
+              />
+            </Button>
+          </>
+        ) : null}
       </div>
     </header>
   )

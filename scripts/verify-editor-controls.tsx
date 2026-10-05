@@ -181,6 +181,13 @@ const assistantNavbarHtml = renderToStaticMarkup(
   <EditorNavbar {...baseNavbarProps} isAssistantOpen={false} onToggleAssistant={() => undefined} />
 )
 assert.match(assistantNavbarHtml, /aria-controls="assistant-sidebar"/)
-assert.match(assistantNavbarHtml, /Open assistant/)
+assert.match(assistantNavbarHtml, /aria-label="Open assistant"/)
+assert.doesNotMatch(assistantNavbarHtml, />Assistant</, "the toggle is icon-only")
+assert.match(
+  renderToStaticMarkup(
+    <EditorNavbar {...baseNavbarProps} isAssistantOpen onToggleAssistant={() => undefined} />
+  ),
+  /aria-expanded="true"[^>]*aria-label="Close assistant"|aria-label="Close assistant"[^>]*aria-expanded="true"/
+)
 
 console.info("Editor floating-control checks passed")

@@ -46,7 +46,7 @@ import { useCanvasRemoteSync } from "@/hooks/use-canvas-remote-sync";
 import { isCanvasHistoryCommit } from "@/lib/canvas-history";
 import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { RemoteCanvas } from "@/lib/canvas-client";
-import { drawNodesThenEdges, planCanvasReplay } from "@/lib/canvas-replay";
+import { planCanvasEdits, playCanvasEdits } from "@/lib/canvas-replay";
 import {
   SHAPE_DRAG_MIME,
   createNodeId,
@@ -271,23 +271,18 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
         return;
       }
 
-      const plan = planCanvasReplay(latest.current, remote.snapshot);
+      const edits = planCanvasEdits(latest.current, remote.snapshot);
 
-      restore(plan.base);
-      await autosave.whilePaused(() =>
-        drawNodesThenEdges(
-          plan,
-          {
-            addNodes: (added) => setNodes((existing) => [...existing, ...added]),
-            addEdges: (added) => setEdges((existing) => [...existing, ...added]),
-          },
-          {
-            moveCursor: (cursor) => setAgentPresence({ cursor }),
-            clearCursor: () => setAgentPresence(null),
-            sleep: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
-          },
-        ),
-      );
+      await autosave.whilePaused(async () => {
+        await playCanvasEdits(edits, { setNodes, setEdges }, {
+          showAgent: (cursor, editing) => setAgentPresence({ cursor, editing }),
+          clearAgent: () => setAgentPresence(null),
+          sleep: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
+        });
+        // Edits append and replace in place, so order can differ from the
+        // stored snapshot; landing on it exactly keeps autosave clean.
+        restore(remote.snapshot);
+      });
     },
     [autosave, history, restore, setAgentPresence, setEdges, setNodes],
   );

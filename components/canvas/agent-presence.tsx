@@ -3,9 +3,12 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { XYPosition } from "@xyflow/react";
 
-/** The agent's cursor while a replay draws on this tab's canvas. */
+import type { AgentEditing } from "@/lib/canvas-replay";
+
+/** The agent's cursor, and the item it is editing, while a replay plays on this tab's canvas. */
 export interface AgentPresence {
   cursor: XYPosition | null;
+  editing: AgentEditing | null;
 }
 
 interface AgentPresenceValue {
@@ -29,6 +32,17 @@ export function AgentPresenceProvider({ children }: { children: ReactNode }) {
 /** `null` whenever the agent is not drawing. Safe outside a provider. */
 export function useAgentPresence(): AgentPresence | null {
   return useContext(AgentPresenceContext)?.presence ?? null;
+}
+
+/**
+ * Whether the agent is editing this node or edge right now.
+ *
+ * ponytail: every consumer re-renders on each cursor move. Fine at diagram
+ * sizes; split the editing id into its own context if large canvases stutter.
+ */
+export function useIsAgentEditing(kind: AgentEditing["kind"], id: string): boolean {
+  const editing = useAgentPresence()?.editing;
+  return editing?.kind === kind && editing.id === id;
 }
 
 export function useSetAgentPresence(): (presence: AgentPresence | null) => void {

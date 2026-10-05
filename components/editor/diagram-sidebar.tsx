@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { FolderOpen, Pencil, Plus, Trash2 } from "lucide-react"
 
+import { SidebarResizeHandle } from "@/components/editor/sidebar-resize-handle"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { DiagramSummary } from "@/types/diagram"
@@ -34,7 +35,7 @@ export function DiagramSidebar({
       aria-label="Diagrams"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 left-0 z-40 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-elevated px-4 pt-3.5 pb-4 shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        "absolute inset-y-0 left-0 z-40 flex w-(--diagrams-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-elevated px-4 pt-3.5 pb-4 shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
         // Open is the invitation, close gets out of the way: 400ms in, 350ms out.
         isOpen ? "translate-x-0 duration-400" : "-translate-x-[calc(100%+2rem)] duration-350",
         className
@@ -65,6 +66,14 @@ export function DiagramSidebar({
         <Plus className="h-4 w-4" />
         New Diagram
       </Button>
+
+      <SidebarResizeHandle
+        side="left"
+        cssVar="--diagrams-sidebar-w"
+        min={224}
+        max={512}
+        label="Resize diagrams sidebar"
+      />
     </aside>
   )
 }

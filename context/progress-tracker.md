@@ -43,7 +43,7 @@ Update this file whenever the current phase, active feature, or implementation s
     `verify-editor-controls.tsx`.
   - Decisions: OpenRouter calls use `maxRetries: 0`, so a 429 ends the turn at
     once. The 401 "OpenRouter disconnected" notice shows above the Connect
-    button. Disconnect and unmount abort a running turn. The tools validate
+    button. Disconnect (in the Clerk profile menu) and unmount abort a running turn. The tools validate
     each graph with the server's own zod schemas (moved to the client-safe
     `lib/agent-graph-schema.ts`) before any write, so a bad graph returns
     path-level issues to the model and never leaves an empty diagram behind.
@@ -1862,3 +1862,36 @@ result is observed.
   **Verification notes:**
   - Manual browser checks in Tasks 8 and 9 unverified (no signed-in Clerk session in dev environment)
   - All automated gates pass: typecheck, lint, verify:unit, build
+
+- Agent edits replay edit by edit (2026-10-05). `lib/canvas-replay.ts` now
+  plans every change between the open canvas and the agent's write (edge
+  removals, node removals, node updates, node additions, edge updates, edge
+  additions) and plays each one behind the agent cursor: a 540ms sweep, then
+  the item glows for `AI_EDIT_HOLD_MS` (200ms) before the next. Updates and
+  removals used to land at once with only additions animated. Removed
+  `lib/canvas-drawing.ts`, `getBuildStepMs` and `verify-canvas-drawing.ts`.
+  The assistant panel calls `syncNow` after each applied edit, so the replay
+  starts at once instead of on the next 4s poll. Gates pass: typecheck, lint,
+  `verify:unit`. Live browser check pending a signed-in session.
+
+- Assistant chat persists across reloads (2026-10-05). It used to live only in
+  `AiSidebar` state, so a reload wiped it. `lib/assistant-history.ts` saves the
+  transcript and model history per diagram in localStorage after each turn,
+  not on every token. A turn cut off by a reload comes back as stopped.
+  `AiSidebar` is now keyed by diagram id, so switching diagrams loads that
+  diagram's chat instead of carrying the last one over. Past the localStorage
+  quota, saving stops silently. `scripts/verify-assistant-history.ts` is in
+  `verify:unit`. Typecheck and lint pass. Live browser check pending a
+  signed-in session.
+- `/clear` in the assistant composer empties that diagram's chat, both the
+  transcript and the model history, and the save effect overwrites the stored
+  copy. It does nothing while a turn runs, like any other send.
+- Assistant panel header removed (2026-10-05). Disconnect OpenRouter moved to
+  the Clerk profile menu (`ProfileButton` in `ai-sidebar.tsx`), shown only
+  while a key is stored.
+- Resizable sidebars (2026-10-05). `SidebarResizeHandle` sits on the inner
+  edge of the diagrams sidebar (224-512px) and the assistant panel
+  (320-768px), drag or arrow keys, md and up. Widths live in
+  `--diagrams-sidebar-w` and `--assistant-sidebar-w` on `<html>` so the navbar
+  chips follow, and in localStorage. Gates pass; live browser check pending a
+  signed-in session.

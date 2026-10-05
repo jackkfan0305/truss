@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { ModelMessage } from "ai"
-import { CircleAlert } from "lucide-react"
+import { UserButton } from "@clerk/nextjs"
+import { CircleAlert, Unplug } from "lucide-react"
 
+import { useCanvasSyncNow } from "@/components/canvas/canvas-save-context"
 import { AiChatComposer } from "@/components/chat/ai-chat-composer"
 import { OpenRouterLogo } from "@/components/chat/openrouter-logo"
 import { ThinkingOrb } from "@/components/chat/thinking-orb"
+import { SidebarResizeHandle } from "@/components/editor/sidebar-resize-handle"
 import { AiChatTranscript } from "@/components/editor/ai-chat-transcript"
 import type { ChatMessage } from "@/components/editor/chat-entry"
 import { Button } from "@/components/ui/button"
@@ -17,6 +20,7 @@ import {
   readAssistantModel,
   writeAssistantModel,
 } from "@/lib/assistant-models"
+import { readAssistantChat, writeAssistantChat } from "@/lib/assistant-history"
 import { createAssistantActions } from "@/lib/assistant-tools"
 import {
   applyAssistantEvent,
@@ -61,6 +65,27 @@ const STARTER_PROMPTS = [
   "What would you add to this system?",
 ]
 
+/** The Clerk profile menu, with Disconnect OpenRouter while a key is stored. */
+export function ProfileButton() {
+  const apiKey = useSyncExternalStore(subscribeToKey, () => getKey(), () => null)
+  return (
+    <UserButton>
+      {apiKey ? (
+        <UserButton.MenuItems>
+          <UserButton.Action
+            label="Disconnect OpenRouter"
+            labelIcon={<Unplug className="size-4" />}
+            onClick={() => {
+              disconnect()
+              window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
+            }}
+          />
+        </UserButton.MenuItems>
+      ) : null}
+    </UserButton>
+  )
+}
+
 /** The editor's side chat, backed by the browser OpenRouter assistant. */
 export function AiSidebar({
   isOpen,
@@ -77,13 +102,33 @@ export function AiSidebar({
     () => readAssistantModel(window.localStorage),
     () => DEFAULT_ASSISTANT_MODEL_ID
   )
-  const actions = useMemo(() => createAssistantActions(), [])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const syncNow = useCanvasSyncNow()
+  const actions = useMemo(() => {
+    const base = createAssistantActions()
+    return {
+      ...base,
+      // Fetch the write now so the canvas replays it while the turn goes on,
+      // instead of on the next idle poll up to four seconds later.
+      async applyDiagramEdit(input: Parameters<typeof base.applyDiagramEdit>[0]) {
+        const result = await base.applyDiagramEdit(input)
+        if ("applied" in result && input.diagramId === diagramId) syncNow()
+        return result
+      },
+    }
+  }, [diagramId, syncNow])
+  // Read once on mount. The transcript only renders once the key resolves,
+  // after hydration, so the server's empty chat never has to match it.
+  const [saved] = useState(() =>
+    typeof window === "undefined"
+      ? { messages: [], history: [] }
+      : readAssistantChat(window.localStorage, diagramId)
+  )
+  const [messages, setMessages] = useState<ChatMessage[]>(saved.messages)
   const [draft, setDraft] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   // The transcript is hidden once the key is gone, so a 401 notice lives here.
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null)
-  const history = useRef<ModelMessage[]>([])
+  const history = useRef<ModelMessage[]>(saved.history)
   const controller = useRef<AbortController | null>(null)
   const isMounted = useRef(false)
 
@@ -96,6 +141,13 @@ export function AiSidebar({
       controller.current?.abort()
     }
   }, [])
+
+  // Saved between turns, not on every streamed token.
+  useEffect(() => {
+    if (!isRunning) {
+      writeAssistantChat(window.localStorage, diagramId, { messages, history: history.current })
+    }
+  }, [diagramId, messages, isRunning])
 
   function updateTurn(turnId: string, update: (turn: AssistantTurn) => AssistantTurn) {
     setMessages((current) =>
@@ -110,6 +162,14 @@ export function AiSidebar({
   async function send(text: string) {
     const userText = text.trim()
     if (!userText || !apiKey || isRunning) return
+
+    // The save effect then writes the empty chat over the stored one.
+    if (userText === "/clear") {
+      setDraft("")
+      history.current = []
+      setMessages([])
+      return
+    }
 
     const sentAt = Date.now()
     const turnId = `assistant-${sentAt}`
@@ -151,12 +211,10 @@ export function AiSidebar({
     setIsRunning(false)
   }
 
-  function disconnectOpenRouter() {
-    controller.current?.abort()
-    setDisconnectNotice(null)
-    disconnect()
-    window.dispatchEvent(new Event(OPENROUTER_KEY_CHANGE_EVENT))
-  }
+  // Disconnecting from the profile menu stops a running turn too.
+  useEffect(() => {
+    if (!apiKey) controller.current?.abort()
+  }, [apiKey])
 
   return (
     // Mirrors DiagramSidebar on the right edge; an overlay, so the canvas never reflows.
@@ -165,24 +223,10 @@ export function AiSidebar({
       aria-label="Assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl md:pt-3.5 shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        "absolute inset-y-0 right-0 z-40 flex w-(--assistant-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl md:pt-3.5 shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
         isOpen ? "translate-x-0 duration-400" : "translate-x-[calc(100%+2rem)] duration-350"
       )}
     >
-      <div className="flex min-h-9 items-center justify-between gap-2 px-4">
-        <h2 className="text-sm font-medium text-copy-primary">Assistant</h2>
-        {apiKey ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={disconnectOpenRouter}
-            className="-mr-2.5 text-copy-muted hover:text-copy-primary"
-          >
-            Disconnect
-          </Button>
-        ) : null}
-      </div>
-
       {apiKey ? (
         <>
           {/*
@@ -214,6 +258,14 @@ export function AiSidebar({
       ) : (
         <ConnectOpenRouter notice={disconnectNotice} />
       )}
+
+      <SidebarResizeHandle
+        side="right"
+        cssVar="--assistant-sidebar-w"
+        min={320}
+        max={768}
+        label="Resize assistant panel"
+      />
     </aside>
   )
 }

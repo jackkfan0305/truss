@@ -3,7 +3,7 @@ import { Message, MessageContent } from "@/components/ai-elements/message-frame"
 import { AiRunTasks, RunOutcomeLine } from "@/components/editor/ai-run-tasks"
 import type { AssistantTurn } from "@/lib/assistant-turn"
 
-/** One side chat line. Lives in component state, so a reload starts fresh. */
+/** One side chat line, saved per diagram by `lib/assistant-history.ts`. */
 export type ChatMessage =
   | { id: string; role: "user"; content: string; sentAt: number }
   | { id: string; role: "assistant"; turn: AssistantTurn; sentAt: number }

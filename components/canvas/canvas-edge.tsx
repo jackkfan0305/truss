@@ -10,6 +10,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 
+import { useIsAgentEditing } from "@/components/canvas/agent-presence";
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import {
   useEdgeLabelOffset,
@@ -71,6 +72,7 @@ export function CanvasEdgeRenderer({
 }: EdgeProps<CanvasEdge>) {
   const { updateEdgeData } = useReactFlow<CanvasNode, CanvasEdge>();
   const isFreshArrival = useIsFreshArrival();
+  const isAgentEditing = useIsAgentEditing("edge", id);
   // Present for an edge that named no handle, which is every generated one: it
   // replaces React Flow's fixed top-handle endpoints with lane-separated ones.
   const route = useEdgeRoute(id);
@@ -97,7 +99,7 @@ export function CanvasEdgeRenderer({
     ? savedRoute.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")
     : fallbackPath;
   const label = data?.label ?? "";
-  const isActive = isHovered || selected === true || isEditing;
+  const isActive = isHovered || selected === true || isEditing || isAgentEditing;
   const positionedLabel = savedRoute?.label
     ? { x: savedRoute.label.x, y: savedRoute.label.y }
     : positionParallelEdgeLabel({
@@ -141,7 +143,7 @@ export function CanvasEdgeRenderer({
        * together instead of leaving a full-strength arrow on a faded edge.
        */}
       <g
-        className="canvas-edge"
+        className={isAgentEditing ? "canvas-edge canvas-agent-editing" : "canvas-edge"}
         style={{ opacity: isActive ? 1 : REST_OPACITY }}
         onMouseEnter={show}
         onMouseLeave={hide}

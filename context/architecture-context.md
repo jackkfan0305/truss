@@ -50,8 +50,10 @@ require a fresh read and revised edit, without automatic fingerprint replacement
   autosave and agent-token routes both check the version: if the stored version
   does not match, the write fails with `409` and nothing changes. An idle editor
   polls `GET /api/diagrams/:id/canvas?since=N` every 4 seconds. When the version
-  increases, the new canvas is fetched and replayed node by node behind the
-  agent cursor; a remote apply clears the undo stack.
+  increases, the new canvas is fetched and replayed edit by edit behind the
+  agent cursor; a remote apply clears the undo stack. The browser assistant
+  triggers that fetch right after each applied edit instead of waiting for
+  the poll.
 - Diagram IDs are never reused. Deletion stamps `deletingAt` and `deletedAt`
   together in a single tombstone write. Either stamp makes the diagram
   inaccessible and excludes it from diagram lists. Timestamps rather than a
@@ -117,9 +119,9 @@ one-shot local HTTP listener.
   return 409. After any successful write it persists the canonical requested
   snapshot Blob-first then Prisma pointer-second. A persistence failure is
   retryable through exact replay. The browser polls for new versions and
-  replays the imported graph node by node behind the agent cursor through the
-  native AI-drawing loop (540ms cursor-arrival wait then `getBuildStepMs`
-  between items). The import route declares `maxDuration = 120`, leaving
+  replays the imported graph edit by edit behind the agent cursor
+  (`lib/canvas-replay.ts`: a 540ms cursor-arrival wait, then the item glows
+  for `AI_EDIT_HOLD_MS`, 200ms, before the next edit). The import route declares `maxDuration = 120`, leaving
   execution headroom for authorization and persistence.
 - Diagram IDs are persisted before the launch page posts. A `409` first reads
   the same ID through the owner-only diagram route and resumes only when both
@@ -221,7 +223,8 @@ No backoff loop, no page-side state machine beyond "waiting."
 - An edit that reuses an ID from `opaqueNodeIds`/`opaqueEdgeIds` is refused
   outright (`collidesWithOpaque`, `409`), rather than applied.
 - The write is immediate, not paced. The idle editor polls for new versions
-  and replays the changes node by node behind the agent cursor.
+  and replays the changes edit by edit behind the agent cursor: removals,
+  then node updates and additions, then edges, each lit for 200ms.
 - **Edges anchored to a removed node are swept with it, opaque ones included.**
   An opaque edge touching a removed node would otherwise survive pointing at
   a node that no longer exists, permanently, because opaque items are
@@ -262,8 +265,8 @@ Every canvas write arrives through the graph import and edit routes they call.
   rollback would lose concurrent editor edits. The error path reports how many
   of the requested changes landed.
 - An idle editor polls `GET /api/diagrams/:id/canvas?since=N` every 4 seconds.
-  When the version increases, the new canvas is fetched and replayed node by
-  node behind the agent cursor. The cursor sweep duration lives in
+  When the version increases, the new canvas is fetched and replayed edit by
+  edit behind the agent cursor. The cursor sweep duration lives in
   `types/tasks.ts` because the browser animates it during replay.
 - Progress is visible only to the owner: the agent takes an ephemeral cursor
   and avatar on the canvas during replay. It is cosmetic; if the replay stalls,

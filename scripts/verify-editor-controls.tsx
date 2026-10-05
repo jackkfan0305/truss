@@ -97,7 +97,7 @@ assert.match(closedDiagramsToggle, /top-3/)
 assert.match(closedDiagramsToggle, /left-3/)
 assert.ok(
   openDiagramsToggle.includes(
-    "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)]"
+    "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-3.75rem)]"
   ),
   "the open toggle slides to the panel's inner edge on a transform"
 )
@@ -128,7 +128,7 @@ assert.match(homeHtml, /Profile/)
 
 assert.match(openDiagramSidebar, /inset-y-0/)
 assert.match(openDiagramSidebar, /left-0/)
-assert.match(openDiagramSidebar, /w-72/)
+assert.match(openDiagramSidebar, /w-\(--diagrams-sidebar-w\)/)
 assert.match(openDiagramSidebar, /max-w-\[calc\(100%-1\.5rem\)\]/)
 assert.match(openDiagramSidebar, /translate-x-0/)
 assert.match(openDiagramSidebarHtml, /max-sm:pt-8/)

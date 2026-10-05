@@ -17,8 +17,9 @@ use `--accent-ai` and `--accent-ai-text`. State is carried by icons and words,
 never colour alone; the beam and the orb annotate a state the running task
 already states in words.
 
-- The panel sits under the floating navbar with a small header: the title, and
-  Disconnect when connected. The model picker is the composer's settings pill.
+- The panel sits under the floating navbar with no header. Disconnect
+  OpenRouter lives in the Clerk profile menu while a key is stored. The model
+  picker is the composer's settings pill.
 - Not connected, the panel shows a Connect OpenRouter screen: the OpenRouter
   mark and name, a heading, one short paragraph, and one primary button.
 - Messages share one reading edge. Your prompts sit in a `bg-subtle` bubble;

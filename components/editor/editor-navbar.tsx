@@ -78,7 +78,7 @@ export function EditorNavbar({
           SIDEBAR_TOGGLE,
           "left-3 transition-transform ease-smooth-out motion-reduce:transition-none",
           isSidebarOpen
-            ? "translate-x-[calc(min(18rem,calc(100vw-1.5rem))-3.75rem)] duration-400"
+            ? "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-3.75rem)] duration-400"
             : "translate-x-0 duration-350"
         )}
       >
@@ -106,10 +106,10 @@ export function EditorNavbar({
         className={cn(
           FLOATING_SURFACE,
           "pointer-events-auto absolute top-15 right-3 flex h-10 items-center gap-0.5 px-1.5 transition-transform ease-smooth-out motion-reduce:transition-none sm:top-3",
-          // Slides clear of the open assistant panel (w-[26rem]), mirroring how
+          // Slides clear of the open assistant panel (--assistant-sidebar-w), mirroring how
           // the left toggle follows the diagrams sidebar. Below md the panel
           // spans nearly the full width, so there is no room to move into.
-          isAssistantOpen ? "duration-400 md:-translate-x-[26rem]" : "translate-x-0 duration-350"
+          isAssistantOpen ? "duration-400 md:-translate-x-(--assistant-sidebar-w)" : "translate-x-0 duration-350"
         )}
       >
         {saveStatus}

@@ -1,16 +1,15 @@
 "use client";
 
-import { useCallback, useState, type KeyboardEvent } from "react";
 import {
   Handle,
   NodeResizer,
   Position,
   useKeyPress,
-  useReactFlow,
-  useStoreApi,
   type NodeProps,
 } from "@xyflow/react";
 
+import { AwsIcon } from "@/components/canvas/aws-icon";
+import { CanvasLabel } from "@/components/canvas/canvas-label";
 import { useIsAgentEditing } from "@/components/canvas/agent-presence";
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import { NodeColorToolbar } from "@/components/canvas/node-color-toolbar";
@@ -20,12 +19,8 @@ import {
   NODE_COLORS,
   NODE_DEFAULT_SIZES,
   NODE_MIN_SIZE,
-  type CanvasEdge,
   type CanvasNode,
 } from "@/types/canvas";
-
-/** Shown at rest and as the textarea placeholder, so the hint never moves. */
-const LABEL_PLACEHOLDER = "Untitled";
 
 /**
  * One handle per side (16-edge-behavior). All four are declared `source`: the
@@ -93,58 +88,52 @@ function NodeResizeFrame({ accent }: { accent: string }) {
  * inline label editing. Both write through React Flow's controlled flow, so
  * every change lands in the stored snapshot via `onNodesChange`.
  */
-export function CanvasNodeRenderer({
-  id,
-  data,
-  width,
-  height,
-  selected,
-}: NodeProps<CanvasNode>) {
+export function CanvasNodeRenderer(props: NodeProps<CanvasNode>) {
+  return props.data.kind === "aws-service" && props.data.catalogId ? (
+    <AwsServiceRenderer {...props} />
+  ) : (
+    <GenericNodeRenderer {...props} />
+  );
+}
+
+const HANDLES = HANDLE_POSITIONS.map((position) => (
+  <Handle key={position} id={position} type="source" position={position} />
+));
+
+/** Official icon above its editable name. No colour toolbar: icon colours are fixed. */
+function AwsServiceRenderer({ id, data, selected }: NodeProps<CanvasNode>) {
+  const isFreshArrival = useIsFreshArrival();
+  const isAgentEditing = useIsAgentEditing("node", id);
+
+  return (
+    <>
+      <div
+        className={cn(
+          "flex h-full w-full flex-col items-center justify-center gap-2 rounded-md border bg-elevated p-2 text-center text-sm",
+          selected ? "border-brand" : "border-surface-border",
+          isFreshArrival && "canvas-node-arrive",
+          isAgentEditing && "canvas-agent-editing",
+        )}
+      >
+        <AwsIcon catalogId={data.catalogId!} className="h-10 w-10" />
+        <CanvasLabel id={id} label={data.label} ariaLabel="Node label" className="w-full" />
+      </div>
+      {HANDLES}
+      {selected ? <NodeResizeFrame accent="var(--brand)" /> : null}
+    </>
+  );
+}
+
+/**
+ * Renderer for generic `canvasNode` nodes (13-node-shape, 14-node-editing).
+ * The shape lives in `NodeShapeFrame`; this adds the resize frame and label.
+ */
+function GenericNodeRenderer({ id, data, width, height, selected }: NodeProps<CanvasNode>) {
   // React Flow leaves width/height undefined until it has measured the node,
   // and the SVG shapes need a viewBox on the very first paint.
   const fallback = NODE_DEFAULT_SIZES[data.shape];
-  const { updateNodeData } = useReactFlow<CanvasNode, CanvasEdge>();
-  const store = useStoreApi<CanvasNode, CanvasEdge>();
   const isFreshArrival = useIsFreshArrival();
   const isAgentEditing = useIsAgentEditing("node", id);
-  const [isEditing, setIsEditing] = useState(false);
-
-  const stopEditing = useCallback(() => setIsEditing(false), []);
-
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Enter commits; Shift+Enter falls through to the textarea's own newline.
-      // A node label is a name, so a bare Enter breaking the line is almost
-      // never what was meant. The label is already written on every keystroke,
-      // so committing is just closing the editor.
-      const isCommit = event.key === "Enter" && !event.shiftKey;
-
-      if (!isCommit && event.key !== "Escape") {
-        return;
-      }
-
-      if (isCommit) {
-        // Without this the textarea inserts the newline before it unmounts.
-        event.preventDefault();
-      }
-
-      // Otherwise React Flow's own node key handler reads it too — Enter is one
-      // of its selection keys, so it would toggle the selection straight back on.
-      event.stopPropagation();
-      setIsEditing(false);
-
-      // Committing leaves the node entirely: deselect it, so the colour toolbar
-      // and the resize frame go with it, then hand focus to the canvas. The
-      // textarea is about to unmount and the browser would otherwise drop focus
-      // on <body>. `resetSelectedElements` is what a click on the pane calls, so
-      // the deselection travels the same change path as any other.
-      const { domNode, resetSelectedElements } = store.getState();
-
-      resetSelectedElements();
-      domNode?.focus({ preventScroll: true });
-    },
-    [store]
-  );
 
   return (
     <>
@@ -154,72 +143,22 @@ export function CanvasNodeRenderer({
         width={width ?? fallback.width}
         height={height ?? fallback.height}
         selected={selected}
-        // Only nodes that arrive while the canvas is already on screen — the
-        // AI placing one, a collaborator adding one. Opening a saved diagram
-        // mounts every node at once and animates none of them.
+        // Only nodes that arrive while the canvas is already on screen.
         className={cn(isFreshArrival && "canvas-node-arrive", isAgentEditing && "canvas-agent-editing")}
       >
-        {/*
-         * `nopan` covers the whole label area, not just the textarea: React Flow
-         * reads it off the event target to veto both panning and the pane's
-         * double-click zoom, so without it every double-click would zoom the
-         * canvas instead of opening the editor.
-         */}
-        <div
-          className="nopan flex h-full w-full items-center justify-center"
-          onDoubleClick={() => setIsEditing(true)}
-        >
-          {/*
-           * The label stays in the layout while editing — only hidden — and the
-           * textarea is absolutely positioned over it. That keeps the node from
-           * shifting on open and lets the box grow with what is typed, since it
-           * is still the label that sizes it.
-           */}
-          <div className="relative w-full">
-            <span
-              className={`break-words ${isEditing ? "invisible" : ""} ${data.label ? "" : "opacity-50"}`}
-            >
-              {data.label || LABEL_PLACEHOLDER}
-            </span>
-            {isEditing ? (
-              <textarea
-                // Focus on mount: the editor only exists because the user just
-                // double-clicked it, so there is nowhere else focus belongs.
-                autoFocus
-                // `nodrag` so selecting text does not drag the node with it,
-                // and `nokey` so Shift+click extends the text selection rather
-                // than starting the pane's selection box.
-                className="nodrag nopan nokey absolute inset-0 h-full w-full resize-none overflow-hidden bg-transparent text-center outline-none"
-                value={data.label}
-                placeholder={LABEL_PLACEHOLDER}
-                aria-label="Node label"
-                onChange={(event) =>
-                  updateNodeData(id, { label: event.target.value })
-                }
-                onBlur={stopEditing}
-                onKeyDown={handleKeyDown}
-              />
-            ) : null}
-          </div>
-        </div>
+        <CanvasLabel
+          id={id}
+          label={data.label}
+          ariaLabel="Node label"
+          className="flex h-full w-full items-center justify-center"
+        />
       </NodeShapeFrame>
       {/*
-       * Order here is paint order, and all three of these are positioned
-       * elements at `z-index: auto`, so the later sibling wins:
-       *
-       *   shape  →  handles  →  resize frame
-       *
-       * The handles have to come *after* `NodeShapeFrame` or its `absolute
-       * inset-0` fill covers their inner half — a handle straddles the node
-       * border, so that left only a ~4px outer sliver grabbable.
-       *
-       * The resize frame comes after the handles so that a selected node
-       * resizes from its side midpoints rather than starting a connection
-       * there. Connecting is the unselected-node gesture; both are reachable.
+       * Paint order: shape, handles, resize frame. Handles come after the shape
+       * or its `absolute inset-0` fill covers their inner half; the resize frame
+       * comes last so a selected node resizes from its side midpoints.
        */}
-      {HANDLE_POSITIONS.map((position) => (
-        <Handle key={position} id={position} type="source" position={position} />
-      ))}
+      {HANDLES}
       {selected ? (
         <>
           <NodeResizeFrame accent={NODE_COLORS[data.color].text} />

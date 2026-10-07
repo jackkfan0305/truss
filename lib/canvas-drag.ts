@@ -1,3 +1,4 @@
+import { getAwsCatalogEntry } from "@/lib/aws-catalog";
 import {
   NODE_DEFAULT_SIZES,
   NODE_SHAPES,
@@ -69,4 +70,42 @@ export function createNodeId(shape: NodeShape): string {
   nodeIdCounter += 1;
 
   return `${shape}-${Date.now().toString(36)}-${nodeIdCounter.toString(36)}-${crypto.randomUUID()}`;
+}
+
+/**
+ * The AWS picker → canvas drag contract. The payload names a catalog entry and
+ * nothing else: size, icon and label all come from the local catalog on drop.
+ */
+export const AWS_DRAG_MIME = "application/x-truss-aws";
+
+export interface AwsDragPayload {
+  catalogId: string;
+}
+
+export function buildAwsDragPayload(catalogId: string): AwsDragPayload {
+  return { catalogId };
+}
+
+/** Untrusted like the shape payload; any extra field or unknown ID is rejected. */
+export function parseAwsDragPayload(raw: string): AwsDragPayload | null {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const keys = Object.keys(parsed);
+  const { catalogId } = parsed as Record<string, unknown>;
+
+  if (keys.length !== 1 || typeof catalogId !== "string" || !getAwsCatalogEntry(catalogId)) {
+    return null;
+  }
+
+  return { catalogId };
 }

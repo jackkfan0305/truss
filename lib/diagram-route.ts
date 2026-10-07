@@ -59,13 +59,32 @@ export function parseDiagramEdgeLayout(value: unknown): DiagramEdgeLayout | null
   return { version: 1, points, label, geometryKey: value.geometryKey, source: value.source, target: value.target, text: value.text };
 }
 
-/** Every node matters because moving an unrelated node can obstruct an edge. */
+/**
+ * Every node matters because moving an unrelated node can obstruct an edge.
+ * Positions are canvas-absolute, so moving an ancestor invalidates the routes
+ * of its descendants even though their parent-relative positions are unchanged.
+ */
 export function diagramGeometryKey(nodes: readonly CanvasNode[]): string {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const origin = (node: CanvasNode): DiagramPoint => {
+    let x = node.position.x;
+    let y = node.position.y;
+    const seen = new Set([node.id]);
+    for (let parent = node.parentId ? byId.get(node.parentId) : undefined; parent && !seen.has(parent.id);
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined) {
+      seen.add(parent.id);
+      x += parent.position.x;
+      y += parent.position.y;
+    }
+    return { x, y };
+  };
+
   return JSON.stringify([...nodes].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((node) => {
     const size = NODE_DEFAULT_SIZES[node.data.shape];
-    return [node.id, node.position.x, node.position.y,
+    const absolute = origin(node);
+    return [node.id, node.parentId ?? null, absolute.x, absolute.y,
       node.width ?? node.measured?.width ?? size.width,
-      node.height ?? node.measured?.height ?? size.height, node.data.shape];
+      node.height ?? node.measured?.height ?? size.height, node.data.shape, node.data.kind ?? 'generic'];
   }));
 }
 

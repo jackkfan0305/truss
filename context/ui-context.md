@@ -102,6 +102,10 @@ Smooth-step path with an arrow marker. Default edge color: `#f8fafc`. Stroke wid
 - `cylinder` — database / storage
 - `hexagon` — external system / boundary
 
+### AWS Blocks and Boundaries
+
+AWS service blocks are a rectangular elevated surface with the local catalog icon in its official colours above an editable name. They get no colour toolbar, since icon colours are fixed. Boundaries are a dashed `copy-muted` outline with a transparent interior; the icon and title sit in a patch of the page background (`bg-page`) straddling the top edge. Both use the standard four connection handles. A failed icon load shows the catalog name as text. Workspace controls (the AWS picker button and panel) keep the monochrome palette styling.
+
 ### Connection Handles
 
 Small white circular handles, hidden by default, revealed on node hover. Appear at all four sides of a node.

@@ -38,6 +38,9 @@ import {
 /** Dimmed at rest, full strength when hovered, selected or being labelled. */
 const REST_OPACITY = 0.55;
 
+/** Above any elevated edge (parent z + 1000 when selected). */
+const LABEL_Z_INDEX = 10_000;
+
 const LABEL_PLACEHOLDER = "Label";
 
 /** The faint prompt on an active, unlabelled edge. */
@@ -133,6 +136,9 @@ export function CanvasEdgeRenderer({
     // The `EdgeLabelRenderer` container is `pointer-events: none` so it does not
     // swallow clicks on the canvas; each label opts itself back in.
     pointerEvents: "all" as const,
+    // Edges between nested nodes get their parent's z; an auto-z label would
+    // paint under the stroke.
+    zIndex: LABEL_Z_INDEX,
   };
 
   return (

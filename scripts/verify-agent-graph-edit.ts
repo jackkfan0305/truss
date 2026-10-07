@@ -10,6 +10,8 @@ import {
   type SnapshotFlow,
 } from "../lib/agent-canvas-write";
 import { CanvasVersionConflictError } from "../lib/canvas-snapshot";
+import { canvasToAgentGraph } from "../lib/agent-graph";
+import { nestedSnapshot } from "./testing/aws-diagram-fixtures";
 import type { CanvasEdge, CanvasNode } from "../types/canvas";
 
 function n(id: string, label = "Node", x = 0, y = 0) {
@@ -456,6 +458,141 @@ async function checkAuthorizationPrecedesBodyParsing(): Promise<void> {
   assert.deepEqual(state.nodes, []);
 }
 
+async function checkV1EditOfNestedDiagramIsRefused(): Promise<void> {
+  // Create a nested diagram with a boundary node
+  const boundary = {
+    id: "vpc",
+    type: "canvasBoundary",
+    position: { x: 0, y: 0 },
+    width: 400,
+    height: 240,
+    data: { label: "VPC", shape: "rectangle", color: "neutral", kind: "boundary", catalogId: "boundary-vpc" },
+  } as CanvasNode;
+  const child = {
+    id: "web",
+    type: "canvasNode",
+    position: { x: 24, y: 64 },
+    width: 180,
+    height: 100,
+    parentId: "vpc",
+    data: { label: "Web", shape: "rectangle", color: "neutral", kind: "aws-service", catalogId: "aws-ec2" },
+  } as CanvasNode;
+  const live = { nodes: [boundary, child], edges: [] };
+  const { flow } = makeFlow([...live.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+
+  const response = await handleAgentGraphEditPost(
+    request({
+      fingerprint: canvasFingerprint(live),
+      graph: { version: 1, nodes: [n("web")], edges: [] },
+    }),
+    "p1",
+    deps(flow, saved),
+    1, // v1 edit
+  );
+
+  assert.equal(response.status, 409);
+  assert.ok(saved.snapshot === undefined, "no mutation happens on v1 nested edit");
+}
+
+const v2Node = (id: string, catalogId: string, parentId?: string, extra: object = {}) => ({
+  id,
+  catalogId,
+  label: id,
+  kind: catalogId.startsWith("boundary-") ? ("boundary" as const) : ("aws-service" as const),
+  ...(parentId ? { parentId } : {}),
+  ...extra,
+});
+
+async function checkNestedEditCommitsAndReturnsExactGeometry(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow, state } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: { nodes: CanvasNode[] } } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const nodes = [...graph.nodes, v2Node("api", "aws-lambda", "private")];
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2, nodes } }),
+    "p1", deps(flow, saved), 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.applied, true);
+  const committed = saved.snapshot as { nodes: CanvasNode[]; edges: CanvasEdge[] };
+  assert.equal(body.fingerprint, canvasFingerprint(committed));
+  assert.deepEqual(body.graph, canvasToAgentGraph(committed, 2).graph);
+  const api = body.spatial.nodes.find((node: { id: string }) => node.id === "api");
+  const uploads = body.spatial.nodes.find((node: { id: string }) => node.id === "uploads");
+  assert.equal(api.parentId, "private");
+  assert.ok(
+    api.bounds.y >= uploads.bounds.y + uploads.bounds.height || api.bounds.x >= uploads.bounds.x + uploads.bounds.width,
+    "the new service lands clear of its sibling",
+  );
+  assert.deepEqual(state.nodes.find((node) => node.id === "web")?.position, { x: 24, y: 64 });
+}
+
+async function checkNestedCollisionIs422AndPersistsNothing(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const nodes = [...graph.nodes, v2Node("api", "aws-lambda", "public", { x: 24, y: 64 })];
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2, nodes } }),
+    "p1", deps(flow, saved), 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.code, "invalidGeometry");
+  assert.ok(body.issues.some((issue: { itemIds: string[] }) => issue.itemIds.includes("api") && issue.itemIds.includes("web")));
+  assert.equal(saved.snapshot, undefined);
+  assert.deepEqual(flow.nodes.map((node) => node.id).sort(), start.nodes.map((node) => node.id).sort());
+}
+
+async function checkV2GraphWithoutVersionIsRefused(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved),
+  );
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.code, "unsupportedGraphVersion");
+  assert.equal(body.requiredVersion, 2);
+  assert.equal(saved.snapshot, undefined);
+  const unknown = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved), 3,
+  );
+  assert.equal(unknown.status, 400);
+  assert.equal((await unknown.json()).code, "unsupportedGraphVersion");
+}
+
+async function checkV1SuccessBodyIsUnchanged(): Promise<void> {
+  const start = materializeAgentGraph({ version: 1, nodes: [n("web")], edges: [] });
+  const { flow } = makeFlow([...start.nodes], []);
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { version: 1, nodes: [n("web"), n("db", "DB", 280, 0)], edges: [] } }),
+    "p1", deps(flow, {}),
+  );
+  assert.deepEqual(await response.json(), { applied: true });
+}
+
+async function checkStaleNestedEditIs409AndPersistsNothing(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: "0".repeat(64), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved), 2,
+  );
+  assert.equal(response.status, 409);
+  assert.equal(saved.snapshot, undefined);
+}
+
 async function main(): Promise<void> {
   await checkMatchingFingerprintAppliesTheDelta();
   await checkRemovingANodeTakesItsOpaqueEdges();
@@ -473,6 +610,12 @@ async function main(): Promise<void> {
   await checkMalformedBodyIs400();
   await checkStoreFailureIs502();
   await checkVersionConflictIs409();
+  await checkV1EditOfNestedDiagramIsRefused();
+  await checkNestedEditCommitsAndReturnsExactGeometry();
+  await checkNestedCollisionIs422AndPersistsNothing();
+  await checkV2GraphWithoutVersionIsRefused();
+  await checkV1SuccessBodyIsUnchanged();
+  await checkStaleNestedEditIs409AndPersistsNothing();
 
   console.log("verify-agent-graph-edit: ok");
 }

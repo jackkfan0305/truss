@@ -1,6 +1,6 @@
 # Compact graph contract
 
-Send a graph only as the `graph` value in the launcher's stdin JSON object. Emit no fields beyond those shown.
+Send a graph only as the `graph` value of `truss_create_diagram` or the `desiredGraph` of `truss_apply_diagram_edit`. Emit no fields beyond those shown.
 
 Coordinates are optional. Omit `x` and `y` on a new node and Truss arranges the diagram, routes its connections, and places its labels. Keep the coordinates `truss_get_diagram` returned for a node that already exists, so an edit leaves the rest of the canvas where the user put it.
 
@@ -42,3 +42,39 @@ Rules:
 - Aim for an overview a reader understands at a glance, normally 4-8 nodes. Add detail when the user asks for it.
 - Never include React Flow fields, dimensions, viewport state, groups, metadata, or unknown keys. The launcher rejects the entire graph if any rule is violated.
 - The encoded launch fragment must not exceed 16,384 characters. Keep the graph compact; the launcher never truncates it.
+
+## Version 2: AWS services and nested boundaries
+
+Use `version: 2` for AWS services, boundaries and any diagram that nests. Version 1 stays valid for flat generic diagrams, and a version 1 client cannot read or edit a diagram that has AWS or nested content (the server answers `unsupportedGraphVersion`; request version 2).
+
+Get catalog ids from `truss_get_aws_catalog`, never from memory. Services use `aws-` ids (`aws-lambda`, `aws-s3`, `aws-eks`), boundaries use `boundary-` ids (`boundary-vpc`, `boundary-subnet`).
+
+```json
+{
+  "version": 2,
+  "nodes": [
+    { "id": "vpc", "kind": "boundary", "catalogId": "boundary-vpc", "label": "VPC" },
+    { "id": "private", "kind": "boundary", "catalogId": "boundary-subnet", "label": "Private subnet", "parentId": "vpc" },
+    { "id": "worker", "kind": "aws-service", "catalogId": "aws-lambda", "label": "Worker", "parentId": "private" },
+    { "id": "uploads", "kind": "aws-service", "catalogId": "aws-s3", "label": "Uploads", "parentId": "vpc" },
+    { "id": "client", "kind": "generic", "label": "Client", "shape": "circle", "color": "blue" }
+  ],
+  "edges": [
+    { "id": "client-to-worker", "source": "client", "target": "worker", "label": "HTTPS" },
+    { "id": "worker-to-uploads", "source": "worker", "target": "uploads", "label": "Writes" }
+  ]
+}
+```
+
+Writable node fields:
+
+- `generic`: `id`, `kind`, `label`, `shape`, `color`, optional `parentId`, `x`, `y`, `width`, `height`.
+- `aws-service` and `boundary`: `id`, `kind`, `label`, `catalogId`, and the same optional fields. Never send `shape`, `color`, SVG or icon URLs; the catalog supplies the look.
+- Only a `boundary` can be a `parentId`. Parentage is visual grouping, not an AWS deployment requirement. Parents must exist and cannot form a cycle.
+- Boundaries count toward the 40-node limit.
+- Omit `x` and `y` on new nodes so Truss places them. Version 2 accepts fractional coordinates; send `x` with `y` and `width` with `height`, or neither.
+- `x` and `y` are top-left positions relative to the parent (the canvas for root nodes), in canvas units.
+
+Read-only geometry lives in `spatial` on reads and write results, never in the graph. Do not copy bounds or routes into a write. `spatial.nodes[].bounds` and `spatial.edges[].layout.points` are absolute canvas coordinates. Items listed in `opaqueNodeIds` are obstacles you cannot edit: keep clear of their bounds and never reuse their ids. A boundary with opaque descendants cannot be removed (`opaqueDescendants`).
+
+A geometry failure (`invalidGeometry`, HTTP 422) lists `itemIds` per issue. Revise those items or omit their coordinates and retry; nothing was saved. After a conflict, read again and revise against the new graph.

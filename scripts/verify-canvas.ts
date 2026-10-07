@@ -24,7 +24,7 @@ import {
   getParallelEdgeLabelOffset,
   positionParallelEdgeLabel,
 } from "../lib/edge-label-layout";
-import { computeEdgeRoutes } from "../lib/canvas-edge-route";
+import { computeEdgeRoutes, nearestNodeSide } from "../lib/canvas-edge-route";
 import {
   MAX_SNAPSHOT_NODES,
   canvasBlobPath,
@@ -624,6 +624,20 @@ function resizedShapeNode(id: string, shape: NodeShape, x: number, y: number) {
  *
  * Enlarging a default node size is what would silently break this.
  */
+/** Routes live in canvas space, so a nested node is boxed at its absolute position. */
+function checkNestedEdgesRouteInCanvasSpace() {
+  const nested = (id: string, x: number, parentId?: string) =>
+    ({ id, type: "canvasNode", position: { x, y: 0 }, width: 100, height: 60, ...(parentId ? { parentId } : {}), data: { label: id, color: "neutral", shape: "rectangle" } });
+  const nodes = [nested("box", 1000), nested("a", 0, "box"), nested("b", 400, "box")];
+  const edges = [{ id: "ab", source: "a", target: "b", data: { label: "" } }];
+  const routes = computeEdgeRoutes(nodes as never, edges as never);
+  const route = routes.get("ab")!;
+
+  assert.equal(route.source.x, 1100, "a leaves its right side at 1000 + 0 + 100");
+  assert.equal(route.target.x, 1400, "b enters its left side at 1000 + 400");
+  assert.equal(nearestNodeSide(nodes[1] as never, { x: 1100, y: 30 }, nodes as never), "right");
+}
+
 function checkSnapRadiusCoversEveryNodeCentre() {
   for (const shape of NODE_SHAPES) {
     const { width, height } = NODE_DEFAULT_SIZES[shape];
@@ -948,6 +962,7 @@ function main() {
   checkParallelEdgeRenderedLabelsStayClear();
   checkVerticalParallelEdgeLabelsStayClear();
   checkGeneratedEdgesMeetEveryShapeOutline();
+  checkNestedEdgesRouteInCanvasSpace();
   checkSnapRadiusCoversEveryNodeCentre();
   checkShortcutsMatchTheSpecTable();
   checkTemplatesAreWellFormed();

@@ -125,6 +125,8 @@ export type CanvasNodeData = {
   label: string;
   color: NodeColor;
   shape: NodeShape;
+  kind?: "generic" | "aws-service" | "boundary";
+  catalogId?: string;
 };
 
 /** Same reason as `CanvasNodeData`: a `type` gets the index signature React
@@ -135,10 +137,33 @@ export type CanvasEdgeData = {
 };
 
 export const CANVAS_NODE_TYPE = "canvasNode";
+export const CANVAS_BOUNDARY_TYPE = "canvasBoundary";
 export const CANVAS_EDGE_TYPE = "canvasEdge";
 
-export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE>;
+export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE | typeof CANVAS_BOUNDARY_TYPE>;
 export type CanvasEdge = Edge<CanvasEdgeData, typeof CANVAS_EDGE_TYPE>;
+
+/**
+ * Boundary padding inside the boundary rectangle (canvas units).
+ * Interior content cannot overlap the boundary edge.
+ */
+export const BOUNDARY_PADDING = 24;
+
+/**
+ * Space reserved for the boundary title bar at the top (canvas units).
+ * The title sits on the canvas background above any children.
+ */
+export const BOUNDARY_TITLE_HEIGHT = 40;
+
+/**
+ * Absolute bounds of a canvas item in canvas coordinates.
+ */
+export interface CanvasBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 /**
  * The edge look from `context/ui-context.md` (16-edge-behavior): a thin, light

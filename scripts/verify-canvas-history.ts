@@ -9,7 +9,9 @@ import {
   undoCanvasHistory,
 } from "../lib/canvas-history";
 import type { CanvasSnapshot } from "../lib/canvas-snapshot";
-import { CANVAS_NODE_TYPE, type CanvasNode } from "../types/canvas";
+import { CANVAS_EDGE_TYPE, CANVAS_NODE_TYPE, type CanvasNode } from "../types/canvas";
+import { deleteCanvasSubtrees, finishCanvasDrop, resizeCanvasBoundary } from "../lib/canvas-interaction";
+import { nestedSnapshot } from "./testing/aws-diagram-fixtures";
 
 function node(id: string, extra: Partial<CanvasNode> = {}): CanvasNode {
   return {
@@ -80,6 +82,44 @@ function checkCommitClassification() {
   assert.equal(isCanvasHistoryCommit({ type: "replace", id: "a", item: node("a") }, idle), true, "label or colour edit");
 }
 
+/** Subtree delete, reparent and boundary resize each undo and redo to the exact snapshots. */
+function checkNestedUndoRedo() {
+  const base = nestedSnapshot();
+  const snapshot = {
+    ...base,
+    edges: [
+      { id: "cross", type: CANVAS_EDGE_TYPE, source: "web", target: "uploads", data: { label: "" } },
+      { id: "inside", type: CANVAS_EDGE_TYPE, source: "web", target: "cloud", data: { label: "" } },
+    ],
+  } as CanvasSnapshot;
+
+  const deleted = deleteCanvasSubtrees(snapshot, ["vpc"]);
+  assert.deepEqual(deleted.nodes.map((n) => n.id), ["cloud"]);
+  assert.deepEqual(deleted.edges, [], "incident edges go with the subtree");
+
+  const undone = undoCanvasHistory(pushCanvasHistory(EMPTY_CANVAS_HISTORY, snapshot), deleted)!;
+  assert.deepEqual(undone.snapshot, snapshot);
+  assert.deepEqual(redoCanvasHistory(undone.stacks, undone.snapshot)!.snapshot, deleted);
+
+  // Reparent: drop "web" onto the private subnet's interior, then enlarge that subnet.
+  const dragged = {
+    ...snapshot,
+    nodes: snapshot.nodes.map((n) =>
+      n.id === "web" ? { ...n, parentId: "vpc", position: { x: 530, y: 100 } } : n,
+    ),
+  };
+  const reparented = finishCanvasDrop(dragged, "web");
+  const resized = resizeCanvasBoundary(reparented, "private", { x: 488, y: 64, width: 600, height: 500 });
+  let stacks = pushCanvasHistory(EMPTY_CANVAS_HISTORY, snapshot);
+  stacks = pushCanvasHistory(stacks, reparented);
+  const back1 = undoCanvasHistory(stacks, resized)!;
+  assert.deepEqual(back1.snapshot, reparented);
+  const back2 = undoCanvasHistory(back1.stacks, back1.snapshot)!;
+  assert.deepEqual(back2.snapshot, snapshot);
+  assert.deepEqual(redoCanvasHistory(back2.stacks, back2.snapshot)!.snapshot, reparented);
+}
+
+checkNestedUndoRedo();
 checkUndoRedoRoundTrip();
 checkEdgesOfTheStacks();
 checkTheCap();

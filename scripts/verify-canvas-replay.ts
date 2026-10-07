@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import type { XYPosition } from "@xyflow/react";
+import { diagramGeometryKey } from "../lib/diagram-route";
 import { planCanvasEdits, playCanvasEdits, type CanvasEditTarget } from "../lib/canvas-replay";
 import type { CanvasSnapshot } from "../lib/canvas-snapshot";
 import { AI_CURSOR_ARRIVAL_PAD_MS, AI_CURSOR_SWEEP_MS, AI_EDIT_HOLD_MS } from "../types/tasks";
@@ -43,8 +45,8 @@ function checkEveryChangeIsItsOwnEditInOrder() {
 
   assert.deepEqual(
     edits.map((e) => `${e.removes ? "remove" : "put"}:${e.kind}:${e.id}`),
-    ["remove:edge:keep-to-gone", "remove:node:gone", "put:node:keep", "put:node:new", "put:edge:keep-to-new"],
-    "removals, then nodes, then edges; unchanged items are not edits",
+    ["remove:edge:keep-to-gone", "put:node:keep", "put:node:new", "remove:node:gone", "put:edge:keep-to-new"],
+    "edge removals, node puts, node removals, edge puts; unchanged items are not edits",
   );
 }
 
@@ -88,9 +90,9 @@ async function checkTheCursorArrivesThenTheEditHoldsFor200ms() {
   const hold = `delay:${AI_EDIT_HOLD_MS}`;
   assert.equal(AI_EDIT_HOLD_MS, 200);
   assert.deepEqual(events, [
+    "agent:280:-", arrive, "agent:280:orders", "nodes:client,old,orders", hold,
     // A removal is lit while it is still there, then goes.
-    "agent:90:-", arrive, "agent:90:old", hold, "nodes:client",
-    "agent:280:-", arrive, "agent:280:orders", "nodes:client,orders", hold,
+    "agent:90:-", arrive, "agent:90:old", hold, "nodes:client,orders",
     "agent:280:-", arrive, "agent:280:client-to-orders", "edges:client-to-orders", hold,
     "clear",
   ]);
@@ -110,7 +112,64 @@ async function checkTheAgentClearsWhenAnEditThrows() {
   assert.equal(cleared, true);
 }
 
+function nested(id: string, parentId?: string, x = 0): CanvasNode {
+  return { ...node(id, x), ...(parentId ? { parentId } : {}) } as CanvasNode;
+}
+
+/** Every array the canvas could render lists a parent before its children and never names a missing one. */
+function assertHierarchyIntact(nodes: readonly CanvasNode[], where: string) {
+  const seen = new Set<string>();
+  for (const n of nodes) {
+    if (n.parentId) assert.ok(seen.has(n.parentId), `${where}: ${n.id} rendered before its parent ${n.parentId}`);
+    seen.add(n.id);
+  }
+}
+
+async function playChecked(current: CanvasSnapshot, remote: CanvasSnapshot) {
+  const flow = structuredClone(current);
+  const target = snapshotTarget(flow);
+  const cursors: XYPosition[] = [];
+  await playCanvasEdits(planCanvasEdits(current, remote), {
+    setNodes: (update) => { target.setNodes(update); assertHierarchyIntact(flow.nodes, "replay"); },
+    setEdges: target.setEdges,
+  }, { ...noDelays, showAgent: (cursor, editing) => { if (!editing) cursors.push(cursor); } });
+  return { flow, cursors };
+}
+
+async function checkNestedReplayKeepsTheHierarchyIntact() {
+  const base: CanvasSnapshot = {
+    nodes: [nested("vpc"), nested("other"), nested("s3", "vpc", 24)],
+    edges: [],
+  };
+
+  // A reparent alone is an edit, though the local position is identical.
+  const reparented: CanvasSnapshot = { ...base, nodes: base.nodes.map((n) => (n.id === "s3" ? { ...n, parentId: "other" } : n)) };
+  assert.ok(planCanvasEdits(base, reparented).some((e) => e.id === "s3"));
+  assert.notEqual(diagramGeometryKey(base.nodes), diagramGeometryKey(reparented.nodes));
+
+  // A child listed before its new parent still renders parent-first.
+  const { flow: added, cursors } = await playChecked(
+    { nodes: [], edges: [] },
+    { nodes: [nested("web", "subnet", 5), nested("subnet", "net", 10), nested("net", undefined, 100)], edges: [] },
+  );
+  assert.deepEqual(added.nodes.map((n) => n.id), ["net", "subnet", "web"]);
+  // The cursor lands on absolute canvas positions: 100 + 10 + 5.
+  assert.deepEqual(cursors.map((c) => c.x), [100, 110, 115]);
+
+  // Deleting a parent while its child survives under another parent.
+  const { flow: moved } = await playChecked(base, {
+    nodes: [nested("other"), nested("s3", "other", 24)],
+    edges: [],
+  });
+  assert.deepEqual(moved.nodes.map((n) => `${n.id}<${n.parentId ?? ""}`), ["other<", "s3<other"]);
+
+  // A whole subtree removed, descendants first.
+  const { flow: pruned } = await playChecked(base, { nodes: [nested("other")], edges: [] });
+  assert.deepEqual(pruned.nodes.map((n) => n.id), ["other"]);
+}
+
 void (async () => {
+  await checkNestedReplayKeepsTheHierarchyIntact();
   checkEveryChangeIsItsOwnEditInOrder();
   await checkPlayingTheEditsLandsOnTheRemote();
   await checkTheCursorArrivesThenTheEditHoldsFor200ms();

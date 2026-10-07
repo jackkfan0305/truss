@@ -31,23 +31,28 @@ Once you have a `diagramId` from the list, use it in the calls below. Never assi
 
 ```json
 {
-  "graph": { "version": 1, "nodes": [ … ], "edges": [ … ] },
+  "graph": { "version": 2, "nodes": [ … ], "edges": [ … ] },
   "opaqueNodeIds": [ "…" ],
+  "opaqueEdgeIds": [ "…" ],
+  "spatial": { "coordinateSpace": "canvas", "nodes": [ … ], "edges": [ … ] },
   "fingerprint": "…"
 }
 ```
 
-`graph` is the compact projection of the live canvas — same contract as [graph-schema.md](graph-schema.md). `opaqueNodeIds` lists canvas items the compact contract cannot express; never assign one of these ids to a node in your edit.
+`graph` is the compact projection of the live canvas — the version 2 contract in [graph-schema.md](graph-schema.md). `opaqueNodeIds` lists canvas items the compact contract cannot express; never assign one of these ids to a node in your edit, and treat their `spatial` bounds as obstacles. `spatial` is read-only: node `position` is parent-relative top-left, while `bounds` and edge route points are absolute canvas coordinates. Do not echo any of it into `desiredGraph`. Call `truss_get_aws_catalog` for catalog ids and descriptions when adding AWS services.
 
 Apply the user's requested change **in place**, against `graph`:
 
 - Reuse the existing `id` of every node and edge you are keeping or modifying, so the server-side diff can align it with the live canvas. Keep the `x` and `y` the read returned for it too, so the edit leaves the rest of the canvas where the user put it.
-- Omit `x` and `y` on a node you are adding. Truss lays new blocks out together beside the existing diagram and routes their connections.
+- Omit `x` and `y` on a node you are adding. Truss places it inside its `parentId` boundary (or beside the diagram at the root) and routes its connections.
+- Keep each existing node's `parentId`. Changing it moves the node between boundaries.
 - Assign new kebab-case IDs, following the same rules as [graph-schema.md](graph-schema.md), only to genuinely new nodes and edges.
 - Never reuse an ID that appears in `opaqueNodeIds`.
-- **If the result removes any node or edge present in `graph`,** state exactly what will be removed (by label, not ID) and get an explicit yes from the user before calling `truss_apply_diagram_edit`. This confirmation is the only safety net a destructive edit gets — never skip it, even for a small change. It matters more since edit is headless: there is no tab in front of the user showing what is about to happen. Server-side edits cannot be undone by the client's undo stack.
+- **If the result removes any node or edge present in `graph`,** state exactly what will be removed (by label, not ID). Removing a boundary removes its whole subtree, so list every descendant label and every connection that goes with it, and get an explicit yes from the user before calling `truss_apply_diagram_edit`. This confirmation is the only safety net a destructive edit gets — never skip it, even for a small change. It matters more since edit is headless: there is no tab in front of the user showing what is about to happen. Server-side edits cannot be undone by the client's undo stack.
 
-Call `truss_apply_diagram_edit` with `{ diagramId, fingerprint, desiredGraph }`, where `fingerprint` is exactly the value `truss_get_diagram` returned — never invented — and `desiredGraph` is the complete graph after your change, not a diff. The tool applies the diff and animates it into the room; anyone with that diagram open in a browser watches it happen live, with the AI cursor, exactly as they would during a create. Nobody needs to be watching for the edit to land.
+Call `truss_apply_diagram_edit` with `{ diagramId, fingerprint, desiredGraph }`, where `fingerprint` is exactly the value `truss_get_diagram` returned — never invented — and `desiredGraph` is the complete graph after your change, not a diff. The tool returns the committed `graph`, `spatial` geometry and new `fingerprint`: use those for any follow-up edit, since they show where Truss actually placed things. It applies the diff and animates it into the room; anyone with that diagram open in a browser watches it happen live, with the AI cursor, exactly as they would during a create. Nobody needs to be watching for the edit to land.
+
+A geometry failure comes back as an error carrying `invalidGeometry` and the `itemIds` that collide or no longer fit. Nothing was saved: revise those items or drop their coordinates and retry. An `unsupportedGraphVersion` error means the graph or read was version 1 for a diagram that needs version 2.
 
 A stale fingerprint means someone changed the canvas after your read. The tool reports the conflict and changes nothing: call `truss_get_diagram` again, reapply the user's request to the graph that comes back, and submit it with the new fingerprint. Never resend the graph you already built with a fresh fingerprint — that would silently discard the other person's work.
 

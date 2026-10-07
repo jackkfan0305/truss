@@ -72,7 +72,8 @@ export function computeEdgeRoutes(
   nodes: readonly CanvasNode[],
   edges: readonly CanvasEdge[],
 ): Map<string, EdgeRoute> {
-  const boxes = new Map(nodes.map((node) => [node.id, toBox(node)] as const));
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  const boxes = new Map(nodes.map((node) => [node.id, toBox(node, byId)] as const));
   const ends = new Map<string, { source: Endpoint; target: Endpoint }>();
 
   for (const edge of edges) {
@@ -175,8 +176,10 @@ function laneOffsets(endpoints: readonly Endpoint[]): Map<Endpoint, number> {
 export function nearestNodeSide(
   node: CanvasNode,
   point: { x: number; y: number },
+  /** Every node, when `node` may be nested and `point` is canvas-absolute. */
+  nodes?: readonly CanvasNode[],
 ): EdgeSide {
-  const box = toBox(node);
+  const box = toBox(node, nodes && new Map(nodes.map((n) => [n.id, n] as const)));
   const distances: Record<EdgeSide, number> = {
     left: Math.abs(point.x - box.x),
     right: Math.abs(point.x - (box.x + box.width)),
@@ -333,14 +336,43 @@ function center(box: Box): { x: number; y: number } {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** React Flow leaves `width`/`height` unset until it has measured the node. */
-function toBox(node: CanvasNode): Box {
+/**
+ * Canvas-absolute origin: a nested node's position is relative to its parent,
+ * but routes and saved route points live in canvas space.
+ */
+function absoluteOrigin(
+  node: CanvasNode,
+  byId: ReadonlyMap<string, CanvasNode>,
+): { x: number; y: number } {
+  let { x, y } = node.position;
+  const seen = new Set([node.id]);
+
+  for (
+    let parent = node.parentId ? byId.get(node.parentId) : undefined;
+    parent && !seen.has(parent.id);
+    parent = parent.parentId ? byId.get(parent.parentId) : undefined
+  ) {
+    seen.add(parent.id);
+    x += parent.position.x;
+    y += parent.position.y;
+  }
+
+  return { x, y };
+}
+
+/**
+ * React Flow leaves `width`/`height` unset until it has measured the node.
+ * Pass `byId` for nodes that may be nested; without it the node is taken as
+ * already absolute.
+ */
+function toBox(node: CanvasNode, byId?: ReadonlyMap<string, CanvasNode>): Box {
   const fallback =
     NODE_DEFAULT_SIZES[node.data.shape] ?? NODE_DEFAULT_SIZES.rectangle;
+  const origin = byId ? absoluteOrigin(node, byId) : node.position;
 
   return {
-    x: node.position.x,
-    y: node.position.y,
+    x: origin.x,
+    y: origin.y,
     width: node.width ?? node.measured?.width ?? fallback.width,
     height: node.height ?? node.measured?.height ?? fallback.height,
     shape: node.data.shape,

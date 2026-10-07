@@ -57,6 +57,7 @@ const {
   buildRoomId,
   createDiagram,
   deleteDiagram,
+  getAwsCatalog,
   getDiagram,
   listDiagrams,
   login,
@@ -66,6 +67,7 @@ const {
   slugifyTitle,
   validateCreateInput,
   validateGraph,
+  graphRequestError,
 } = await import(CORE_SCRIPT);
 
 function mintToken() {
@@ -170,6 +172,7 @@ function createStubServerDynamic(handler) {
     const answer = handler(req.method, url.pathname, {
       headers: req.headers,
       body: bodyJson,
+      search: url.search,
     });
 
     if (!answer) {
@@ -999,6 +1002,134 @@ await withHome(async (homeDir) => {
   await stub.close();
 });
 
+// --- version 2 graphs ---------------------------------------------------
+
+const V2_GRAPH = {
+  version: 2,
+  nodes: [
+    { id: "vpc", kind: "boundary", catalogId: "boundary-vpc", label: "VPC" },
+    { id: "worker", kind: "aws-service", catalogId: "aws-lambda", label: "Worker", parentId: "vpc" },
+  ],
+  edges: [],
+};
+assert.deepEqual(validateGraph(V2_GRAPH), V2_GRAPH, "a coordinate-free v2 graph is returned unchanged");
+const placed = {
+  ...V2_GRAPH,
+  nodes: [
+    { ...V2_GRAPH.nodes[0], x: 12.5, y: -3.25, width: 500.5, height: 300 },
+    { ...V2_GRAPH.nodes[1], x: 24, y: 64 },
+    { id: "client", kind: "generic", label: "Client", shape: "circle", color: "blue" },
+  ],
+};
+assert.deepEqual(validateGraph(placed), placed, "fractional positions and dimensions survive");
+for (const parentId of ["missing", "worker"]) {
+  rejectsGraph({ ...V2_GRAPH, nodes: [V2_GRAPH.nodes[0], { ...V2_GRAPH.nodes[1], parentId }] }, `parent ${parentId}`);
+}
+rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[0], parentId: "vpc" }, V2_GRAPH.nodes[1]] }, "self-parent");
+rejectsGraph({ ...V2_GRAPH, nodes: [
+  { ...V2_GRAPH.nodes[0], parentId: "inner" },
+  { id: "inner", kind: "boundary", catalogId: "boundary-subnet", label: "Inner", parentId: "vpc" },
+] }, "multi-node cycle");
+rejectsGraph({ ...V2_GRAPH, nodes: [V2_GRAPH.nodes[0], V2_GRAPH.nodes[0]] }, "duplicate ids");
+rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[0], x: 1 }] }, "half coordinate pair");
+rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[0], width: 10 }] }, "half dimension pair");
+rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[0], width: 0, height: 10 }] }, "zero width");
+for (const forged of [{ iconUrl: "https://x/y.svg" }, { svg: "<svg/>" }, { shape: "circle" }, { color: "blue" }, { kind: "boundary" }]) {
+  rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[1], ...forged }] }, `forged ${Object.keys(forged)[0]}`);
+}
+rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[1], catalogId: "boundary-vpc" }] }, "wrong catalog prefix");
+rejectsGraph({ ...V2_GRAPH, nodes: [{ id: "g", kind: "generic", label: "G", shape: "circle", color: "blue", catalogId: "aws-ec2" }] }, "generic with catalog");
+rejectsGraph({ ...V2_GRAPH, unknown: true }, "unknown graph key");
+rejectsGraph({
+  version: 2,
+  nodes: Array.from({ length: 41 }, (_, index) => ({ id: `b${index}`, kind: "boundary", catalogId: "boundary-vpc", label: "B" })),
+  edges: [],
+}, "41 nodes including boundaries");
+assert.throws(() => validateGraph({ ...GRAPH, version: 3 }), Error, "unknown version");
+
+{
+  const error = graphRequestError({ error: "Overlap", code: "invalidGeometry", issues: [{ itemIds: ["a", "b"] }] }, "fallback");
+  assert.match(error.message, /^Overlap /);
+  assert.match(error.message, /"itemIds":\["a","b"\]/);
+  assert.equal(graphRequestError({}, "fallback").message, "fallback");
+}
+
+// Catalog reads need no credential and no browser.
+await withHome(async () => {
+  const catalog = { catalogVersion: 1, entries: [{ id: "aws-lambda", name: "AWS Lambda" }] };
+  const stub = await createStubServerDynamic((method, pathname, ctx) => {
+    if (method === "GET" && pathname === "/api/agent/catalog") {
+      assert.equal(ctx.headers.authorization, undefined);
+      return { status: 200, body: catalog };
+    }
+    return null;
+  });
+  assert.deepEqual(await getAwsCatalog(stub.origin), catalog);
+  await assert.rejects(getAwsCatalog("http://127.0.0.1:1/path"), /origin/);
+  await stub.close();
+  const broken = await createStubServerDynamic(() => ({ status: 200, body: { nope: true } }));
+  await assert.rejects(getAwsCatalog(broken.origin), /AWS catalog/);
+  await broken.close();
+});
+
+// Reads, edits and imports keep the committed geometry and negotiate version 2.
+await withHome(async (homeDir) => {
+  const token = mintToken();
+  const spatial = { coordinateSpace: "canvas", nodes: [], edges: [] };
+  const fingerprint = "c".repeat(64);
+  const committed = { graph: V2_GRAPH, opaqueNodeIds: ["Opaque_Item"], opaqueEdgeIds: [], spatial, fingerprint };
+  const seen = [];
+  const stub = await createStubServerDynamic((method, pathname, ctx) => {
+    seen.push(`${method} ${pathname}${ctx.search}`);
+    if (method === "GET" && pathname === "/api/diagrams") return { status: 200, body: { diagrams: [{ id: "p1", name: "P" }] } };
+    if (method === "GET" && pathname === "/api/diagrams/p1/agent-graph") return { status: 200, body: committed };
+    if (method === "POST" && pathname === "/api/diagrams/p1/agent-graph-edit") {
+      assert.deepEqual(ctx.body, { fingerprint, graph: V2_GRAPH });
+      return { status: 200, body: { applied: true, ...committed } };
+    }
+    if (method === "POST" && pathname === "/api/diagrams") return { status: 201, body: { diagram: { id: ctx.body.id } } };
+    if (/agent-launch-import$/.test(pathname)) {
+      assert.deepEqual(ctx.body.graph, V2_GRAPH);
+      return { status: 200, body: { imported: true, ...committed } };
+    }
+    return null;
+  });
+  seedCredential(homeDir, stub.origin, token);
+
+  const read = await getDiagram(stub.origin, "p1");
+  assert.deepEqual(read.spatial, spatial);
+  assert.deepEqual(read.opaqueEdgeIds, []);
+  const applied = await applyDiagramEdit(stub.origin, "p1", fingerprint, V2_GRAPH);
+  assert.deepEqual(applied.graph, V2_GRAPH);
+  assert.equal(applied.fingerprint, fingerprint);
+  assert.deepEqual(applied.spatial, spatial);
+  const created = await createDiagram(stub.origin, "AWS", V2_GRAPH);
+  assert.equal(created.fingerprint, fingerprint);
+  assert.ok(created.editorUrl.endsWith(`/editor/${created.diagramId}`));
+  assert.ok(seen.includes("GET /api/diagrams/p1/agent-graph?version=2"));
+  assert.ok(seen.includes("POST /api/diagrams/p1/agent-graph-edit?version=2"));
+  assert.ok(seen.some((entry) => /agent-launch-import\?version=2$/.test(entry)));
+  await stub.close();
+});
+
+// Server refusals reach the caller with their codes; a stale 409 asks for a fresh read.
+await withHome(async (homeDir) => {
+  const token = mintToken();
+  const fingerprint = "c".repeat(64);
+  const answers = [
+    { status: 422, body: { error: "Could not resolve diagram layout", code: "invalidGeometry", issues: [{ code: "siblingCollision", itemIds: ["a", "b"] }] } },
+    { status: 409, body: { code: "unsupportedGraphVersion", requiredVersion: 2, message: "Upgrade" } },
+    { status: 409, body: { error: "The canvas changed since it was read" } },
+  ];
+  const stub = await createStubServerDynamic((method, pathname) =>
+    method === "POST" && pathname === "/api/diagrams/p1/agent-graph-edit" ? answers.shift() : null);
+  seedCredential(homeDir, stub.origin, token);
+  await assert.rejects(applyDiagramEdit(stub.origin, "p1", fingerprint, V2_GRAPH), /invalidGeometry.*"itemIds":\["a","b"\]/);
+  await assert.rejects(applyDiagramEdit(stub.origin, "p1", fingerprint, V2_GRAPH), /unsupportedGraphVersion.*"requiredVersion":2/);
+  await assert.rejects(applyDiagramEdit(stub.origin, "p1", fingerprint, V2_GRAPH), /truss_get_diagram/);
+  await stub.close();
+});
+
 // --- SKILL.md / operations.md describe the MCP tool contract --------------
 
 const skillMarkdown = await readFile(join(SKILL_DIR, "SKILL.md"), "utf8");
@@ -1014,6 +1145,21 @@ assert.match(operationsMarkdown, /empty library, editing/i, "operations.md cover
 assert.match(operationsMarkdown, /empty library, deleting/i, "operations.md covers the empty-library branch for delete");
 assert.match(operationsMarkdown, /truss_apply_diagram_edit/, "operations.md names the edit tool");
 assert.match(operationsMarkdown, /truss_delete_diagram\b/, "operations.md names the delete tool");
+
+// Examples use real catalog ids, and the runtime keeps no list of its own.
+const catalogSource = await readFile(fileURLToPath(new URL("../lib/aws-catalog.ts", import.meta.url)), "utf8");
+const catalogIds = new Set([...catalogSource.matchAll(/id: "((?:aws|boundary)-[a-z0-9-]+)"/g)].map((match) => match[1]));
+assert.ok(catalogIds.size >= 30);
+const schemaMarkdown = await readFile(join(SKILL_DIR, "references", "graph-schema.md"), "utf8");
+for (const [, id] of schemaMarkdown.matchAll(/"catalogId": "([^"]+)"/g)) {
+  assert.ok(catalogIds.has(id), `graph-schema.md example uses unknown catalog id ${id}`);
+}
+assert.match(skillMarkdown, /truss_get_aws_catalog/, "SKILL.md lists the catalog tool");
+assert.match(schemaMarkdown, /parent \(the canvas for root nodes\)/, "schema doc explains parent-relative coordinates");
+for (const file of ["core.mjs", "mcp-server.mjs"]) {
+  const source = await readFile(join(SKILL_DIR, "scripts", file), "utf8");
+  for (const id of catalogIds) assert.ok(!source.includes(`"${id}"`), `${file} enumerates catalog id ${id}`);
+}
 
 unblockRealBrowser(realPath);
 console.info("Truss diagram core checks passed");

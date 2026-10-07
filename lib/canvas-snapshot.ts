@@ -14,6 +14,7 @@ import { parseDiagramEdgeLayout } from "@/lib/diagram-route";
  */
 
 import {
+  CANVAS_BOUNDARY_TYPE,
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
   CANVAS_EDGE_TYPE,
@@ -64,7 +65,7 @@ function parseNode(value: unknown): CanvasNode | null {
     return null;
   }
 
-  const { id, position, width, height, data } = value;
+  const { id, position, width, height, parentId, data } = value;
 
   if (typeof id !== "string" || !id) {
     return null;
@@ -81,21 +82,30 @@ function parseNode(value: unknown): CanvasNode | null {
   const nodeData = isRecord(data) ? data : {};
   const color = nodeData.color;
   const shape = nodeData.shape;
+  const kind = nodeData.kind;
+  const catalogId = nodeData.catalogId;
+
+  // Determine node type: boundary nodes use CANVAS_BOUNDARY_TYPE
+  const isBoundary = kind === "boundary";
+  const nodeType = isBoundary ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
 
   return {
     id,
     // Rebuilt field by field rather than spread: an unknown key from a stored
     // blob would otherwise flow straight into React Flow's node store.
-    type: CANVAS_NODE_TYPE,
+    type: nodeType,
     position: { x: position.x, y: position.y },
     ...(isFiniteNumber(width) ? { width } : {}),
     ...(isFiniteNumber(height) ? { height } : {}),
+    ...(typeof parentId === "string" && parentId ? { parentId } : {}),
     data: {
       label: typeof nodeData.label === "string" ? nodeData.label : "",
       // An unknown colour or shape degrades to the default instead of failing
       // the whole snapshot — one retired palette key must not cost the diagram.
       color: isNodeColor(color) ? color : DEFAULT_NODE_COLOR,
       shape: isNodeShape(shape) ? shape : DEFAULT_NODE_SHAPE,
+      ...(kind && (kind === "generic" || kind === "aws-service" || kind === "boundary") ? { kind } : {}),
+      ...(typeof catalogId === "string" && catalogId ? { catalogId } : {}),
     },
   };
 }

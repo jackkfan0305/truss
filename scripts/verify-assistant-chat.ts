@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { APICallError, RetryError } from "ai";
 
 import { buildAssistantInstructions, describeAssistantError, isToolOutputOk, runAssistantTurn } from "../lib/assistant-chat";
+import { AWS_CATALOG } from "../lib/aws-catalog";
 import { AssistantStopError, type AssistantActions } from "../lib/assistant-tools";
 
 function apiError(statusCode: number): APICallError {
@@ -58,6 +59,15 @@ assert.equal(describeAssistantError(apiError(500))?.clearKey, false);
   // Replies render as sanitized markdown, so the prompt allows it.
   assert.doesNotMatch(withGraph, /no markdown/);
   assert.match(withGraph, /concise markdown/);
+
+  // Every catalog ID comes from the shared catalog; the prompt has no list of its own.
+  for (const { id } of AWS_CATALOG) assert.ok(withGraph.includes(id), id);
+  assert.match(withGraph, /get_aws_catalog/);
+  assert.match(withGraph, /relative to their parent, or the canvas for roots/);
+  assert.match(withGraph, /opaque items and their absolute bounds as obstacles/);
+  assert.match(withGraph, /read again and revise the edit against the new graph/);
+  assert.match(withGraph, /item IDs/);
+  assert.doesNotMatch(withGraph, /Omit x and y for new blocks\. Keep x and y unchanged/);
 }
 
 // A failed or conflicted tool result marks its task row failed, not done.
@@ -79,6 +89,7 @@ async function checkAbortDuringInitialRead() {
       await new Promise<void>((resolve) => { finishRead = resolve; });
       return { error: "unavailable" };
     },
+    getAwsCatalog: async () => { throw new Error("Stopped turn read the catalog"); },
     listDiagrams: async () => { throw new Error("Stopped turn called a tool"); },
     applyDiagramEdit: async () => { throw new Error("Stopped turn edited a diagram"); },
     createDiagram: async () => { throw new Error("Stopped turn created a diagram"); },

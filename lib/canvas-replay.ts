@@ -1,5 +1,6 @@
 import type { XYPosition } from "@xyflow/react";
 
+import { getAbsoluteBounds, sortParentsBeforeChildren } from "@/lib/canvas-hierarchy";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import { AI_CURSOR_ARRIVAL_PAD_MS, AI_CURSOR_SWEEP_MS, AI_EDIT_HOLD_MS } from "@/types/tasks";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
@@ -34,8 +35,9 @@ export interface CanvasReplayDependencies {
 }
 
 // Only what the canvas draws; flow state also carries `measured`, `selected` and the like.
+// `type` and `parentId` count: a reparent leaves the local position unchanged.
 const nodeShape = (node: CanvasNode) =>
-  JSON.stringify([node.position, node.width, node.height, node.data]);
+  JSON.stringify([node.type, node.parentId, node.position, node.width, node.height, node.data]);
 const edgeShape = (edge: CanvasEdge) =>
   JSON.stringify([edge.source, edge.target, edge.sourceHandle, edge.targetHandle, edge.data]);
 
@@ -43,9 +45,21 @@ function byId<T extends { id: string }>(items: T[]): Map<string, T> {
   return new Map(items.map((item) => [item.id, item]));
 }
 
+/** Absolute canvas position, so the cursor reaches nested nodes where they are drawn. */
+const cursorPosition = (id: string, nodes: readonly CanvasNode[]): XYPosition | null => {
+  try {
+    const { x, y } = getAbsoluteBounds(id, nodes);
+    return { x, y };
+  } catch {
+    return null;
+  }
+};
+
 /**
- * Removals first, edges before their nodes, then node updates and additions,
- * then edges, so an edge never lands before both of its endpoints.
+ * Edge removals, then node updates and additions parent-first, then node
+ * removals descendant-first, then edge updates and additions. Survivors are
+ * reparented before their former parents go, so no step leaves a dangling
+ * parent, and `apply` keeps parents ahead of children in the array.
  */
 export function planCanvasEdits(current: CanvasSnapshot, remote: CanvasSnapshot): CanvasEdit[] {
   const currentNodes = byId(current.nodes);
@@ -53,15 +67,17 @@ export function planCanvasEdits(current: CanvasSnapshot, remote: CanvasSnapshot)
   const remoteNodes = byId(remote.nodes);
   const remoteEdges = byId(remote.edges);
   const positionOf = (id: string) =>
-    (remoteNodes.get(id) ?? currentNodes.get(id))?.position ?? null;
+    remoteNodes.has(id) ? cursorPosition(id, remote.nodes) : cursorPosition(id, current.nodes);
 
   const putNode = (node: CanvasNode, isNew: boolean): CanvasEdit => ({
     kind: "node",
     id: node.id,
-    at: node.position,
+    at: cursorPosition(node.id, remote.nodes),
     removes: false,
     apply: ({ setNodes }) =>
-      setNodes((nodes) => (isNew ? [...nodes, node] : nodes.map((n) => (n.id === node.id ? node : n)))),
+      setNodes((nodes) =>
+        sortParentsBeforeChildren(isNew ? [...nodes, node] : nodes.map((n) => (n.id === node.id ? node : n))),
+      ),
   });
   const putEdge = (edge: CanvasEdge, isNew: boolean): CanvasEdit => ({
     kind: "edge",
@@ -80,18 +96,18 @@ export function planCanvasEdits(current: CanvasSnapshot, remote: CanvasSnapshot)
       removes: true,
       apply: ({ setEdges }) => setEdges((edges) => edges.filter((e) => e.id !== edge.id)),
     }]),
-    ...current.nodes.flatMap((node): CanvasEdit[] => remoteNodes.has(node.id) ? [] : [{
-      kind: "node",
-      id: node.id,
-      at: node.position,
-      removes: true,
-      apply: ({ setNodes }) => setNodes((nodes) => nodes.filter((n) => n.id !== node.id)),
-    }]),
-    ...remote.nodes.flatMap((node) => {
+    ...sortParentsBeforeChildren(remote.nodes).flatMap((node) => {
       const before = currentNodes.get(node.id);
       if (!before) return [putNode(node, true)];
       return nodeShape(before) === nodeShape(node) ? [] : [putNode(node, false)];
     }),
+    ...[...sortParentsBeforeChildren(current.nodes)].reverse().flatMap((node): CanvasEdit[] => remoteNodes.has(node.id) ? [] : [{
+      kind: "node",
+      id: node.id,
+      at: cursorPosition(node.id, current.nodes),
+      removes: true,
+      apply: ({ setNodes }) => setNodes((nodes) => nodes.filter((n) => n.id !== node.id)),
+    }]),
     ...remote.edges.flatMap((edge) => {
       const before = currentEdges.get(edge.id);
       if (!before) return [putEdge(edge, true)];

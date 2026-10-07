@@ -4,6 +4,33 @@ Update this file whenever the current phase, active feature, or implementation s
 
 ## Current Phase
 
+- AWS diagrams implementation: Plan 04 - Agent integrations IN PROGRESS (2026-10-06, uncommitted)
+  - Gateway task: V2 request parsing. Updated `lib/agent-graph-schema.ts` with union schemas `agentGraphInputUnionSchema` and `agentGraphEditInputUnionSchema` accepting both v1 and v2 graphs. Enhanced `parseAgentGraphInput()` with version negotiation: rejects v2 graphs when version=1 is requested. Updated both handlers to accept version parameter and pass it through validation. Edit handler now returns explicit `unsupportedGraphVersion` (409) instead of generic stale error for v1 access to AWS/nested diagrams. Import route now parses `?version=2` query parameter. All existing tests pass; lint clean.
+  - Open: Task 12 (expose catalog to agents), Task 13 (browser assistant v2), Task 14 (terminal MCP v2), Task 15 (agent roundtrip verification).
+
+- AWS diagrams implementation: Plan 03 - Canvas editing and picker COMPLETE (2026-10-06, uncommitted; browser checks pending with the tester)
+  - Task C1: manual containment transactions in `lib/canvas-interaction.ts`, wired into `canvas.tsx` (drag stop, Delete/Backspace, insertion).
+  - Task C2: `CanvasNodeRenderer` dispatches on `data.kind` (AWS service block vs generic shape). `AwsIcon` shows the catalog name on load failure or unknown ID, `CanvasLabel` holds the shared inline editor, `CanvasBoundaryRenderer` draws the dashed outline, title patch, handles and a `NodeResizer` whose resizes go through `resizeCanvasBoundary` via `BoundaryResizeContext`. `elevateNodesOnSelect` is off so selecting a boundary never lifts it over descendants; React Flow's parent-depth z-order keeps edges above outlines.
+  - Task C3: `components/canvas/aws-panel.tsx` (search by name/alias, Services and Boundaries sections grouped by category, native buttons, tooltips plus `aria-describedby` descriptions, Escape restores trigger focus). `AWS_DRAG_MIME` helpers in `lib/canvas-drag.ts` accept only `{catalogId}` of a known entry; size, kind and label come from the catalog. Click insertion uses the wrapper centre, drop uses pointer coordinates, both through `insertCanvasItem`. `scripts/verify-aws-picker.tsx` is in `verify:unit`.
+  - Task C4: replay compares `type` and `parentId`, aims the cursor at absolute positions and orders edits as edge removals, node puts parent-first, node removals descendant-first, edge puts (so survivors are reparented before their old parent goes; `apply` re-sorts parents ahead of children). `computeEdgeRoutes` boxes nodes at absolute positions and `nearestNodeSide` takes an optional `nodes` argument. The geometry key already hashed parent IDs and absolute bounds from plan 02; tests now pin group-move route invalidation.
+  - Local edits during replay stay blocked by the `inert` wrapper and `replaying.current` guards (not unit-testable without the browser).
+  - Open: browser pass over nested drag/drop/resize/delete/undo, keyboard-only picker, remote agent replay.
+
+- AWS diagrams implementation: Plan 02 - Compound layout and spatial reads COMPLETE (2026-10-06, uncommitted)
+  - Task 0: bundled elkjs 0.12.0 cannot route around fixed compound geometry (interactive layered moves nodes, `elk.noLayout` yields no routes, `fixed` throws without sections; there is no routing-only algorithm). Decision: re-lay out only the innermost changed boundary. `scripts/verify-elk-compound-capability.ts` pins the failures and asserts the settled contract; it is in `verify:unit`.
+  - Task 1: `lib/diagram-geometry.ts` derives absolute bounds and validates containment, sibling collisions, titles, routes (segments, endpoints, staleness) and labels. `diagramGeometryKey` now hashes canvas-absolute rectangles.
+  - Task 2: `lib/diagram-elk-graph.ts` builds compound ELK graphs; `layoutDiagram` lays out nested snapshots (parent-relative positions, canvas-absolute routes) and rejects invalid geometry with `DiagramLayoutError`. Edge coordinates are relative to the lowest common ancestor of their ends.
+  - Task 3: `lib/layout-diagram-contents.ts` re-lays the innermost boundary holding changes, grows ancestors, preserves everything else exactly (opaque items included) and fails with `DiagramLayoutError` if growth would hit a sibling. Routes leaving the re-laid boundary are simple routes and may overlap fixed blocks. `resolveAgentGraphLayout` routes nested graphs here.
+  - Task 4: `lib/diagram-spatial-context.ts`; read, edit and import responses carry `spatial` and the committed fingerprint; `DiagramLayoutError` becomes a 422 `invalidGeometry`. Edit now also writes parent IDs and re-routed edges. Flat import keeps its `{ imported }` body.
+  - Open: nested graphs cannot reach these handlers over HTTP until plan 03 widens request parsing to v2; coverage there is at the layout and projection level (`scripts/verify-nested-diagram-layout.ts`).
+
+- AWS diagrams implementation: Plan 01 - Catalog and contracts COMPLETE
+  - Task 1 complete: AWS catalog with 24 services and 6 boundaries. Created `lib/aws-catalog.ts`, `public/aws-icons/*.svg` (30 reviewed local icons), `public/aws-icons/NOTICE.md` with provenance. `scripts/verify-aws-catalog.ts` passing all assertions.
+  - Task 2 complete: V2 graph schemas and hierarchy. Updated `types/canvas.ts` with boundary constants and fields. Created `lib/canvas-hierarchy.ts` with four core functions. Extended `lib/agent-graph-schema.ts` with V2 discriminated unions, strict hierarchy validation. Both verification scripts passing.
+  - Task 3 complete: Snapshot persistence for AWS identity. Created `scripts/testing/aws-diagram-fixtures.ts`. Updated `lib/canvas-snapshot.ts` to parse/preserve hierarchy and AWS fields. Enhanced `lib/agent-graph.ts`: materializeAgentGraph handles V2 with hierarchy sorting, canonicalCanvasSnapshotsEqual includes AWS fields, canvasFingerprint covers all canonical state.
+  - Task 4 complete: Version negotiation and legacy guards. Updated `handleAgentGraphGet()` to accept version parameter, return unsupportedGraphVersion (409) for v1 access to AWS/nested. Updated `handleAgentGraphEdit()` with v1 rejection and opaqueDescendants protection (422 on boundary removal with opaque children). Wired version param through API routes. Tests passing.
+  - Delivered: +7 new files, modified 10 existing. TypeScript checks pass. Ready for Plan 02.
+
 - canvas-without-liveblocks: removing Liveblocks collaborator surface
 
 ## Current Goal
@@ -1904,3 +1931,35 @@ result is observed.
   Replay removal planning uses one pass per collection. React Doctor reports
   no new issues against main. Added cancellation regression coverage.
   Full unit suite, typecheck and lint pass. CI validation pending.
+
+- AWS diagrams plan 04, agent integrations (2026-10-06). Reviewed and fixed the
+  earlier edit/import widening: `canvasToAgentGraph(snapshot, 2)` now projects
+  kind, catalog ID, parent, dimensions and fractional positions (opacity flows
+  to children of unreadable parents), and `diffAgentGraph` compares those
+  fields. `lib/agent-graph-version.ts` owns `?version` parsing and the
+  `unsupportedGraphVersion` body (`requiredVersion: 2`). Unknown versions are
+  400, a v2 graph or a nested diagram without `?version=2` is 409, checked
+  before the fingerprint. Omitted version stays v1 and v1 success bodies are
+  unchanged (`{ applied }`, `{ imported }`). Version 2 edit and import return
+  `graph`, `opaqueNodeIds`, `opaqueEdgeIds`, `spatial` and `fingerprint` of the
+  committed snapshot; 422 `invalidGeometry` and 409 conflicts persist nothing.
+  Added nested write-path tests through the real handlers
+  (`verify-agent-graph-edit.ts`, `verify-agent-graph-import.ts`).
+- `GET /api/agent/catalog` serves `{ catalogVersion: 1, entries }` with no
+  sign-in. Browser tool `get_aws_catalog`, MCP `truss_get_aws_catalog` (reads
+  with no credential and no tab). The assistant prompt lists catalog IDs from
+  `AWS_CATALOG`. Browser tools use a shared loose v1/v2 model schema
+  (`agentGraphModelSchema`) and the strict union schemas at execution; results
+  spread the server body and keep `code`, `issues`, `itemIds`. The MCP server
+  and `core.mjs` accept v1/v2 (strict transport schema, `validateGraph` checks
+  kinds, parents, cycles, pairs, limits; catalog identity stays server-side),
+  request `?version=2` for reads, and format refusals with the server's code
+  and item IDs. Skill and both references document v2.
+- `scripts/verify-aws-agent-roundtrip.ts` (in `verify:unit`) drives browser
+  actions and terminal core against one handler-backed HTTP server with real
+  ELK and geometry validation: create, cross-client reads, an opaque obstacle,
+  a terminal edit, stale 409 then revised edit, cycle and collision rejection
+  with nothing persisted. Targeted scripts, typecheck (only the pre-existing
+  missing generated Prisma client errors remain) and eslint on touched files
+  pass. Not run: `npm test` as a whole, build, `verify:integration`, and the
+  plan's browser checks (no signed-in session).

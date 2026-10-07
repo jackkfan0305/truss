@@ -23,6 +23,15 @@ its diagram geometry and label match; manual changes use interactive routing.
 Positioned legacy imports remain supported. Coordinate-free agent edits resolve
 against live state after fingerprint validation.
 
+Nested diagrams: node positions are parent-relative, route and label
+coordinates canvas-absolute, and the geometry key hashes absolute rectangles.
+Bundled ELK cannot route around fixed geometry, so a nested edit re-lays out
+only the innermost boundary holding changed content; ancestors grow, siblings
+and opaque items never move, and a collision fails with a 422 `invalidGeometry`
+error. Routes inside the re-laid boundary are ELK's; routes leaving it are
+simple and may overlap fixed blocks. Agent reads and writes return a `spatial`
+projection of the same snapshot as the fingerprint.
+
 The local MCP keeps browser linking and cached bearer credentials. Its delete
 operation uses the existing owner-only diagram deletion endpoint. Edit conflicts
 require a fresh read and revised edit, without automatic fingerprint replacement.
@@ -212,6 +221,16 @@ No backoff loop, no page-side state machine beyond "waiting."
   sets rather than being silently dropped. `fingerprint` is a hash of the
   full stored canvas state, opaque items included, used for optimistic
   concurrency on apply.
+
+- Capability negotiation: `?version=2` selects the v2 projection (AWS kind,
+  catalog ID, parent, dimensions, `spatial` geometry). An omitted version is
+  v1. A nested or AWS diagram read, edited or imported as v1, a v2 graph sent
+  without `?version=2`, and an unknown version all answer
+  `unsupportedGraphVersion` with `requiredVersion: 2`. Version 2 edit and
+  import return `graph`, `opaqueNodeIds`, `opaqueEdgeIds`, `spatial` and
+  `fingerprint` of the exact committed snapshot; a layout that cannot fit is a
+  422 `invalidGeometry` with item IDs and nothing saved. Catalog metadata for
+  both agents comes from the public `GET /api/agent/catalog`.
 
 ### Applying the edit
 

@@ -50,8 +50,8 @@ const NOTE_GAP_Y = 24;
 
 /**
  * Puts unplaced notes in a column 80px right of the laid-out diagram, top
- * aligned; placed notes keep their spot. Roots bound the diagram because every
- * child sits inside its root boundary.
+ * aligned, each below any note already in its way; placed notes keep their
+ * spot. Roots bound the diagram because every child sits inside its root.
  */
 export function placeNotes(
   laidOut: readonly CanvasNode[],
@@ -64,10 +64,27 @@ export function placeNotes(
     : 0;
   let y = roots.length ? Math.min(...roots.map((node) => node.position.y)) : 0;
 
+  const taken = notes.filter((note) => !unplaced.has(note.id));
+
   return notes.map((note) => {
     if (!unplaced.has(note.id)) return note;
+    const width = note.width ?? NOTE_DEFAULT_SIZE.width;
+    const height = note.height ?? NOTE_DEFAULT_SIZE.height;
+    // ponytail: O(n²) over notes, fine below the 40-node graph limit.
+    for (let blocker = findOverlap(taken, right, y, width, height); blocker; blocker = findOverlap(taken, right, y, width, height)) {
+      y = blocker.position.y + (blocker.height ?? NOTE_DEFAULT_SIZE.height) + NOTE_GAP_Y;
+    }
     const placed = { ...note, position: { x: right, y } };
-    y += (note.height ?? NOTE_DEFAULT_SIZE.height) + NOTE_GAP_Y;
+    taken.push(placed);
+    y += height + NOTE_GAP_Y;
     return placed;
   });
+}
+
+function findOverlap(nodes: readonly CanvasNode[], x: number, y: number, width: number, height: number) {
+  return nodes.find((node) =>
+    node.position.x < x + width &&
+    x < node.position.x + (node.width ?? NOTE_DEFAULT_SIZE.width) &&
+    node.position.y < y + height &&
+    y < node.position.y + (node.height ?? NOTE_DEFAULT_SIZE.height));
 }

@@ -76,6 +76,10 @@ async function checkAgentNoteLifecycle(): Promise<void> {
   assert.equal(todo()!.data.label, "Retry twice");
   assert.equal(todo()!.data.noteColor, "blue");
 
+  await postV2(flow, state, [api, placed, { id: "later", kind: "note", label: "Second" }]);
+  assert.deepEqual(state.nodes.find((node) => node.id === "later")!.position, { x: 260, y: 224 }, "a later note stacks below an earlier one");
+  await postV2(flow, state, [api, placed]);
+
   await postV2(flow, state, [{ ...api, label: "Gateway" }, placed]);
   assert.deepEqual(todo()!.position, { x: 260, y: 0 }, "untouched note keeps its spot");
 

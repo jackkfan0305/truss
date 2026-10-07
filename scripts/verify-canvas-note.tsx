@@ -97,6 +97,10 @@ async function main() {
       <NoteContextMenu onAdd={(point) => menuAdds.push(point)}>
         <div className="react-flow__pane" id="pane">
           <div className="react-flow__node" id="node" />
+          <div className="react-flow__edgelabel-renderer">
+            <div id="edge-label">HTTPS</div>
+          </div>
+          <input id="field" />
         </div>
       </NoteContextMenu>,
     ),
@@ -109,6 +113,12 @@ async function main() {
     query("#node")!.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })),
   );
   assert.equal(menuItem(), undefined, "right-clicking a node keeps the browser menu");
+  for (const id of ["#edge-label", "#field"]) {
+    await act(async () =>
+      query(id)!.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+    );
+    assert.equal(menuItem(), undefined, `right-clicking ${id} keeps the browser menu`);
+  }
   await act(async () =>
     query("#pane")!.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })),
   );

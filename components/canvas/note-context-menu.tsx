@@ -16,12 +16,19 @@ interface NoteContextMenuProps {
   children: ReactNode;
 }
 
-/** Empty canvas only: React Flow's pane, minus the nodes and edges drawn inside it. */
+/**
+ * Anything drawn on the pane that is not empty canvas: nodes, edges, edge
+ * labels (portalled outside `.react-flow__edge`) and any text field.
+ */
+const NOT_EMPTY_CANVAS =
+  ".react-flow__node, .react-flow__edge, .react-flow__edgelabel-renderer > *, input, textarea, [contenteditable]";
+
+/** Empty canvas only: React Flow's pane, minus everything drawn on it. */
 function isEmptyCanvas(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
     target.closest(".react-flow__pane") !== null &&
-    target.closest(".react-flow__node, .react-flow__edge") === null
+    target.closest(NOT_EMPTY_CANVAS) === null
   );
 }
 

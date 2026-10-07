@@ -106,6 +106,12 @@ Smooth-step path with an arrow marker. Default edge color: `#f8fafc`. Stroke wid
 
 AWS service blocks are a rectangular elevated surface with the local catalog icon in its official colours above an editable name. They get no colour toolbar, since icon colours are fixed. Boundaries are a dashed `copy-muted` outline with a transparent interior; the icon and title sit in a patch of the page background (`bg-page`) straddling the top edge. Both use the standard four connection handles. A failed icon load shows the catalog name as text. Workspace controls (the AWS picker button and panel) keep the monochrome palette styling.
 
+### Sticky Notes
+
+Notes are light paper on the dark canvas with dark ink: yellow (default), pink, blue or green (`NOTE_COLORS`). A 4px radius, a soft shadow and a folded top-right corner set them apart from diagram blocks. A new note is 200×200 and resizes down to 120×80; text past the edge scrolls inside the note. Double-click edits; Escape or clicking away commits, and Enter adds a line. Selected, a note shows the colour toolbar and resize handles. It has no connection handles.
+
+Three ways add a note, each creating a selected yellow note in its editor: the sticky-note button beside the section dock (click, or drag onto the canvas), right-click on empty canvas ("Add sticky note"), and the `N` key.
+
 ### Connection Handles
 
 Small white circular handles, hidden by default, revealed on node hover. Appear at all four sides of a node.

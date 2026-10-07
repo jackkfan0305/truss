@@ -1256,6 +1256,13 @@ Update this file whenever the current phase, active feature, or implementation s
 - `02-editor-chrome` — `components/editor/` created with three client components: `editor-navbar.tsx` (fixed `h-14` bar, three sections, sidebar toggle with `PanelLeftOpen`/`PanelLeftClose`, right section empty), `project-sidebar.tsx` (absolute overlay, `translate-x` slide, `isOpen`/`onClose` props, Projects header + close button, `Tabs` for My Projects / Shared with empty states, full-width `New Project` button with `Plus`), and `editor-dialog.tsx` (reusable title/description/footer shell — no concrete dialogs built yet).
 - `01-design-system` — shadcn/ui initialized (`components.json`, `base-nova` style, `neutral` base, CSS variables). UI primitives added unmodified in `components/ui/`: Button, Card, Dialog, Input, Tabs, Textarea, ScrollArea. `lucide-react` installed. `lib/utils.ts` exports `cn()` (clsx + tailwind-merge). Dark theme tokens from `ui-context.md` defined in `app/globals.css`.
 
+## Sticky notes — 2026-10-06
+
+- Notes are a `note` node kind rendered by `canvasNote` (`components/canvas/canvas-note.tsx`), with no parent, no edges and no layout.
+- Added with the note button beside the dock, a right-click on empty canvas, or `N`.
+- Agents read and write notes through the v2 graph, the truss-diagram skill and the assistant, with a guideline to add one only for something the diagram cannot show.
+- `scripts/verify-canvas-note.tsx` covers the component and the three ways to add a note.
+
 ## In Progress
 
 - None.

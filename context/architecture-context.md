@@ -294,6 +294,10 @@ Every canvas write arrives through the graph import and edit routes they call.
   the next poll will replay from the stored canvas again.
 
 
+## Sticky Notes
+
+A note is a fourth node kind (`data.kind: "note"`, React Flow type `canvasNote`), so selection, drag, undo, autosave and replay treat it as any other node. Its text lives in `data.label` (up to 1,000 characters) and its colour in `data.noteColor`. Three chokepoints keep notes out of the diagram's structure: `parseCanvasSnapshot` drops a note's parent and any edge touching a note, `finishCanvasDrop` never reparents a note, and `resolveAgentGraphLayout` keeps notes out of ELK, placing new ones 80px right of the diagram. In the v2 agent graph a note is `{ kind: "note", id, label, color?, x?, y?, width?, height? }`; an edge to one fails with "Notes cannot be connected."
+
 ## Invariants
 
 1. Truss runs no server-side model and holds no model key (ADR 0001, narrowed by ADR 0006). Models are the terminal agent and the optional browser assistant, and both write through the agent endpoints. Truss never interprets a user's intent. The calling agent does.

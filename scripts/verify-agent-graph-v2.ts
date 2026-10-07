@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { canvasFingerprint, canvasToAgentGraph, materializeAgentGraph, canonicalCanvasSnapshotsEqual } from "../lib/agent-graph";
 import { agentGraphV2Schema, agentGraphV2EditSchema } from "../lib/agent-graph-schema";
 
 // Test basic v2 acceptance
@@ -80,3 +81,29 @@ const editParsed = agentGraphV2EditSchema.safeParse(empty);
 assert.ok(editParsed.success, "Edit schema should allow empty graph");
 
 console.log("✓ All v2 graph schema tests passed");
+
+// Sticky notes in the v2 graph.
+{
+  const api = { id: "api", kind: "generic", shape: "rectangle", color: "neutral", label: "API" };
+  const todo = { id: "todo", kind: "note", label: "Add retries  \n", color: "pink" };
+  const withNote = { version: 2, nodes: [api, todo], edges: [] as Array<{ id: string; source: string; target: string; label: string }> };
+  assert.ok(agentGraphV2Schema.safeParse(withNote).success, "note validates, untrimmed text allowed");
+  const connected = agentGraphV2Schema.safeParse({ ...withNote, edges: [{ id: "e", source: "api", target: "todo", label: "" }] });
+  assert.ok(!connected.success && connected.error.issues.some((issue) => issue.message === "Notes cannot be connected."));
+  assert.ok(!agentGraphV2Schema.safeParse({ ...withNote, nodes: [{ ...api, parentId: "todo" }, todo] }).success, "note as parent rejected");
+  assert.ok(!agentGraphV2Schema.safeParse({ ...withNote, nodes: [api, { ...todo, parentId: "api" }] }).success, "parentId on a note rejected");
+  assert.ok(!agentGraphV2Schema.safeParse({ ...withNote, nodes: [api, { ...todo, color: "teal" }] }).success, "node colour on a note rejected");
+
+  const materialized = materializeAgentGraph(withNote as never);
+  const noteNode = materialized.nodes.find((node) => node.id === "todo")!;
+  assert.equal(noteNode.type, "canvasNote");
+  assert.equal(noteNode.data.noteColor, "pink");
+  assert.equal(noteNode.width, 200);
+  const projected = canvasToAgentGraph(materialized, 2).graph.nodes.find((node) => node.id === "todo");
+  assert.deepEqual(projected, { id: "todo", kind: "note", label: "Add retries  \n", color: "pink", x: 0, y: 0, width: 200, height: 200 });
+
+  const recoloured = { ...materialized, nodes: materialized.nodes.map((node) => node.id === "todo" ? { ...node, data: { ...node.data, noteColor: "green" as const } } : node) };
+  assert.notEqual(canvasFingerprint(materialized), canvasFingerprint(recoloured));
+  assert.ok(!canonicalCanvasSnapshotsEqual(materialized, recoloured));
+  console.log("verify-agent-graph-v2 notes: ok");
+}

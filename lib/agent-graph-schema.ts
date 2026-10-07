@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { NODE_COLORS, NODE_SHAPES, type NodeColor } from "@/types/canvas";
+import { MAX_NOTE_TEXT_LENGTH, NODE_COLORS, NODE_SHAPES, NOTE_COLORS, type NodeColor, type NoteColor } from "@/types/canvas";
 import { getAwsCatalogEntry } from "@/lib/aws-catalog";
 
 /**
@@ -33,6 +33,7 @@ function canonicalTrimmedString(minimumLength: number, maximumLength: number) {
 }
 
 const nodeColorValues = Object.keys(NODE_COLORS) as [NodeColor, ...NodeColor[]];
+const noteColorValues = Object.keys(NOTE_COLORS) as [NoteColor, ...NoteColor[]];
 
 const agentGraphPositionSchema = z
   .number()
@@ -201,6 +202,18 @@ export const agentGraphNodeV2Schema = z
     z.strictObject({ ...baseV2, ...genericV2Fields }),
     z.strictObject({ ...baseV2, ...serviceV2Fields }),
     z.strictObject({ ...baseV2, ...boundaryV2Fields }),
+    // No parentId: notes float free of every boundary.
+    z.strictObject({
+      kind: z.literal("note"),
+      id: agentGraphIdSchema,
+      // Not trimmed: human notes end in newlines, and a trim rule would make them opaque.
+      label: z.string().min(1).max(MAX_NOTE_TEXT_LENGTH),
+      color: z.enum(noteColorValues).optional(),
+      x: coordinateV2.optional(),
+      y: coordinateV2.optional(),
+      width: dimensionV2.optional(),
+      height: dimensionV2.optional(),
+    }),
   ])
   .superRefine((node, context) => {
     if ((node.x === undefined) !== (node.y === undefined)) {
@@ -217,7 +230,7 @@ export const agentGraphNodeV2Schema = z
         message: "Supply both dimensions or omit both.",
       });
     }
-    if (node.kind !== "generic") {
+    if (node.kind === "aws-service" || node.kind === "boundary") {
       const expected = node.kind === "boundary" ? "boundary" : "service";
       if (getAwsCatalogEntry(node.catalogId)?.kind !== expected) {
         context.addIssue({
@@ -303,6 +316,7 @@ function buildAgentGraphV2Schema(minimumNodes: 0 | 1) {
       }
 
       // Validate edges (shared with v1)
+      const noteIds = new Set(graph.nodes.filter((node) => node.kind === "note").map((node) => node.id));
       const edgeIds = new Set<string>();
       const endpointPairs = new Set<string>();
 
@@ -321,6 +335,14 @@ function buildAgentGraphV2Schema(minimumNodes: 0 | 1) {
             code: "custom",
             message: "Edges cannot be self-loops.",
             path: ["edges", index, "target"],
+          });
+        }
+
+        if (noteIds.has(edge.source) || noteIds.has(edge.target)) {
+          context.addIssue({
+            code: "custom",
+            message: "Notes cannot be connected.",
+            path: ["edges", index],
           });
         }
 
@@ -385,12 +407,12 @@ export const agentGraphModelSchema = z.union([
     nodes: z.array(
       z.looseObject({
         id: z.string().describe("Unique lowercase kebab-case id, at most 48 characters."),
-        kind: z.enum(["generic", "aws-service", "boundary"]),
-        label: z.string().describe("Short label, at most 80 characters, no surrounding spaces."),
+        kind: z.enum(["generic", "aws-service", "boundary", "note"]),
+        label: z.string().describe("Short label, at most 80 characters, no surrounding spaces. A note's text may run to 1000 characters."),
         catalogId: z.string().optional().describe("Required for aws-service and boundary nodes; an id from get_aws_catalog. Never send it for generic nodes."),
         shape: z.enum(NODE_SHAPES).optional().describe("Generic nodes only."),
-        color: z.enum(nodeColorValues).optional().describe("Generic nodes only."),
-        parentId: z.string().optional().describe("The id of the boundary that visually holds this node."),
+        color: z.enum([...nodeColorValues, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
+        parentId: z.string().optional().describe("The id of the boundary that visually holds this node. Never on a note."),
         x: z.number().optional().describe("Top-left, relative to the parent (the canvas for roots). Omit x and y for new nodes."),
         y: z.number().optional().describe("Supply only together with x."),
         width: z.number().optional().describe("Omit unless resizing; supply only together with height."),

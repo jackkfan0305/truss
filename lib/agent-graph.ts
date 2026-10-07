@@ -20,11 +20,17 @@ import {
   CANVAS_EDGE_STYLE,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  CANVAS_NOTE_TYPE,
+  DEFAULT_NODE_COLOR,
+  DEFAULT_NOTE_COLOR,
   NODE_DEFAULT_SIZES,
+  NOTE_DEFAULT_SIZE,
   type CanvasNode,
   type NodeColor,
   type NodeShape,
+  type NoteColor,
 } from "@/types/canvas";
+import { isNoteColor } from "@/lib/canvas-note";
 
 export {
   agentGraphSchema,
@@ -77,7 +83,7 @@ export interface MaterializableNode {
   id: string;
   label: string;
   shape?: NodeShape;
-  color?: NodeColor;
+  color?: NodeColor | NoteColor;
   x?: number;
   y?: number;
   width?: number;
@@ -111,7 +117,24 @@ export function materializeAgentGraph(
     }
   }
 
-  const canvasNodes: CanvasNode[] = sortedNodes.map((node) => {
+  const canvasNodes: CanvasNode[] = sortedNodes.map((node): CanvasNode => {
+    if (isV2 && node.kind === "note") {
+      return {
+        id: node.id,
+        type: CANVAS_NOTE_TYPE,
+        position: { x: node.x ?? 0, y: node.y ?? 0 },
+        width: node.width ?? NOTE_DEFAULT_SIZE.width,
+        height: node.height ?? NOTE_DEFAULT_SIZE.height,
+        data: {
+          kind: "note",
+          label: node.label,
+          noteColor: isNoteColor(node.color) ? node.color : DEFAULT_NOTE_COLOR,
+          color: DEFAULT_NODE_COLOR,
+          shape: "rectangle",
+        },
+      };
+    }
+
     const isBoundary = isV2 && node.kind === "boundary";
     const nodeType = isBoundary ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
 
@@ -141,7 +164,7 @@ export function materializeAgentGraph(
       data: {
         label: node.label,
         shape: node.shape || "rectangle",
-        color: node.color || "neutral",
+        color: (node.color as NodeColor | undefined) || "neutral",
         ...(node.kind ? { kind: node.kind } : {}),
         ...(node.catalogId ? { catalogId: node.catalogId } : {}),
       },
@@ -197,7 +220,8 @@ export function canonicalCanvasSnapshotsEqual(
         node.data.color === other.data.color &&
         (node.parentId ?? "") === (other.parentId ?? "") &&
         (node.data.kind ?? "") === (other.data.kind ?? "") &&
-        (node.data.catalogId ?? "") === (other.data.catalogId ?? "")
+        (node.data.catalogId ?? "") === (other.data.catalogId ?? "") &&
+        (node.data.noteColor ?? "") === (other.data.noteColor ?? "")
       );
     }) &&
     leftEdges.every((edge, index) => {
@@ -240,6 +264,18 @@ export interface AgentGraphViewV2 {
 
 function projectNodeV2(node: CanvasNode): unknown {
   const kind = node.data?.kind ?? "generic";
+  if (kind === "note") {
+    return {
+      id: node.id,
+      kind,
+      label: node.data.label,
+      color: node.data.noteColor ?? DEFAULT_NOTE_COLOR,
+      x: node.position?.x,
+      y: node.position?.y,
+      width: node.width ?? NOTE_DEFAULT_SIZE.width,
+      height: node.height ?? NOTE_DEFAULT_SIZE.height,
+    };
+  }
   return {
     id: node.id,
     kind,
@@ -319,7 +355,7 @@ export function canvasToAgentGraph(
       changed = false;
       const readable = new Map(nodes.map((node) => [node.id, node]));
       for (const node of [...nodes]) {
-        const parentId = (node as AgentGraphNodeV2).parentId;
+        const parentId = (node as { parentId?: string }).parentId;
         if (parentId !== undefined && (readable.get(parentId) as AgentGraphNodeV2 | undefined)?.kind !== "boundary") {
           nodes.splice(nodes.indexOf(node), 1);
           opaqueNodeIds.push(node.id);
@@ -392,6 +428,7 @@ export function canvasFingerprint(snapshot: CanvasSnapshot): string {
       node.parentId ?? "",
       node.data?.kind ?? "",
       node.data?.catalogId ?? "",
+      node.data?.noteColor ?? "",
     ]);
   const edges = [...snapshot.edges]
     .sort((left, right) => left.id.localeCompare(right.id))

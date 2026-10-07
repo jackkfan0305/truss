@@ -454,7 +454,10 @@ export const agentGraphModelSchema = z.union([
         id: z.string().describe("Unique lowercase kebab-case id, at most 48 characters."),
         kind: z.enum(["generic", "aws-service", "boundary", "note", "code"]),
         label: z.string().describe("Short label, at most 80 characters, no surrounding spaces. A note's text may run to 1000 characters."),
-        catalogId: z.string().optional().describe("Required for aws-service and boundary nodes; an id from get_aws_catalog. Never send it for generic nodes."),
+        catalogId: z.string().optional().describe("Required for aws-service, boundary and code nodes; an id from get_catalog. Never send it for generic nodes."),
+        signature: z.string().optional().describe("Code nodes only. Keep the value you read."),
+        rows: z.array(z.string()).optional().describe("Code nodes only. Keep the values you read."),
+        source: z.looseObject({ path: z.string(), line: z.number().optional(), url: z.string().optional() }).optional().describe("Code nodes only. Keep the value you read."),
         shape: z.enum(NODE_SHAPES).optional().describe("Generic nodes only."),
         color: z.enum([...nodeColorValues, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
         parentId: z.string().optional().describe("The id of the boundary that visually holds this node. Never on a note."),
@@ -464,12 +467,13 @@ export const agentGraphModelSchema = z.union([
         height: z.number().optional().describe("Supply only together with width."),
       }),
     ),
-    edges: z.array(agentGraphEdgeModelSchema()),
+    edges: z.array(agentGraphEdgeModelSchema(true)),
   }),
 ]);
 
-function agentGraphEdgeModelSchema() {
+function agentGraphEdgeModelSchema(withKind = false) {
   return z.looseObject({
+    ...(withKind ? { kind: z.enum(CODE_EDGE_KINDS).optional().describe("Code diagrams: calls (default, solid) or uses (dashed). Keep the value you read.") } : {}),
     id: z.string().describe("Unique lowercase kebab-case id."),
     source: z.string(),
     target: z.string(),

@@ -62,7 +62,9 @@ assert.equal(describeAssistantError(apiError(500))?.clearKey, false);
 
   // Every catalog ID comes from the shared catalog; the prompt has no list of its own.
   for (const { id } of AWS_CATALOG) assert.ok(withGraph.includes(id), id);
-  assert.match(withGraph, /get_aws_catalog/);
+  assert.match(withGraph, /get_catalog/);
+  assert.doesNotMatch(withGraph, /get_aws_catalog/);
+  assert.match(withGraph, /truss-diagram/);
   assert.match(withGraph, /relative to their parent, or the canvas for roots/);
   assert.match(withGraph, /opaque items and their absolute bounds as obstacles/);
   assert.match(withGraph, /read again and revise the edit against the new graph/);
@@ -89,7 +91,7 @@ async function checkAbortDuringInitialRead() {
       await new Promise<void>((resolve) => { finishRead = resolve; });
       return { error: "unavailable" };
     },
-    getAwsCatalog: async () => { throw new Error("Stopped turn read the catalog"); },
+    getCatalog: async () => { throw new Error("Stopped turn read the catalog"); },
     listDiagrams: async () => { throw new Error("Stopped turn called a tool"); },
     applyDiagramEdit: async () => { throw new Error("Stopped turn edited a diagram"); },
     createDiagram: async () => { throw new Error("Stopped turn created a diagram"); },

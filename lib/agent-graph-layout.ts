@@ -49,7 +49,8 @@ export async function resolveAgentGraphLayout(
       const previous = existingEdges.get(edge.id);
       if (!previous) return edge;
       // The graph states an edge's kind, so a missing one clears the stored kind.
-      const { kind: _previousKind, ...previousData } = previous.data ?? { label: "" };
+      const previousData = { ...(previous.data ?? { label: "" }) };
+      delete previousData.kind;
       return { ...previous, source: edge.source, target: edge.target, data: { ...previousData, ...edge.data! } };
     }),
   };

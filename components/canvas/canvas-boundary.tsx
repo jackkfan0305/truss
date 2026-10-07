@@ -5,6 +5,7 @@ import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlow
 
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
+import { CodeIcon } from "@/components/canvas/code-icon";
 import { BoundaryResizeContext } from "@/lib/canvas-boundary-context";
 import { getBoundaryMinimumSize } from "@/lib/canvas-interaction";
 import type { CanvasNode } from "@/types/canvas";
@@ -27,13 +28,26 @@ export function CanvasBoundaryRenderer({ id, data, selected }: NodeProps<CanvasN
   const minWidth = useStore(minimumOf("width"));
   const minHeight = useStore(minimumOf("height"));
 
+  const isCode = data.catalogId?.startsWith("code-") === true;
+
   return (
     <>
-      <div className="h-full w-full border border-dashed border-copy-muted bg-transparent" />
-      <div className="absolute left-4 top-0 flex max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-2 bg-page px-2 text-sm">
-        {data.catalogId ? <AwsIcon catalogId={data.catalogId} className="h-5 w-5" /> : null}
-        <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
-      </div>
+      {isCode ? (
+        <div data-code-boundary="" className="flex h-full w-full flex-col rounded-md border border-surface-border bg-transparent">
+          <div className="flex h-8 items-center gap-2 border-b border-surface-border bg-elevated px-3 font-mono text-sm">
+            <CodeIcon catalogId={data.catalogId!} className="text-copy-muted" />
+            <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="h-full w-full border border-dashed border-copy-muted bg-transparent" />
+          <div className="absolute left-4 top-0 flex max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-2 bg-page px-2 text-sm">
+            {data.catalogId ? <AwsIcon catalogId={data.catalogId} className="h-5 w-5" /> : null}
+            <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
+          </div>
+        </>
+      )}
       {HANDLE_POSITIONS.map((position) => (
         <Handle key={position} id={position} type="source" position={position} />
       ))}

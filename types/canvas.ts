@@ -31,6 +31,23 @@ export type NodeColor = keyof typeof NODE_COLORS;
 
 export const DEFAULT_NODE_COLOR: NodeColor = "neutral";
 
+/**
+ * Sticky-note paper colours: a light fill with dark ink, the reverse of the
+ * node palette, so a note never reads as part of the diagram.
+ */
+export const NOTE_COLORS = {
+  yellow: { fill: "#FDE68A", ink: "#3F2E00" },
+  pink: { fill: "#FBCFE8", ink: "#4A1030" },
+  blue: { fill: "#BFDBFE", ink: "#0B2545" },
+  green: { fill: "#BBF7D0", ink: "#0B3B1E" },
+} as const;
+
+export type NoteColor = keyof typeof NOTE_COLORS;
+
+export const DEFAULT_NOTE_COLOR: NoteColor = "yellow";
+
+export const MAX_NOTE_TEXT_LENGTH = 1000;
+
 /** The 6 node shapes from `context/ui-context.md`. */
 export const NODE_SHAPES = [
   "rectangle",
@@ -71,6 +88,9 @@ export const NODE_DEFAULT_SIZES: Record<NodeShape, NodeSize> = {
  * shape: below roughly this, a centred label has nowhere left to sit.
  */
 export const NODE_MIN_SIZE: NodeSize = { width: 72, height: 48 };
+
+export const NOTE_DEFAULT_SIZE: NodeSize = { width: 200, height: 200 };
+export const NOTE_MIN_SIZE: NodeSize = { width: 120, height: 80 };
 
 /**
  * The room an edge label needs at the midpoint of its edge, in flow units.
@@ -125,8 +145,10 @@ export type CanvasNodeData = {
   label: string;
   color: NodeColor;
   shape: NodeShape;
-  kind?: "generic" | "aws-service" | "boundary";
+  kind?: "generic" | "aws-service" | "boundary" | "note";
   catalogId?: string;
+  /** Notes only; the note's text lives in `label`. */
+  noteColor?: NoteColor;
 };
 
 /** Same reason as `CanvasNodeData`: a `type` gets the index signature React
@@ -138,9 +160,10 @@ export type CanvasEdgeData = {
 
 export const CANVAS_NODE_TYPE = "canvasNode";
 export const CANVAS_BOUNDARY_TYPE = "canvasBoundary";
+export const CANVAS_NOTE_TYPE = "canvasNote";
 export const CANVAS_EDGE_TYPE = "canvasEdge";
 
-export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE | typeof CANVAS_BOUNDARY_TYPE>;
+export type CanvasNode = Node<CanvasNodeData, typeof CANVAS_NODE_TYPE | typeof CANVAS_BOUNDARY_TYPE | typeof CANVAS_NOTE_TYPE>;
 export type CanvasEdge = Edge<CanvasEdgeData, typeof CANVAS_EDGE_TYPE>;
 
 /**

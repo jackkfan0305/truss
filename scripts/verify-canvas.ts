@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createNoteNode } from "../lib/canvas-note";
+import { finishCanvasDrop } from "../lib/canvas-interaction";
 import { readFileSync } from "node:fs";
 import { getSmoothStepPath, Position } from "@xyflow/react";
 
@@ -981,4 +983,41 @@ try {
   console.error("❌ Canvas verification failed");
   console.error(error);
   process.exitCode = 1;
+}
+
+// Sticky notes: snapshot round-trip and the no-parent, no-edge rules.
+{
+  const note = createNoteNode({ x: 100, y: 100 });
+  assert.equal(note.type, "canvasNote");
+  assert.deepEqual(note.position, { x: 0, y: 0 });
+  assert.equal(note.width, 200);
+  assert.equal(note.data.noteColor, "yellow");
+
+  const roundTrip = parseCanvasSnapshot(JSON.parse(serializeCanvasSnapshot({
+    nodes: [{ ...note, width: 300, height: 150, data: { ...note.data, noteColor: "blue", label: "Check quotas" } }],
+    edges: [],
+  })))!;
+  assert.equal(roundTrip.nodes[0].type, "canvasNote");
+  assert.equal(roundTrip.nodes[0].data.noteColor, "blue");
+  assert.equal(roundTrip.nodes[0].width, 300);
+  assert.equal(roundTrip.nodes[0].data.label, "Check quotas");
+
+  const dirty = parseCanvasSnapshot({
+    nodes: [
+      { id: "b", position: { x: 0, y: 0 }, width: 400, height: 400, data: { kind: "boundary", catalogId: "boundary-vpc", label: "VPC" } },
+      { id: "n", position: { x: 10, y: 10 }, parentId: "b", data: { kind: "note", noteColor: "mauve", label: "x".repeat(1200) } },
+      { id: "a", position: { x: 0, y: 0 }, data: { label: "A" } },
+    ],
+    edges: [{ id: "e", source: "a", target: "n" }],
+  })!;
+  const dirtyNote = dirty.nodes.find((node) => node.id === "n")!;
+  assert.equal(dirtyNote.parentId, undefined);
+  assert.equal(dirtyNote.data.noteColor, "yellow");
+  assert.equal(dirtyNote.data.label.length, 1000);
+  assert.equal(dirty.edges.length, 0);
+
+  // A note dropped inside a boundary stays a root.
+  const dropped = finishCanvasDrop({ nodes: [dirty.nodes[0], { ...dirtyNote, position: { x: 50, y: 50 } }], edges: [] }, "n");
+  assert.equal(dropped.nodes.find((node) => node.id === "n")!.parentId, undefined);
+  console.log("verify-canvas notes: ok");
 }

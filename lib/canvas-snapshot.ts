@@ -19,7 +19,10 @@ import {
   CANVAS_EDGE_STYLE,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  CANVAS_NOTE_TYPE,
   DEFAULT_NODE_COLOR,
+  DEFAULT_NOTE_COLOR,
+  MAX_NOTE_TEXT_LENGTH,
   DEFAULT_NODE_SHAPE,
   NODE_COLORS,
   NODE_SHAPES,
@@ -28,6 +31,7 @@ import {
   type NodeColor,
   type NodeShape,
 } from "@/types/canvas";
+import { isNoteColor } from "@/lib/canvas-note";
 
 export interface CanvasSnapshot {
   nodes: CanvasNode[];
@@ -85,9 +89,9 @@ function parseNode(value: unknown): CanvasNode | null {
   const kind = nodeData.kind;
   const catalogId = nodeData.catalogId;
 
-  // Determine node type: boundary nodes use CANVAS_BOUNDARY_TYPE
-  const isBoundary = kind === "boundary";
-  const nodeType = isBoundary ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
+  const isNote = kind === "note";
+  const nodeType = isNote ? CANVAS_NOTE_TYPE : kind === "boundary" ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
+  const label = typeof nodeData.label === "string" ? nodeData.label : "";
 
   return {
     id,
@@ -97,14 +101,17 @@ function parseNode(value: unknown): CanvasNode | null {
     position: { x: position.x, y: position.y },
     ...(isFiniteNumber(width) ? { width } : {}),
     ...(isFiniteNumber(height) ? { height } : {}),
-    ...(typeof parentId === "string" && parentId ? { parentId } : {}),
+    // Notes float free: a stored parent is dropped rather than trusted.
+    ...(!isNote && typeof parentId === "string" && parentId ? { parentId } : {}),
     data: {
-      label: typeof nodeData.label === "string" ? nodeData.label : "",
+      // An over-long note is cut rather than failing the whole snapshot.
+      label: isNote ? label.slice(0, MAX_NOTE_TEXT_LENGTH) : label,
       // An unknown colour or shape degrades to the default instead of failing
       // the whole snapshot — one retired palette key must not cost the diagram.
       color: isNodeColor(color) ? color : DEFAULT_NODE_COLOR,
       shape: isNodeShape(shape) ? shape : DEFAULT_NODE_SHAPE,
-      ...(kind && (kind === "generic" || kind === "aws-service" || kind === "boundary") ? { kind } : {}),
+      ...(kind === "generic" || kind === "aws-service" || kind === "boundary" || kind === "note" ? { kind } : {}),
+      ...(isNote ? { noteColor: isNoteColor(nodeData.noteColor) ? nodeData.noteColor : DEFAULT_NOTE_COLOR } : {}),
       ...(typeof catalogId === "string" && catalogId ? { catalogId } : {}),
     },
   };
@@ -194,11 +201,13 @@ export function parseCanvasSnapshot(value: unknown): CanvasSnapshot | null {
     }
   }
 
+  // Notes cannot be connected, so an edge touching one drops like a dangling edge.
+  const connectableIds = new Set(nodes.filter((node) => node.type !== CANVAS_NOTE_TYPE).map((node) => node.id));
   const edges: CanvasEdge[] = [];
   const seenEdgeIds = new Set<string>();
 
   for (const candidate of value.edges) {
-    const edge = parseEdge(candidate, seenNodeIds);
+    const edge = parseEdge(candidate, connectableIds);
 
     if (edge && !seenEdgeIds.has(edge.id)) {
       seenEdgeIds.add(edge.id);

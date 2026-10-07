@@ -146,6 +146,11 @@ export function finishCanvasDrop(snapshot: CanvasSnapshot, id: string): CanvasSn
     return snapshot;
   }
 
+  // ponytail: notes are never children; they stay where they were dropped.
+  if (snapshot.nodes[nodeIndex].data.kind === "note") {
+    return snapshot;
+  }
+
   const absolute = getAbsoluteBounds(id, snapshot.nodes);
   const center = { x: absolute.x + absolute.width / 2, y: absolute.y + absolute.height / 2 };
   const excluded = new Set([id, ...collectDescendantIds(id, snapshot.nodes)]);

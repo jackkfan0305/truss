@@ -1,3 +1,4 @@
+import { parseRequestedVersion } from "@/lib/agent-graph-version";
 import { handleAgentGraphGet } from "@/lib/agent-graph-read-server";
 import { readCanvas } from "@/lib/canvas-read";
 import { authorizeDiagram } from "@/lib/diagram-access";
@@ -14,11 +15,17 @@ export async function GET(
 ): Promise<Response> {
   const { diagramId } = await params;
 
-  return handleAgentGraphGet(diagramId, {
-    // Closes over `request` so a `trs_agent_...` bearer token resolves the
-    // same as the browser session did, without changing
-    // AgentGraphReadDependencies' own signature or its verifier.
-    authorizeDiagram: (id) => authorizeDiagram(request, id),
-    readCanvas,
-  });
+  const version = parseRequestedVersion(request.url);
+
+  return handleAgentGraphGet(
+    diagramId,
+    {
+      // Closes over `request` so a `trs_agent_...` bearer token resolves the
+      // same as the browser session did, without changing
+      // AgentGraphReadDependencies' own signature or its verifier.
+      authorizeDiagram: (id) => authorizeDiagram(request, id),
+      readCanvas,
+    },
+    version,
+  );
 }

@@ -52,7 +52,8 @@ export function useKeyboardShortcuts({
 
       const shortcut = resolveShortcut(event);
 
-      if (!shortcut) {
+      // `N` belongs to the canvas (`useAddNoteShortcut`), not the control bar.
+      if (!shortcut || shortcut === "add-note") {
         return;
       }
 
@@ -80,4 +81,25 @@ export function useKeyboardShortcuts({
 
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [flow, undo, redo]);
+}
+
+/**
+ * `N` adds a sticky note. Its own hook rather than a fifth action above, so the
+ * canvas, which owns note creation, registers it without the control bar.
+ */
+export function useAddNoteShortcut(addNote: () => void) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target) || resolveShortcut(event) !== "add-note") {
+        return;
+      }
+
+      event.preventDefault();
+      addNote();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [addNote]);
 }

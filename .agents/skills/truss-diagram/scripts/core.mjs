@@ -18,6 +18,7 @@ export const MAX_NODE_LABEL_LENGTH = 80;
 export const MAX_EDGE_LABEL_LENGTH = 40;
 export const MIN_POSITION = -10_000;
 export const MAX_POSITION = 10_000;
+export const MAX_DIMENSION = 1_000_000;
 export const DEFAULT_BASE_URL = "http://localhost:3000";
 // Matches the loopback's idle timeout (Global Constraints: 120000 ms).
 const LOOPBACK_TIMEOUT_MS = 120_000;
@@ -86,6 +87,119 @@ function isDiagramId(value) {
   );
 }
 
+const COMMON_V2_KEYS = ["id", "kind", "label", "parentId", "x", "y", "width", "height"];
+const NODE_KEYS_V2 = {
+  generic: new Set([...COMMON_V2_KEYS, "shape", "color"]),
+  "aws-service": new Set([...COMMON_V2_KEYS, "catalogId"]),
+  boundary: new Set([...COMMON_V2_KEYS, "catalogId"]),
+  note: new Set(["id", "kind", "label", "color", "x", "y", "width", "height"]),
+};
+const NOTE_COLORS = new Set(["yellow", "pink", "blue", "green"]);
+const MAX_NOTE_LENGTH = 1000;
+
+// Note text keeps its line breaks and trailing spaces; only the length is capped.
+function isNoteText(value) {
+  return typeof value === "string" && value.length >= 1 && value.length <= MAX_NOTE_LENGTH;
+}
+const CATALOG_PREFIX = { "aws-service": "aws-", boundary: "boundary-" };
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function inRange(value, minimum, maximum) {
+  return Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+function validateNodeV1(node, nodeIds) {
+  if (
+    !isPlainObject(node) ||
+    !hasOnlyKeys(node, new Set(["id", "label", "shape", "color", "x", "y"])) ||
+    !isGraphId(node.id) ||
+    !isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH) ||
+    !SHAPES.has(node.shape) ||
+    !COLORS.has(node.color) ||
+    (("x" in node || "y" in node) && (
+      !Number.isInteger(node.x) ||
+      !Number.isInteger(node.y) ||
+      node.x < MIN_POSITION ||
+      node.x > MAX_POSITION ||
+      node.y < MIN_POSITION ||
+      node.y > MAX_POSITION
+    )) ||
+    nodeIds.has(node.id)
+  ) {
+    throw new Error("The graph contains an invalid node.");
+  }
+  return {
+    id: node.id,
+    label: node.label,
+    shape: node.shape,
+    color: node.color,
+    ...("x" in node ? { x: node.x, y: node.y } : {}),
+  };
+}
+
+// Catalog identity is server-authoritative (the .mjs runtime cannot import the
+// TypeScript catalog); this checks only the field shape and the kind's prefix.
+function validateNodeV2(node, nodeIds) {
+  if (isPlainObject(node) && node.kind === "note") {
+    for (const field of ["parentId", "catalogId"]) {
+      if (field in node) throw new Error(`Notes cannot have a ${field}.`);
+    }
+  }
+  const keys = isPlainObject(node) ? NODE_KEYS_V2[node.kind] : undefined;
+  if (
+    !keys ||
+    !hasOnlyKeys(node, keys) ||
+    !isGraphId(node.id) ||
+    !(node.kind === "note" ? isNoteText(node.label) : isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH)) ||
+    ("parentId" in node && !isGraphId(node.parentId)) ||
+    ("x" in node !== "y" in node) ||
+    ("x" in node && (!inRange(node.x, MIN_POSITION, MAX_POSITION) || !inRange(node.y, MIN_POSITION, MAX_POSITION))) ||
+    ("width" in node !== "height" in node) ||
+    ("width" in node && (
+      !inRange(node.width, Number.MIN_VALUE, MAX_DIMENSION) ||
+      !inRange(node.height, Number.MIN_VALUE, MAX_DIMENSION)
+    )) ||
+    nodeIds.has(node.id)
+  ) {
+    throw new Error("The graph contains an invalid node.");
+  }
+  if (node.kind === "generic") {
+    if (!SHAPES.has(node.shape) || !COLORS.has(node.color)) {
+      throw new Error("The graph contains an invalid node.");
+    }
+  } else if (node.kind === "note") {
+    if ("color" in node && !NOTE_COLORS.has(node.color)) {
+      throw new Error("The graph contains an invalid node.");
+    }
+  } else if (
+    typeof node.catalogId !== "string" ||
+    !node.catalogId.startsWith(CATALOG_PREFIX[node.kind]) ||
+    !isGraphId(node.catalogId)
+  ) {
+    throw new Error("The graph contains an invalid node.");
+  }
+  return { ...node };
+}
+
+// Parents must exist and be boundaries; a per-node visited set rejects cycles.
+function validateHierarchy(nodes) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const node of nodes) {
+    if (node.parentId === undefined) continue;
+    if (byId.get(node.parentId)?.kind !== "boundary") {
+      throw new Error("The graph contains an invalid parent.");
+    }
+    const visited = new Set([node.id]);
+    for (let next = node.parentId; next !== undefined; next = byId.get(next)?.parentId) {
+      if (visited.has(next)) throw new Error("The graph contains a containment cycle.");
+      visited.add(next);
+    }
+  }
+}
+
 export function validateGraph(rawGraph) {
   if (
     rawGraph === null ||
@@ -95,8 +209,9 @@ export function validateGraph(rawGraph) {
   ) {
     throw new Error("The graph must use the compact graph contract.");
   }
+  const version = rawGraph.version;
   if (
-    rawGraph.version !== 1 ||
+    (version !== 1 && version !== 2) ||
     !Array.isArray(rawGraph.nodes) ||
     !Array.isArray(rawGraph.edges) ||
     rawGraph.nodes.length < 1 ||
@@ -107,40 +222,13 @@ export function validateGraph(rawGraph) {
   }
 
   const nodeIds = new Set();
+  const validateNode = version === 2 ? validateNodeV2 : validateNodeV1;
   const nodes = rawGraph.nodes.map((node) => {
-    if (
-      node === null ||
-      typeof node !== "object" ||
-      Array.isArray(node) ||
-      !hasOnlyKeys(
-        node,
-        new Set(["id", "label", "shape", "color", "x", "y"]),
-      ) ||
-      !isGraphId(node.id) ||
-      !isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH) ||
-      !SHAPES.has(node.shape) ||
-      !COLORS.has(node.color) ||
-      (("x" in node || "y" in node) && (
-        !Number.isInteger(node.x) ||
-        !Number.isInteger(node.y) ||
-        node.x < MIN_POSITION ||
-        node.x > MAX_POSITION ||
-        node.y < MIN_POSITION ||
-        node.y > MAX_POSITION
-      )) ||
-      nodeIds.has(node.id)
-    ) {
-      throw new Error("The graph contains an invalid node.");
-    }
-    nodeIds.add(node.id);
-    return {
-      id: node.id,
-      label: node.label,
-      shape: node.shape,
-      color: node.color,
-      ...("x" in node ? { x: node.x, y: node.y } : {}),
-    };
+    const valid = validateNode(node, nodeIds);
+    nodeIds.add(valid.id);
+    return valid;
   });
+  if (version === 2) validateHierarchy(nodes);
 
   const edgeIds = new Set();
   const endpointPairs = new Set();
@@ -172,7 +260,7 @@ export function validateGraph(rawGraph) {
     };
   });
 
-  return { version: 1, nodes, edges };
+  return { version, nodes, edges };
 }
 
 export function validateCreateInput(rawTitle, rawGraph) {
@@ -350,16 +438,30 @@ function fetchDiagrams(baseUrl, token) {
   });
 }
 
+// Recoverable server refusals carry a code and the item IDs to revise.
+export function graphRequestError(body, fallback) {
+  const message = typeof body?.error === "string"
+    ? body.error
+    : typeof body?.message === "string" ? body.message : fallback;
+  const { code, issues, itemIds, boundaryId, requiredVersion } = body ?? {};
+  const details = code || issues
+    ? ` ${JSON.stringify({ code, issues, itemIds, boundaryId, requiredVersion })}`
+    : "";
+  return new Error(`${message}${details}`);
+}
+
+const versionQuery = (graph) => (graph.version === 2 ? "?version=2" : "");
+
 function fetchGraph(baseUrl, diagramId, token) {
   return fetchJson(
-    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-graph`,
+    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-graph?version=2`,
     { headers: { authorization: `Bearer ${token}` } },
   );
 }
 
 function postGraphEdit(baseUrl, diagramId, token, fingerprint, graph) {
   return fetchJson(
-    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-graph-edit`,
+    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-graph-edit${versionQuery(graph)}`,
     {
       method: "POST",
       headers: {
@@ -405,7 +507,7 @@ function postDiagram(baseUrl, token, id, name) {
 
 function postGraphImport(baseUrl, diagramId, token, launchId, graph) {
   return fetchJson(
-    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-launch-import`,
+    `${baseUrl}/api/diagrams/${encodeURIComponent(diagramId)}/agent-launch-import${versionQuery(graph)}`,
     {
       method: "POST",
       headers: {
@@ -442,6 +544,23 @@ async function loadDiagrams(baseUrl, auth, { force = false } = {}) {
 
   await writeDiagrams(baseUrl, diagrams);
   return { diagrams, fromCache: false };
+}
+
+/**
+ * Reads the public AWS catalog. It holds no owner data, so this neither needs
+ * nor opens a sign-in; the origin is still validated like every other call.
+ */
+export async function getAwsCatalog(rawBaseUrl) {
+  const baseUrl = resolveBaseUrl(rawBaseUrl);
+  const result = await fetchJson(`${baseUrl}/api/agent/catalog`);
+  if (
+    result.status !== 200 ||
+    result.body?.catalogVersion !== 1 ||
+    !Array.isArray(result.body?.entries)
+  ) {
+    throw new Error("We couldn't read the AWS catalog. Please try again.");
+  }
+  return result.body;
 }
 
 /** `--op login` — mints and caches an agent token, priming the diagram cache. */
@@ -509,9 +628,10 @@ export async function getDiagram(rawBaseUrl, diagramId) {
     if (result.status === 404 && fromCache) {
       await loadDiagrams(baseUrl, auth, { force: true });
     }
-    throw new Error("We couldn't read this diagram. Please try again.");
+    throw graphRequestError(result.body, "We couldn't read this diagram. Please try again.");
   }
   return {
+    ...result.body,
     graph: result.body?.graph,
     opaqueNodeIds: Array.isArray(result.body?.opaqueNodeIds) ? result.body.opaqueNodeIds : [],
     fingerprint: result.body?.fingerprint,
@@ -530,15 +650,16 @@ export async function applyDiagramEdit(rawBaseUrl, diagramId, fingerprint, desir
   const result = await auth.call((token) =>
     postGraphEdit(baseUrl, diagramId, token, fingerprint, graph),
   );
-  if (result.status === 409) {
+  // A 409 with a code is a refused contract, not a stale read.
+  if (result.status === 409 && !result.body?.code) {
     throw new Error(
       "This diagram changed since you read it. Read it again with truss_get_diagram, reapply your changes to the current graph, and submit its fingerprint.",
     );
   }
   if (result.status !== 200) {
-    throw new Error("We couldn't apply that change. Please try again.");
+    throw graphRequestError(result.body, "We couldn't apply that change. Please try again.");
   }
-  return { editorUrl: `${baseUrl}/editor/${diagramId}` };
+  return { ...result.body, editorUrl: `${baseUrl}/editor/${diagramId}` };
 }
 
 /** Delete through the owner-authorized API and report its completed result. */
@@ -608,13 +729,14 @@ export async function createDiagram(rawBaseUrl, title, graph) {
     // The diagram exists but is empty. Say so with the URL rather than
     // silently reporting success — and do not delete it, since the user may
     // well want to keep it and draw by hand.
+    const cause = graphRequestError(imported.body, "");
     throw new Error(
-      `The diagram was created but the diagram could not be drawn. Open ${editorUrl} and try the edit again.`,
+      `The diagram was created but the diagram could not be drawn. Open ${editorUrl} and try the edit again.${cause.message ? ` ${cause.message}` : ""}`,
     );
   }
 
   await loadDiagrams(baseUrl, auth, { force: true });
-  return { editorUrl, diagramId };
+  return { ...imported.body, editorUrl, diagramId };
 }
 
 /**

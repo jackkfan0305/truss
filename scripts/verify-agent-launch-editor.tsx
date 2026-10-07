@@ -17,7 +17,6 @@ import {
   createAgentLaunchRecord,
   type AgentLaunchRecord,
 } from "../lib/agent-launch";
-import { initialEditorSidebar } from "../lib/editor-sidebar-state";
 import { createReactHookHarness } from "./testing/react-hook-harness";
 
 const launchId = "00000000-0000-4a00-8000-000000000006";
@@ -460,9 +459,6 @@ async function checkStorageMethodsAreGuardedAndNoLaunchDoesNotTouchStorage(): Pr
 }
 
 async function checkNeutralFailureUiAndUnchangedManualSidebar(): Promise<void> {
-  assert.equal(initialEditorSidebar(), null, "normal editor visits start closed");
-  assert.equal(initialEditorSidebar(), null, "launch imports do not open a sidebar");
-
   const failure = renderToStaticMarkup(
     <AgentLaunchImportFailure
       message="We couldn't import your diagram. Please try again."

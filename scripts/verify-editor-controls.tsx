@@ -10,7 +10,6 @@ const baseNavbarProps = {
   isSidebarOpen: false,
   onToggleSidebar: () => undefined,
   diagramName: "Checkout API",
-  onOpenTemplates: () => undefined,
   saveStatus: <span>Saved</span>,
   presence: <span>Collaborators</span>,
   profile: <span>Profile</span>,
@@ -87,38 +86,41 @@ const closedDiagramSidebar = controlledRegion(
 )
 const closedDiagramTitle = parentDivContaining(closedHtml, "Checkout API")
 
-// The sidebar toggle is a plain icon button, not a floating chip.
-assert.doesNotMatch(closedDiagramsToggle, /border-surface-border|backdrop-blur-xl/)
-assert.doesNotMatch(
-  closedHtml,
-  /<div[^>]*(?:border-surface-border|bg-surface\/80)[^>]*>\s*<button[^>]*aria-controls="diagrams-sidebar"/
-)
-assert.match(closedDiagramsToggle, /top-3/)
-assert.match(closedDiagramsToggle, /left-3/)
+// The sidebar toggle sits in a chip, mirroring the utility chip on the right.
+function toggleChip(html: string): string {
+  const tag = html.match(
+    /<div[^>]*>(?=\s*<button[^>]*aria-controls="diagrams-sidebar")/
+  )?.[0]
+  assert.ok(tag, "Expected the diagrams toggle inside a chip")
+  return tag
+}
+assert.match(toggleChip(closedHtml), /border-surface-border/)
+assert.match(toggleChip(closedHtml), /top-3/)
+assert.match(toggleChip(closedHtml), /left-3/)
 assert.ok(
-  openDiagramsToggle.includes(
-    "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-3.75rem)]"
+  toggleChip(diagramsOpenHtml).includes(
+    "translate-x-[calc(min(var(--diagrams-sidebar-w),calc(100vw-1.5rem))-4.125rem)]"
   ),
-  "the open toggle slides to the panel's inner edge on a transform"
+  "the open chip slides to the panel's inner edge on a transform"
 )
 assert.match(closedDiagramsToggle, /aria-expanded="false"/)
 assert.match(closedDiagramsToggle, /aria-label="Open diagrams sidebar"/)
 assert.match(openDiagramsToggle, /aria-expanded="true"/)
 assert.match(openDiagramsToggle, /aria-label="Close diagrams sidebar"/)
-// Hugeicons SidebarLeftIcon, the same glyph open or closed (shadcn's pattern).
-assert.match(closedHtml, /d="M9\.5 3L9\.5 21"/)
-assert.match(diagramsOpenHtml, /d="M9\.5 3L9\.5 21"/)
+// Lucide PanelLeft, the same glyph open or closed (shadcn's pattern).
+assert.match(closedHtml, /lucide-panel-left/)
+assert.match(diagramsOpenHtml, /lucide-panel-left/)
 
 // No right-hand toggle survives the AI removal (ADR 0001).
 assert.doesNotMatch(closedHtml, /lucide-panel-right-open|lucide-panel-right-close/)
 
 assert.match(closedHtml, /Checkout API/)
 assert.doesNotMatch(diagramsOpenHtml, /Checkout API/)
-assert.match(closedDiagramTitle, /top-3/)
-assert.match(closedDiagramTitle, /left-14/)
+// The title shares the toggle's chip.
+assert.equal(closedDiagramTitle, toggleChip(closedHtml))
 
 assert.match(closedHtml, /Saved/)
-assert.match(closedHtml, /Templates/)
+assert.doesNotMatch(closedHtml, /Templates/)
 assert.doesNotMatch(closedHtml, /Share/)
 assert.match(closedHtml, /Collaborators/)
 assert.match(closedHtml, /Profile/)

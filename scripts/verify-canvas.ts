@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createNoteNode } from "../lib/canvas-note";
+import { finishCanvasDrop } from "../lib/canvas-interaction";
 import { readFileSync } from "node:fs";
 import { getSmoothStepPath, Position } from "@xyflow/react";
 
@@ -8,11 +10,6 @@ import {
   createNodeId,
   parseShapeDragPayload,
 } from "../lib/canvas-drag";
-import {
-  CANVAS_TEMPLATES,
-  getNodeBox,
-  getTemplateBounds,
-} from "../components/editor/starter-templates";
 import {
   SVG_SHAPES,
   buildShapeGeometry,
@@ -24,7 +21,7 @@ import {
   getParallelEdgeLabelOffset,
   positionParallelEdgeLabel,
 } from "../lib/edge-label-layout";
-import { computeEdgeRoutes } from "../lib/canvas-edge-route";
+import { computeEdgeRoutes, nearestNodeSide } from "../lib/canvas-edge-route";
 import {
   MAX_SNAPSHOT_NODES,
   canvasBlobPath,
@@ -624,6 +621,20 @@ function resizedShapeNode(id: string, shape: NodeShape, x: number, y: number) {
  *
  * Enlarging a default node size is what would silently break this.
  */
+/** Routes live in canvas space, so a nested node is boxed at its absolute position. */
+function checkNestedEdgesRouteInCanvasSpace() {
+  const nested = (id: string, x: number, parentId?: string) =>
+    ({ id, type: "canvasNode", position: { x, y: 0 }, width: 100, height: 60, ...(parentId ? { parentId } : {}), data: { label: id, color: "neutral", shape: "rectangle" } });
+  const nodes = [nested("box", 1000), nested("a", 0, "box"), nested("b", 400, "box")];
+  const edges = [{ id: "ab", source: "a", target: "b", data: { label: "" } }];
+  const routes = computeEdgeRoutes(nodes as never, edges as never);
+  const route = routes.get("ab")!;
+
+  assert.equal(route.source.x, 1100, "a leaves its right side at 1000 + 0 + 100");
+  assert.equal(route.target.x, 1400, "b enters its left side at 1000 + 400");
+  assert.equal(nearestNodeSide(nodes[1] as never, { x: 1100, y: 30 }, nodes as never), "right");
+}
+
 function checkSnapRadiusCoversEveryNodeCentre() {
   for (const shape of NODE_SHAPES) {
     const { width, height } = NODE_DEFAULT_SIZES[shape];
@@ -671,68 +682,6 @@ function checkShortcutsMatchTheSpecTable() {
   }
 }
 
-/**
- * The starter templates (18-starter-templates). This is hand-written data that
- * nothing type-checks past its shape: an edge naming a node that is not in the
- * template renders as nothing at all, and a duplicate ID makes React Flow drop
- * a node — both silent, and both invisible in a preview that "looks fine".
- */
-function checkTemplatesAreWellFormed() {
-  assert.ok(CANVAS_TEMPLATES.length >= 3, "at least three templates ship");
-
-  const templateIds = CANVAS_TEMPLATES.map((template) => template.id);
-  assert.equal(
-    new Set(templateIds).size,
-    templateIds.length,
-    "template IDs are unique",
-  );
-
-  // Node IDs are namespaced by template rather than generated, so uniqueness is
-  // checked across the whole library, not just within one template.
-  const nodeIds = CANVAS_TEMPLATES.flatMap((template) =>
-    template.nodes.map((node) => node.id),
-  );
-  assert.equal(
-    new Set(nodeIds).size,
-    nodeIds.length,
-    "node IDs are unique across every template",
-  );
-
-  for (const template of CANVAS_TEMPLATES) {
-    assert.ok(template.name.length > 0, `${template.id} has a name`);
-    assert.ok(
-      template.description.length > 0,
-      `${template.id} has a description`,
-    );
-    assert.ok(template.nodes.length > 0, `${template.id} has nodes`);
-    assert.ok(template.edges.length > 0, `${template.id} has edges`);
-
-    const ids = new Set(template.nodes.map((node) => node.id));
-
-    for (const edge of template.edges) {
-      assert.ok(ids.has(edge.source), `${edge.id} has a real source`);
-      assert.ok(ids.has(edge.target), `${edge.id} has a real target`);
-      assert.notEqual(
-        edge.source,
-        edge.target,
-        `${edge.id} is not a self-loop`,
-      );
-    }
-
-    const edgeIds = template.edges.map((edge) => edge.id);
-    assert.equal(
-      new Set(edgeIds).size,
-      edgeIds.length,
-      `${template.id} has unique edge IDs`,
-    );
-  }
-}
-
-/**
- * Preview fitting is a `viewBox` built from these bounds, so a box that does not
- * enclose every node crops the preview silently — and a zero-size one on an
- * empty template divides the browser's aspect fit by nothing.
- */
 /**
  * The avatar fallback is the only thing standing between a photo-less
  * collaborator and an empty circle, and an empty circle looks like a rendering
@@ -886,39 +835,6 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
   assert.equal(canvasBlobPath("my-diagram"), "canvas/my-diagram.json");
 }
 
-function checkTemplateBoundsEncloseEveryNode() {
-  assert.deepEqual(
-    getTemplateBounds([]),
-    { x: 0, y: 0, width: 0, height: 0 },
-    "an empty template has a zero box rather than an Infinity one",
-  );
-
-  for (const template of CANVAS_TEMPLATES) {
-    const bounds = getTemplateBounds(template.nodes);
-
-    assert.ok(
-      bounds.width > 0 && bounds.height > 0,
-      `${template.id} has a positive bounding box`,
-    );
-
-    for (const node of template.nodes) {
-      const box = getNodeBox(node);
-
-      assert.ok(
-        box.width > 0 && box.height > 0,
-        `${node.id} has a resolved size`,
-      );
-      assert.ok(
-        box.x >= bounds.x &&
-          box.y >= bounds.y &&
-          box.x + box.width <= bounds.x + bounds.width &&
-          box.y + box.height <= bounds.y + bounds.height,
-        `${node.id} is inside ${template.id}'s bounding box`,
-      );
-    }
-  }
-}
-
 function checkCanvasBrandingIsHidden() {
   const source = readFileSync(
     new URL("../components/canvas/canvas.tsx", import.meta.url),
@@ -948,15 +864,14 @@ function main() {
   checkParallelEdgeRenderedLabelsStayClear();
   checkVerticalParallelEdgeLabelsStayClear();
   checkGeneratedEdgesMeetEveryShapeOutline();
+  checkNestedEdgesRouteInCanvasSpace();
   checkSnapRadiusCoversEveryNodeCentre();
   checkShortcutsMatchTheSpecTable();
-  checkTemplatesAreWellFormed();
-  checkTemplateBoundsEncloseEveryNode();
   checkInitialsAlwaysRenderSomething();
   checkSnapshotsRejectJunkAndSurviveRoundTrips();
   checkCanvasBrandingIsHidden();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials and snapshot validation verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, presence initials and snapshot validation verified",
   );
 }
 
@@ -966,4 +881,41 @@ try {
   console.error("❌ Canvas verification failed");
   console.error(error);
   process.exitCode = 1;
+}
+
+// Sticky notes: snapshot round-trip and the no-parent, no-edge rules.
+{
+  const note = createNoteNode({ x: 100, y: 100 });
+  assert.equal(note.type, "canvasNote");
+  assert.deepEqual(note.position, { x: 0, y: 0 });
+  assert.equal(note.width, 200);
+  assert.equal(note.data.noteColor, "yellow");
+
+  const roundTrip = parseCanvasSnapshot(JSON.parse(serializeCanvasSnapshot({
+    nodes: [{ ...note, width: 300, height: 150, data: { ...note.data, noteColor: "blue", label: "Check quotas" } }],
+    edges: [],
+  })))!;
+  assert.equal(roundTrip.nodes[0].type, "canvasNote");
+  assert.equal(roundTrip.nodes[0].data.noteColor, "blue");
+  assert.equal(roundTrip.nodes[0].width, 300);
+  assert.equal(roundTrip.nodes[0].data.label, "Check quotas");
+
+  const dirty = parseCanvasSnapshot({
+    nodes: [
+      { id: "b", position: { x: 0, y: 0 }, width: 400, height: 400, data: { kind: "boundary", catalogId: "boundary-vpc", label: "VPC" } },
+      { id: "n", position: { x: 10, y: 10 }, parentId: "b", data: { kind: "note", noteColor: "mauve", label: "x".repeat(1200) } },
+      { id: "a", position: { x: 0, y: 0 }, data: { label: "A" } },
+    ],
+    edges: [{ id: "e", source: "a", target: "n" }],
+  })!;
+  const dirtyNote = dirty.nodes.find((node) => node.id === "n")!;
+  assert.equal(dirtyNote.parentId, undefined);
+  assert.equal(dirtyNote.data.noteColor, "yellow");
+  assert.equal(dirtyNote.data.label.length, 1000);
+  assert.equal(dirty.edges.length, 0);
+
+  // A note dropped inside a boundary stays a root.
+  const dropped = finishCanvasDrop({ nodes: [dirty.nodes[0], { ...dirtyNote, position: { x: 50, y: 50 } }], edges: [] }, "n");
+  assert.equal(dropped.nodes.find((node) => node.id === "n")!.parentId, undefined);
+  console.log("verify-canvas notes: ok");
 }

@@ -17,12 +17,13 @@ This skill's MCP server registers:
 
 - `truss_login` — link this agent to a Truss origin. Every other tool already does this automatically the first time it needs a credential; call this directly only when the user explicitly asks to sign in or re-link.
 - `truss_list_diagrams` — the signed-in user's diagrams as `{ id, name }` pairs. Use it to resolve which diagram a request means.
-- `truss_get_diagram` — one diagram's current compact graph, plus a `fingerprint` for the edit that follows.
+- `truss_get_aws_catalog` — the AWS services and boundaries Truss supports, with ids and descriptions. Public metadata: it needs no sign-in and opens no tab.
+- `truss_get_diagram` — one diagram's current version 2 graph and read-only `spatial` geometry, plus a `fingerprint` for the edit that follows.
 - `truss_apply_diagram_edit` — replace a diagram's graph with a fully-specified `desiredGraph`.
 - `truss_create_diagram` — make a new diagram and draw a graph into it in one call.
 - `truss_delete_diagram` — delete one diagram the linked user owns. It completes the deletion itself; the confirmation you get from the user is the only one.
 
-Report an error by passing along the tool result's message without inventing detail beyond it. Create and edit return an `editorUrl` — give the user that link when one comes back.
+Report an error by passing along the tool result's message without inventing detail beyond it. Create and edit return an `editorUrl` — give the user that link when one comes back. They also return the committed `graph`, `spatial` geometry and `fingerprint`, which show where Truss actually placed everything; use them for the next edit instead of guessing.
 
 ## Authentication
 
@@ -36,10 +37,11 @@ Every tool authenticates with an agent token cached at `~/.truss/credentials.jso
 
 1. Preserve the user's title and description after trimming whitespace. Do not invent a title when one is missing. Ask only for the missing title or description.
 2. Reject titles over 120 characters and descriptions over 2,000 characters with a concise request to shorten that value.
-3. Read [the compact graph contract](references/graph-schema.md). Infer the architecture from the description and produce one compact graph that conforms exactly to it, omitting coordinates so Truss arranges it. Do not include secrets in labels.
+3. Read [the compact graph contract](references/graph-schema.md). Infer the architecture from the description and produce one compact graph that conforms exactly to it, omitting coordinates so Truss arranges it. For AWS services and nested boundaries use graph version 2 and call `truss_get_aws_catalog` first for the ids. Do not include secrets in labels.
 4. Default to an overview a reader understands at a glance, normally 4-8 blocks: the actor or entry point, the main steps, the outcome. Add technical detail only when the description asks for it. Use stable lowercase kebab-case IDs, short labels in the user's own vocabulary, edge labels only where the relationship is not obvious, consistent colors, cylinders for durable stores, diamonds for decisions/routing, circles for people or external actors, and rectangles for everything else.
-5. Call `truss_create_diagram` with `{ title, graph }`.
-6. The tool creates the diagram and draws the graph into it, returning `editorUrl`. Tell the user the diagram is ready and give them that link. Nobody has to be watching for it to land — but if they already have Truss open, they will see the agent draw it live.
+5. Notes (`kind: "note"`, version 2): add a note only when the diagram cannot show something important, such as a key design decision or a caveat. Keep it short and plain: one or two sentences a person can read at a glance. Never connect notes. Good: "Chose DynamoDB over RDS: access is key-value and traffic is spiky." Bad: a paragraph that restates what the boxes and arrows already show.
+6. Call `truss_create_diagram` with `{ title, graph }`.
+7. The tool creates the diagram and draws the graph into it, returning `editorUrl`. Tell the user the diagram is ready and give them that link. Nobody has to be watching for it to land — but if they already have Truss open, they will see the agent draw it live.
 
 ## Origin
 

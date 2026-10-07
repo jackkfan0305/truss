@@ -10,6 +10,8 @@ import {
   type SnapshotFlow,
 } from "../lib/agent-canvas-write";
 import { CanvasVersionConflictError } from "../lib/canvas-snapshot";
+import { canvasToAgentGraph } from "../lib/agent-graph";
+import { nestedSnapshot } from "./testing/aws-diagram-fixtures";
 import type { CanvasEdge, CanvasNode } from "../types/canvas";
 
 function n(id: string, label = "Node", x = 0, y = 0) {
@@ -49,6 +51,57 @@ function request(body: unknown): Request {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+async function postV2(flow: SnapshotFlow, state: { readonly nodes: readonly CanvasNode[]; readonly edges: readonly CanvasEdge[] }, nodes: unknown[]): Promise<void> {
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint({ nodes: [...state.nodes], edges: [...state.edges] }), graph: { version: 2, nodes, edges: [] } }),
+    "d", deps(flow, {}), 2,
+  );
+  assert.equal(response.status, 200, await response.clone().text());
+}
+
+async function checkAgentNoteLifecycle(): Promise<void> {
+  const api = { id: "api", kind: "generic", shape: "rectangle", color: "neutral", label: "API", x: 0, y: 0, width: 180, height: 100 };
+  const start = materializeAgentGraph({ version: 2, nodes: [api as never], edges: [] });
+  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
+  const todo = () => state.nodes.find((node) => node.id === "todo");
+
+  await postV2(flow, state, [api, { id: "todo", kind: "note", label: "Retry" }]);
+  assert.deepEqual(todo()!.position, { x: 260, y: 0 }, "80px right of the diagram, top-aligned");
+  assert.equal(todo()!.type, "canvasNote");
+
+  const placed = { id: "todo", kind: "note", label: "Retry twice", color: "blue", x: 260, y: 0, width: 200, height: 200 };
+  await postV2(flow, state, [api, placed]);
+  assert.equal(todo()!.data.label, "Retry twice");
+  assert.equal(todo()!.data.noteColor, "blue");
+
+  await postV2(flow, state, [api, placed, { id: "later", kind: "note", label: "Second" }]);
+  assert.deepEqual(state.nodes.find((node) => node.id === "later")!.position, { x: 260, y: 224 }, "a later note stacks below an earlier one");
+  await postV2(flow, state, [api, placed]);
+
+  await postV2(flow, state, [{ ...api, label: "Gateway" }, placed]);
+  assert.deepEqual(todo()!.position, { x: 260, y: 0 }, "untouched note keeps its spot");
+
+  await postV2(flow, state, [api]);
+  assert.equal(todo(), undefined, "note removed");
+}
+
+async function checkUnplacedNotesStackOnAnEmptyCanvas(): Promise<void> {
+  const { flow, state } = makeFlow([], []);
+  await postV2(flow, state, [{ id: "a", kind: "note", label: "One" }, { id: "b", kind: "note", label: "Two" }]);
+  assert.deepEqual(state.nodes.map((node) => node.position), [{ x: 0, y: 0 }, { x: 0, y: 224 }]);
+}
+
+async function checkRemovingABoundaryLeavesNotes(): Promise<void> {
+  const vpc = { id: "vpc", kind: "boundary", catalogId: "boundary-vpc", label: "VPC", x: 0, y: 0, width: 400, height: 240 };
+  const fn = { id: "fn", kind: "aws-service", catalogId: "aws-lambda", label: "Fn", parentId: "vpc", x: 40, y: 60, width: 120, height: 100 };
+  const note = { id: "why", kind: "note", label: "Private subnets only.", color: "yellow", x: 500, y: 0, width: 200, height: 200 };
+  const start = materializeAgentGraph({ version: 2, nodes: [vpc, fn, note] as never, edges: [] });
+  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
+  await postV2(flow, state, [note]);
+  assert.deepEqual(state.nodes.map((node) => node.id), ["why"]);
+  assert.deepEqual(state.nodes[0].position, { x: 500, y: 0 });
 }
 
 async function checkMatchingFingerprintAppliesTheDelta(): Promise<void> {
@@ -456,6 +509,141 @@ async function checkAuthorizationPrecedesBodyParsing(): Promise<void> {
   assert.deepEqual(state.nodes, []);
 }
 
+async function checkV1EditOfNestedDiagramIsRefused(): Promise<void> {
+  // Create a nested diagram with a boundary node
+  const boundary = {
+    id: "vpc",
+    type: "canvasBoundary",
+    position: { x: 0, y: 0 },
+    width: 400,
+    height: 240,
+    data: { label: "VPC", shape: "rectangle", color: "neutral", kind: "boundary", catalogId: "boundary-vpc" },
+  } as CanvasNode;
+  const child = {
+    id: "web",
+    type: "canvasNode",
+    position: { x: 24, y: 64 },
+    width: 180,
+    height: 100,
+    parentId: "vpc",
+    data: { label: "Web", shape: "rectangle", color: "neutral", kind: "aws-service", catalogId: "aws-ec2" },
+  } as CanvasNode;
+  const live = { nodes: [boundary, child], edges: [] };
+  const { flow } = makeFlow([...live.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+
+  const response = await handleAgentGraphEditPost(
+    request({
+      fingerprint: canvasFingerprint(live),
+      graph: { version: 1, nodes: [n("web")], edges: [] },
+    }),
+    "p1",
+    deps(flow, saved),
+    1, // v1 edit
+  );
+
+  assert.equal(response.status, 409);
+  assert.ok(saved.snapshot === undefined, "no mutation happens on v1 nested edit");
+}
+
+const v2Node = (id: string, catalogId: string, parentId?: string, extra: object = {}) => ({
+  id,
+  catalogId,
+  label: id,
+  kind: catalogId.startsWith("boundary-") ? ("boundary" as const) : ("aws-service" as const),
+  ...(parentId ? { parentId } : {}),
+  ...extra,
+});
+
+async function checkNestedEditCommitsAndReturnsExactGeometry(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow, state } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: { nodes: CanvasNode[] } } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const nodes = [...graph.nodes, v2Node("api", "aws-lambda", "private")];
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2, nodes } }),
+    "p1", deps(flow, saved), 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.applied, true);
+  const committed = saved.snapshot as { nodes: CanvasNode[]; edges: CanvasEdge[] };
+  assert.equal(body.fingerprint, canvasFingerprint(committed));
+  assert.deepEqual(body.graph, canvasToAgentGraph(committed, 2).graph);
+  const api = body.spatial.nodes.find((node: { id: string }) => node.id === "api");
+  const uploads = body.spatial.nodes.find((node: { id: string }) => node.id === "uploads");
+  assert.equal(api.parentId, "private");
+  assert.ok(
+    api.bounds.y >= uploads.bounds.y + uploads.bounds.height || api.bounds.x >= uploads.bounds.x + uploads.bounds.width,
+    "the new service lands clear of its sibling",
+  );
+  assert.deepEqual(state.nodes.find((node) => node.id === "web")?.position, { x: 24, y: 64 });
+}
+
+async function checkNestedCollisionIs422AndPersistsNothing(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const nodes = [...graph.nodes, v2Node("api", "aws-lambda", "public", { x: 24, y: 64 })];
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2, nodes } }),
+    "p1", deps(flow, saved), 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.code, "invalidGeometry");
+  assert.ok(body.issues.some((issue: { itemIds: string[] }) => issue.itemIds.includes("api") && issue.itemIds.includes("web")));
+  assert.equal(saved.snapshot, undefined);
+  assert.deepEqual(flow.nodes.map((node) => node.id).sort(), start.nodes.map((node) => node.id).sort());
+}
+
+async function checkV2GraphWithoutVersionIsRefused(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved),
+  );
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.code, "unsupportedGraphVersion");
+  assert.equal(body.requiredVersion, 2);
+  assert.equal(saved.snapshot, undefined);
+  const unknown = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved), 3,
+  );
+  assert.equal(unknown.status, 400);
+  assert.equal((await unknown.json()).code, "unsupportedGraphVersion");
+}
+
+async function checkV1SuccessBodyIsUnchanged(): Promise<void> {
+  const start = materializeAgentGraph({ version: 1, nodes: [n("web")], edges: [] });
+  const { flow } = makeFlow([...start.nodes], []);
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint(start), graph: { version: 1, nodes: [n("web"), n("db", "DB", 280, 0)], edges: [] } }),
+    "p1", deps(flow, {}),
+  );
+  assert.deepEqual(await response.json(), { applied: true });
+}
+
+async function checkStaleNestedEditIs409AndPersistsNothing(): Promise<void> {
+  const start = nestedSnapshot();
+  const { flow } = makeFlow([...start.nodes], []);
+  const saved: { snapshot?: unknown } = {};
+  const graph = canvasToAgentGraph(start, 2).graph;
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: "0".repeat(64), graph: { ...graph, version: 2 } }),
+    "p1", deps(flow, saved), 2,
+  );
+  assert.equal(response.status, 409);
+  assert.equal(saved.snapshot, undefined);
+}
+
 async function main(): Promise<void> {
   await checkMatchingFingerprintAppliesTheDelta();
   await checkRemovingANodeTakesItsOpaqueEdges();
@@ -473,6 +661,16 @@ async function main(): Promise<void> {
   await checkMalformedBodyIs400();
   await checkStoreFailureIs502();
   await checkVersionConflictIs409();
+  await checkV1EditOfNestedDiagramIsRefused();
+  await checkNestedEditCommitsAndReturnsExactGeometry();
+  await checkNestedCollisionIs422AndPersistsNothing();
+  await checkV2GraphWithoutVersionIsRefused();
+  await checkV1SuccessBodyIsUnchanged();
+  await checkStaleNestedEditIs409AndPersistsNothing();
+
+  await checkAgentNoteLifecycle();
+  await checkUnplacedNotesStackOnAnEmptyCanvas();
+  await checkRemovingABoundaryLeavesNotes();
 
   console.log("verify-agent-graph-edit: ok");
 }

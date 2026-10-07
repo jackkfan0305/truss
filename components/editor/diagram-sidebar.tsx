@@ -35,9 +35,9 @@ export function DiagramSidebar({
       aria-label="Diagrams"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 left-0 z-40 flex w-(--diagrams-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-elevated px-4 pt-3.5 pb-4 shadow-2xl shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
+        "absolute inset-y-0 left-0 z-40 flex w-(--diagrams-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col gap-4 border-r border-surface-border bg-elevated px-4 pt-3.5 pb-4 shadow-2xl shadow-page/80 transition-[translate,filter,opacity] ease-smooth-out motion-reduce:transition-none",
         // Open is the invitation, close gets out of the way: 400ms in, 350ms out.
-        isOpen ? "translate-x-0 duration-400" : "-translate-x-[calc(100%+2rem)] duration-350",
+        isOpen ? "translate-x-0 duration-400" : "-translate-x-[calc(100%+2rem)] duration-350 opacity-0 blur-[14px]",
         className
       )}
     >

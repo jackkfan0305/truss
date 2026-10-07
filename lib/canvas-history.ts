@@ -24,6 +24,14 @@ export interface CanvasHistoryStacks {
   future: readonly CanvasSnapshot[];
 }
 
+export interface CanvasHistoryCheckpointOptions {
+  /**
+   * If true, force a new checkpoint regardless of timing.
+   * Used for distinct operations like drag-start, insertion, deletion.
+   */
+  force?: boolean;
+}
+
 export const EMPTY_CANVAS_HISTORY: CanvasHistoryStacks = { past: [], future: [] };
 
 /** Records the state *before* an edit. A new edit drops the redo branch. */

@@ -1,6 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { APICallError, RetryError, stepCountIs, streamText, type ModelMessage } from "ai";
 
+import { AWS_CATALOG } from "@/lib/aws-catalog";
 import {
   AssistantStopError,
   createAssistantTools,
@@ -22,6 +23,7 @@ export type AssistantEvent =
 
 const TOOL_LABELS: Record<string, string> = {
   list_diagrams: "Listing diagrams",
+  get_aws_catalog: "Reading AWS catalog",
   get_diagram: "Reading diagram",
   apply_diagram_edit: "Editing diagram",
   create_diagram: "Creating diagram",
@@ -58,6 +60,8 @@ export function describeAssistantError(error: unknown): AssistantError | null {
   return { message: "The model call failed. Try again.", clearKey: false };
 }
 
+const CATALOG_SUMMARY = AWS_CATALOG.map(({ id, name, kind }) => `${id}: ${name} [${kind}]`).join("; ");
+
 /**
  * The truss-diagram skill's rules, condensed, plus the open diagram so chat
  * answers are about what is on the canvas.
@@ -70,8 +74,15 @@ export function buildAssistantInstructions(diagramId: string, current: unknown):
     "Answer questions about the open diagram from its graph below. Keep replies short. Use concise markdown (short paragraphs, lists, inline code) only when it helps.",
     "To change the open diagram, call apply_diagram_edit with the full desired graph and the fingerprint you read. If it returns a conflict, call get_diagram again and reapply.",
     "To make a new diagram, call create_diagram. Default to an overview of four to eight blocks that explains the main flow. Add detail only when asked.",
-    "Omit x and y for new blocks. Keep x and y unchanged for blocks you are not moving.",
     "Ids are lowercase kebab-case. Node labels are at most 80 characters, edge labels at most 40.",
+    "Use graph version 2 for AWS services and boundaries. Discover catalog IDs through get_aws_catalog; use catalog descriptions when choosing services.",
+    "Only boundaries can be parents. Parent IDs describe visual grouping, not AWS deployment requirements.",
+    "New nodes omit x and y so the server computes geometry. Existing x and y are top-left positions relative to their parent, or the canvas for roots, in canvas units.",
+    "Read before editing. Preserve IDs, parent IDs, and coordinates of unchanged items. Treat opaque items and their absolute bounds as obstacles and never reuse their IDs.",
+    "A successful write returns the actual graph, spatial geometry, and fingerprint. Use those results for subsequent edits. After a conflict, read again and revise the edit against the new graph.",
+    "If geometry validation fails, use the issue's item IDs to revise the request or omit coordinates on the items being repositioned.",
+    `AWS catalog (id: name [kind]): ${CATALOG_SUMMARY}`,
+    "Call get_aws_catalog for descriptions when you need to distinguish similar services.",
     `The open diagram id is "${diagramId}".`,
     hasGraph
       ? `Its current graph and fingerprint: ${JSON.stringify(current)}`

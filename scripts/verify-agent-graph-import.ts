@@ -7,6 +7,7 @@ import {
 import { materializeAgentGraph, type AgentGraph } from "../lib/agent-graph";
 import { CanvasVersionConflictError } from "../lib/canvas-snapshot";
 import type { CanvasSnapshot } from "../lib/canvas-snapshot";
+import { canvasFingerprint, canvasToAgentGraph } from "../lib/agent-graph";
 
 const launchId = "7a4b4d2e-2f28-4f91-8fbc-5622ee2b9451";
 const graph: AgentGraph = {
@@ -68,8 +69,12 @@ function createDependencies(
       }),
       mutateCanvas: async (_diagramId, callback) => {
         const flow = {
-          nodes: canvas.nodes,
-          edges: canvas.edges,
+          get nodes() {
+            return canvas.nodes;
+          },
+          get edges() {
+            return canvas.edges;
+          },
           addNodes: (nodes: typeof canvas.nodes) => {
             flowWriteCount += 1;
             flowWrites.push(...nodes.map((node) => `node:${node.id}`));
@@ -289,6 +294,61 @@ async function checkVersionConflictIs409(): Promise<void> {
   assert.deepEqual(await response.json(), { error: "The canvas changed since it was read" });
 }
 
+const nestedGraph = (extra: object = {}) => ({
+  version: 2,
+  nodes: [
+    { id: "vpc", kind: "boundary", catalogId: "boundary-vpc", label: "VPC" },
+    { id: "a", kind: "aws-service", catalogId: "aws-ec2", label: "A", parentId: "vpc" },
+    { id: "b", kind: "aws-service", catalogId: "aws-s3", label: "B", parentId: "vpc", ...extra },
+  ],
+  edges: [{ id: "a-to-b", source: "a", target: "b", label: "Writes" }],
+});
+
+async function checkNestedImportCommitsAndReturnsExactGeometry(): Promise<void> {
+  const canvas: CanvasSnapshot = { nodes: [], edges: [] };
+  const { dependencies } = createDependencies(canvas);
+  const response = await handleAgentGraphImportPost(
+    request({ launchId, graph: nestedGraph() }), "diagram-1", dependencies, 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.imported, true);
+  assert.equal(body.fingerprint, canvasFingerprint(canvas));
+  assert.deepEqual(body.graph, canvasToAgentGraph(canvas, 2).graph);
+  assert.equal(body.graph.nodes.find((node: { id: string }) => node.id === "a").parentId, "vpc");
+  assert.equal(body.spatial.edges[0].layout.points.length >= 2, true);
+}
+
+async function checkNestedImportCollisionIs422AndPersistsNothing(): Promise<void> {
+  const canvas: CanvasSnapshot = { nodes: [], edges: [] };
+  const { dependencies, getFlowWriteCount } = createDependencies(canvas);
+  const graph = nestedGraph({ x: 24, y: 64 });
+  graph.nodes[0] = { ...graph.nodes[0], x: 0, y: 0 } as never;
+  graph.nodes[1] = { ...graph.nodes[1], x: 24, y: 64 } as never;
+  const response = await handleAgentGraphImportPost(
+    request({ launchId, graph }), "diagram-1", dependencies, 2,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.code, "invalidGeometry");
+  assert.ok(body.issues.some((issue: { itemIds: string[] }) => issue.itemIds.includes("a") && issue.itemIds.includes("b")));
+  assert.equal(getFlowWriteCount(), 0);
+  assert.deepEqual(canvas.nodes, []);
+}
+
+async function checkV2GraphWithoutVersionIsRefused(): Promise<void> {
+  const canvas: CanvasSnapshot = { nodes: [], edges: [] };
+  const { dependencies, getFlowWriteCount } = createDependencies(canvas);
+  const response = await handleAgentGraphImportPost(
+    request({ launchId, graph: nestedGraph() }), "diagram-1", dependencies,
+  );
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.code, "unsupportedGraphVersion");
+  assert.equal(body.requiredVersion, 2);
+  assert.equal(getFlowWriteCount(), 0);
+}
+
 async function main(): Promise<void> {
   await checkAuthorizationPrecedesBodyRead();
   await checkMalformedRequestsAreRejectedSafely();
@@ -298,6 +358,9 @@ async function main(): Promise<void> {
   await checkDuplicateLiveFlowIdsConflict();
   await checkPartialResumeAddsOnlyMissingItems();
   await checkVersionConflictIs409();
+  await checkNestedImportCommitsAndReturnsExactGeometry();
+  await checkNestedImportCollisionIs422AndPersistsNothing();
+  await checkV2GraphWithoutVersionIsRefused();
 
   console.log("✅ Agent graph import endpoint verified");
 }

@@ -2,7 +2,7 @@
 
 ## Theme
 
-Dark only. No light mode. The visual language is a dark technical workspace with near-black backgrounds, layered surfaces, and vivid accent colors for interactive elements.
+Dark only. No light mode. The visual language is monotone graphite with one accent. The neutrals are a single OKLCH ramp (hue 264, chroma 0.004) defined in `app/globals.css`, evenly spaced in lightness from page to primary text. Electric lime `--accent-primary` (#b1ef4a, `oklch(0.88 0.2 128)`) is the only accent, with `--bg-base` text on it: focus rings, primary actions, selection and every AI state (`--accent-ai` points at it). Node colours, AWS icons and status colours are content, not accents.
 
 Signed-out storyboard builders show a `Sign in to save` action in the top-right
 of the page. The user can keep building without signing in. If sign-in is
@@ -22,6 +22,11 @@ already states in words.
   picker is the composer's settings pill.
 - Not connected, the panel shows a Connect OpenRouter screen: the OpenRouter
   mark and name, a heading, one short paragraph, and one primary button.
+- An empty conversation shows a centred breathing orb, a heading and one
+  line of copy, with no example prompts. On macOS the orb has thinking-orbs' gravity: the pointer
+  bends toward it, drawn from `public/cursor-arrow-macos.png` (off under
+  reduced motion and on other platforms).
+- The model pill's chevron turns 180° while the model menu is open.
 - Messages share one reading edge. Your prompts sit in a `bg-subtle` bubble;
   replies render as markdown with no bubble.
 - Each turn is a stack of tasks, one per tool call, with the model's visible
@@ -31,8 +36,9 @@ already states in words.
   "Thinking" label; the waiting state uses the same orb and label.
 - Errors show verbatim under the reply with an icon. A stopped turn says it
   stopped rather than failed and keeps its partial work.
-- The transcript follows new lines until the reader scrolls up, then offers
-  Jump to latest.
+- The transcript follows new lines until the reader scrolls up. Jump to
+  latest appears only once they are more than 240px from the bottom, so a
+  small scroll up to reread a line shows no button.
 
 ## Typography
 
@@ -89,7 +95,7 @@ Default node color: `#1F1F1F` with `#EDEDED` text.
 
 ### Edge Style
 
-Smooth-step path with an arrow marker. Default edge color: `#f8fafc`. Stroke width is thin — edges are visually secondary to nodes.
+Smooth-step path with an arrow marker. Default edge color: `--canvas-edge`, which points at `--text-primary`. Stroke width is thin — edges are visually secondary to nodes.
 
 ### Node Shapes
 
@@ -101,6 +107,16 @@ Smooth-step path with an arrow marker. Default edge color: `#f8fafc`. Stroke wid
 - `pill` — service / process
 - `cylinder` — database / storage
 - `hexagon` — external system / boundary
+
+### AWS Blocks and Boundaries
+
+AWS service blocks are a rectangular elevated surface with the local catalog icon in its official colours above an editable name. They get no colour toolbar, since icon colours are fixed. Boundaries are a dashed `copy-muted` outline with a transparent interior; the icon and title sit in a patch of the page background (`bg-page`) straddling the top edge. Both use the standard four connection handles. A failed icon load shows the catalog name as text. Workspace controls (the bottom dock's AWS section) keep the monochrome palette styling.
+
+### Sticky Notes
+
+Notes are light paper on the dark canvas with dark ink: yellow (default), pink, blue or green (`NOTE_COLORS`). A 4px radius, a soft shadow and a folded top-right corner set them apart from diagram blocks. A new note is 200×200 and resizes down to 120×80; text past the edge scrolls inside the note. Double-click edits; Escape or clicking away commits, and Enter adds a line. Selected, a note shows the colour toolbar and resize handles. It has no connection handles.
+
+Three ways add a note, each creating a selected yellow note in its editor: the sticky-note button beside the section dock (click, or drag onto the canvas), right-click on empty canvas ("Add sticky note"), and the `N` key.
 
 ### Connection Handles
 
@@ -117,8 +133,9 @@ shadcn/ui on top of Tailwind. No custom design system. Components live in `compo
 ## Layout Patterns
 
 - Editor workspace: full-viewport canvas or editor-home background with floating control islands and floating sidebar overlays.
-- Floating controls: left diagrams toggle plus diagram title and a minimal utility group. The toggle is a plain ghost icon button (Hugeicons `SidebarLeftIcon`, one glyph for open and closed) that slides with its panel on a transform. The title and utility chips use the sidebar's solid `bg-elevated` surface at 40px tall; thin dividers split the utility chip into save state, actions and people. Use existing shadcn primitives and semantic surface tokens.
-- Sidebars: floating overlays below the control row, on a solid `bg-elevated` surface with a subtle border. They slide on `ease-smooth-out`, 400ms open and 350ms close. Diagram row rename/delete actions appear on hover or focus, and always show on touch screens.
+- Bottom bar: matches the approved artifact draft. Bottom left, the zoom and history controls fold into one 48px `+` button on a `liquid-gooey` surface (`LIQUID_SURFACE`, the same material as `FLOATING_SURFACE` written as raw CSS, with the border drawn as an inset ring). Open, undo and redo rise above it and zoom out, fit and zoom in run to its right on a 550ms overshooting ease, staggered 30ms. Bottom centre, `SectionDock` sits on `FLOATING_SURFACE` with one tab per item section (Basic, AWS) and its item count. The dock, the note button and the controls blob are all 48px tall. Opening a section grows the dock to the section's size over 500ms while the tabs blur out and the panel blurs in. The panel has a back button, the title, search, category chips and a tile grid whose tiles unblur 18ms apart (`.dock-tile` in `app/globals.css`). Escape or back reverses it and focuses the tab. A new item family is one entry in `SECTIONS` plus its panel.
+- Floating controls: every floating piece sits on `FLOATING_SURFACE` (`lib/floating-surface.ts`): solid `bg-elevated`, a `surface-border` edge and `shadow-lg shadow-page/60`. The top bar is two mirrored 40px chips with 12px radius. The left chip holds the diagrams toggle (Lucide `PanelLeft`, one glyph for open and closed), a divider and the diagram title. When the sidebar opens, the title folds away and the chip slides with the panel on a transform. The right chip holds save state, people and the assistant toggle (`PanelRight`), split by thin dividers. Use existing shadcn primitives and semantic surface tokens.
+- Sidebars: floating overlays below the control row, on a solid `bg-elevated` surface with a subtle border. They slide on `ease-smooth-out`, 400ms open and 350ms close, and blur in from 14px and fade as they slide, matching the bottom dock's section change. Diagram row rename/delete actions appear on hover or focus, and always show on touch screens.
 - Loading: full-screen and canvas loading states use `TrussLoader`, a truss triangle that draws itself edge by edge (keyframes in `app/globals.css`). Under reduced motion it shows the finished triangle and only fades in and out. The agent entry pages (`/agent/new`, `/agent/link`, `/agent/pick`) use it for every working and redirecting state, `AgentDoneStatus` (a check in a ring) when finished, and `components/agent/agent-status.tsx` card and button styles for decisions and failures.
 - On narrow screens, the utility group moves to a second right-aligned floating row so the title and the sidebar toggle remain unobstructed.
 

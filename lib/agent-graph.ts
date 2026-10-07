@@ -4,20 +4,33 @@ import type { z } from "zod";
 
 import {
   agentGraphEdgeSchema,
-  agentGraphEditInputSchema,
   agentGraphEditSchema,
   agentGraphInputSchema,
   agentGraphNodeSchema,
   agentGraphSchema,
+  agentGraphInputUnionSchema,
+  agentGraphNodeV2Schema,
+  agentGraphEditInputUnionSchema,
 } from "@/lib/agent-graph-schema";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
+import { sortParentsBeforeChildren } from "@/lib/canvas-hierarchy";
 import {
+  CANVAS_BOUNDARY_TYPE,
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  CANVAS_NOTE_TYPE,
+  DEFAULT_NODE_COLOR,
+  DEFAULT_NOTE_COLOR,
   NODE_DEFAULT_SIZES,
+  NOTE_DEFAULT_SIZE,
+  type CanvasNode,
+  type NodeColor,
+  type NodeShape,
+  type NoteColor,
 } from "@/types/canvas";
+import { isNoteColor } from "@/lib/canvas-note";
 
 export {
   agentGraphSchema,
@@ -28,9 +41,23 @@ export {
 export type AgentGraphInput = z.infer<typeof agentGraphInputSchema>;
 
 /** API input may omit geometry. Legacy fragment launches stay positioned. */
-export function parseAgentGraphInput(value: unknown, allowEmpty = false): AgentGraphInput | null {
-  const parsed = (allowEmpty ? agentGraphEditInputSchema : agentGraphInputSchema).safeParse(value);
-  return parsed.success ? parsed.data : null;
+export function parseAgentGraphInput(
+  value: unknown,
+  allowEmpty = false,
+  requestedVersion: number = 1,
+): AgentGraphInput | null {
+  const schema = allowEmpty ? agentGraphEditInputUnionSchema : agentGraphInputUnionSchema;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    return null;
+  }
+
+  // Reject v2 graphs when v1 is explicitly requested
+  if (requestedVersion === 1 && parsed.data.version === 2) {
+    return null;
+  }
+
+  return parsed.data as AgentGraphInput;
 }
 
 export type AgentGraph = z.infer<typeof agentGraphSchema>;
@@ -48,19 +75,105 @@ export function parseAgentGraph(value: unknown): AgentGraph | null {
 /**
  * Materializes compact graph values into the one canonical canvas snapshot.
  *
- * Takes `AgentGraphView["graph"]` rather than the stricter `AgentGraph` — the
- * body only reads fields both share, and the edit path legitimately produces a
- * zero-node graph that `AgentGraph` alone would not type.
+ * Handles both V1 and V2 graphs. V2 graphs may include AWS identity and nesting;
+ * V1 graphs remain purely generic. Nodes are ordered so parents appear before
+ * children for correct materialization.
  */
-export function materializeAgentGraph(graph: AgentGraphView["graph"]): CanvasSnapshot {
-  return {
-    nodes: graph.nodes.map((node) => ({
+export interface MaterializableNode {
+  id: string;
+  label: string;
+  shape?: NodeShape;
+  color?: NodeColor | NoteColor;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  parentId?: string;
+  kind?: CanvasNode["data"]["kind"];
+  catalogId?: string;
+}
+
+export function materializeAgentGraph(
+  graph: { version: number; nodes: MaterializableNode[]; edges: AgentGraphView["graph"]["edges"] },
+): CanvasSnapshot {
+  const isV2 = graph.version === 2;
+
+  // Sort nodes so parents come before children. The sort only supplies the order;
+  // the nodes themselves stay the graph's, so their coordinates survive.
+  let sortedNodes = graph.nodes;
+  if (isV2) {
+    try {
+      const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+      const order = sortParentsBeforeChildren(graph.nodes.map((node) => ({
+        id: node.id,
+        parentId: node.parentId,
+        position: { x: 0, y: 0 },
+        data: { label: node.label, shape: "rectangle", color: "neutral" },
+      })) as CanvasNode[]);
+      sortedNodes = order.map((node) => byId.get(node.id)!);
+    } catch {
+      // Hierarchy validation owns the error; here the unsorted nodes are kept.
+      sortedNodes = graph.nodes;
+    }
+  }
+
+  const canvasNodes: CanvasNode[] = sortedNodes.map((node): CanvasNode => {
+    if (isV2 && node.kind === "note") {
+      return {
+        id: node.id,
+        type: CANVAS_NOTE_TYPE,
+        position: { x: node.x ?? 0, y: node.y ?? 0 },
+        width: node.width ?? NOTE_DEFAULT_SIZE.width,
+        height: node.height ?? NOTE_DEFAULT_SIZE.height,
+        data: {
+          kind: "note",
+          label: node.label,
+          noteColor: isNoteColor(node.color) ? node.color : DEFAULT_NOTE_COLOR,
+          color: DEFAULT_NODE_COLOR,
+          shape: "rectangle",
+        },
+      };
+    }
+
+    const isBoundary = isV2 && node.kind === "boundary";
+    const nodeType = isBoundary ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
+
+    // For V2, use provided dimensions; for V1, use shape defaults
+    let width = node.width;
+    let height = node.height;
+    if (!width || !height) {
+      if (isBoundary) {
+        width = 400;
+        height = 240;
+      } else if (isV2) {
+        width = 180;
+        height = 100;
+      } else {
+        const defaults = NODE_DEFAULT_SIZES[node.shape ?? "rectangle"];
+        width = width ?? defaults.width;
+        height = height ?? defaults.height;
+      }
+    }
+
+    return {
       id: node.id,
-      type: CANVAS_NODE_TYPE,
-      position: { x: node.x, y: node.y },
-      ...NODE_DEFAULT_SIZES[node.shape],
-      data: { label: node.label, shape: node.shape, color: node.color },
-    })),
+      type: nodeType,
+      position: { x: node.x ?? 0, y: node.y ?? 0 },
+      width,
+      height,
+      data: {
+        label: node.label,
+        shape: node.shape || "rectangle",
+        color: (node.color as NodeColor | undefined) || "neutral",
+        ...(node.kind ? { kind: node.kind } : {}),
+        ...(node.catalogId ? { catalogId: node.catalogId } : {}),
+      },
+      ...(isV2 && node.parentId ? { parentId: node.parentId } : {}),
+    };
+  });
+
+  return {
+    nodes: canvasNodes,
     edges: graph.edges.map((edge) => ({
       id: edge.id,
       type: CANVAS_EDGE_TYPE,
@@ -104,7 +217,11 @@ export function canonicalCanvasSnapshotsEqual(
         node.height === other.height &&
         node.data.label === other.data.label &&
         node.data.shape === other.data.shape &&
-        node.data.color === other.data.color
+        node.data.color === other.data.color &&
+        (node.parentId ?? "") === (other.parentId ?? "") &&
+        (node.data.kind ?? "") === (other.data.kind ?? "") &&
+        (node.data.catalogId ?? "") === (other.data.catalogId ?? "") &&
+        (node.data.noteColor ?? "") === (other.data.noteColor ?? "")
       );
     }) &&
     leftEdges.every((edge, index) => {
@@ -116,6 +233,8 @@ export function canonicalCanvasSnapshotsEqual(
         edge.source === other.source &&
         edge.target === other.target &&
         (edge.data?.label ?? "") === (other.data?.label ?? "") &&
+        (edge.sourceHandle ?? "") === (other.sourceHandle ?? "") &&
+        (edge.targetHandle ?? "") === (other.targetHandle ?? "") &&
         edge.style?.stroke === other.style?.stroke &&
         edge.style?.strokeWidth === other.style?.strokeWidth &&
         edge.style?.strokeLinecap === other.style?.strokeLinecap &&
@@ -128,10 +247,48 @@ export function canonicalCanvasSnapshotsEqual(
 export type AgentGraphNode = AgentGraph["nodes"][number];
 export type AgentGraphEdge = AgentGraph["edges"][number];
 
+export type AgentGraphNodeV2 = z.infer<typeof agentGraphNodeV2Schema>;
+
 export interface AgentGraphView {
   graph: { version: 1; nodes: AgentGraphNode[]; edges: AgentGraphEdge[] };
   opaqueNodeIds: string[];
   opaqueEdgeIds: string[];
+}
+
+/** The version 2 projection: AWS identity, parent links, dimensions and fractional positions. */
+export interface AgentGraphViewV2 {
+  graph: { version: 2; nodes: AgentGraphNodeV2[]; edges: AgentGraphEdge[] };
+  opaqueNodeIds: string[];
+  opaqueEdgeIds: string[];
+}
+
+function projectNodeV2(node: CanvasNode): unknown {
+  const kind = node.data?.kind ?? "generic";
+  if (kind === "note") {
+    return {
+      id: node.id,
+      kind,
+      label: node.data.label,
+      color: node.data.noteColor ?? DEFAULT_NOTE_COLOR,
+      x: node.position?.x,
+      y: node.position?.y,
+      width: node.width ?? NOTE_DEFAULT_SIZE.width,
+      height: node.height ?? NOTE_DEFAULT_SIZE.height,
+    };
+  }
+  return {
+    id: node.id,
+    kind,
+    label: node.data?.label ?? "",
+    ...(kind === "generic"
+      ? { shape: node.data?.shape, color: node.data?.color }
+      : { catalogId: node.data?.catalogId }),
+    ...(node.parentId ? { parentId: node.parentId } : {}),
+    x: node.position?.x,
+    y: node.position?.y,
+    width: node.width,
+    height: node.height,
+  };
 }
 
 /**
@@ -154,22 +311,30 @@ export function parseAgentGraphAllowingEmpty(
  * reported as opaque rather than dropped, because a caller that cannot see an
  * item must never be able to delete it.
  */
-export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
-  const nodes: AgentGraphNode[] = [];
+export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView;
+export function canvasToAgentGraph(snapshot: CanvasSnapshot, version: 2): AgentGraphViewV2;
+export function canvasToAgentGraph(snapshot: CanvasSnapshot, version: 1 | 2): AgentGraphView | AgentGraphViewV2;
+export function canvasToAgentGraph(
+  snapshot: CanvasSnapshot,
+  version: 1 | 2 = 1,
+): AgentGraphView | AgentGraphViewV2 {
+  const nodes: Array<AgentGraphNode | AgentGraphNodeV2> = [];
   const opaqueNodeIds: string[] = [];
 
   const seenNodeIds = new Set<string>();
 
   for (const node of snapshot.nodes) {
-    const candidate = {
-      id: node.id,
-      label: node.data?.label ?? "",
-      shape: node.data?.shape,
-      color: node.data?.color,
-      x: node.position?.x,
-      y: node.position?.y,
-    };
-    const parsed = agentGraphNodeSchema.safeParse(candidate);
+    const candidate = version === 2
+      ? projectNodeV2(node)
+      : {
+          id: node.id,
+          label: node.data?.label ?? "",
+          shape: node.data?.shape,
+          color: node.data?.color,
+          x: node.position?.x,
+          y: node.position?.y,
+        };
+    const parsed = (version === 2 ? agentGraphNodeV2Schema : agentGraphNodeSchema).safeParse(candidate);
 
     // A duplicate ID is opaque rather than a second entry. The stored snapshot
     // cannot produce one because IDs are keys, but this function is typed for
@@ -181,6 +346,22 @@ export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
       nodes.push(parsed.data);
     } else {
       opaqueNodeIds.push(node.id);
+    }
+  }
+
+  if (version === 2) {
+    // A child is only editable if its parent is a readable boundary; opacity flows down.
+    for (let changed = true; changed; ) {
+      changed = false;
+      const readable = new Map(nodes.map((node) => [node.id, node]));
+      for (const node of [...nodes]) {
+        const parentId = (node as { parentId?: string }).parentId;
+        if (parentId !== undefined && (readable.get(parentId) as AgentGraphNodeV2 | undefined)?.kind !== "boundary") {
+          nodes.splice(nodes.indexOf(node), 1);
+          opaqueNodeIds.push(node.id);
+          changed = true;
+        }
+      }
     }
   }
 
@@ -218,7 +399,9 @@ export function canvasToAgentGraph(snapshot: CanvasSnapshot): AgentGraphView {
     edges.push(parsed.data);
   }
 
-  return { graph: { version: 1, nodes, edges }, opaqueNodeIds, opaqueEdgeIds };
+  return version === 2
+    ? { graph: { version: 2, nodes: nodes as AgentGraphNodeV2[], edges }, opaqueNodeIds, opaqueEdgeIds }
+    : { graph: { version: 1, nodes: nodes as AgentGraphNode[], edges }, opaqueNodeIds, opaqueEdgeIds };
 }
 
 /**
@@ -242,10 +425,22 @@ export function canvasFingerprint(snapshot: CanvasSnapshot): string {
       node.data?.label,
       node.data?.shape,
       node.data?.color,
+      node.parentId ?? "",
+      node.data?.kind ?? "",
+      node.data?.catalogId ?? "",
+      node.data?.noteColor ?? "",
     ]);
   const edges = [...snapshot.edges]
     .sort((left, right) => left.id.localeCompare(right.id))
-    .map((edge) => [edge.id, edge.type, edge.source, edge.target, edge.data?.label ?? ""]);
+    .map((edge) => [
+      edge.id,
+      edge.type,
+      edge.source,
+      edge.target,
+      edge.data?.label ?? "",
+      edge.sourceHandle ?? "",
+      edge.targetHandle ?? "",
+    ]);
 
   return createHash("sha256").update(JSON.stringify({ nodes, edges })).digest("hex");
 }

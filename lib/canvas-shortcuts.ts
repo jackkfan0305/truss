@@ -6,7 +6,7 @@
  * combination the browser already owns — is invisible in review.
  */
 
-export type CanvasShortcut = "zoom-in" | "zoom-out" | "undo" | "redo";
+export type CanvasShortcut = "zoom-in" | "zoom-out" | "undo" | "redo" | "add-note";
 
 /** The parts of a `KeyboardEvent` the matcher reads. */
 export interface ShortcutKeys {
@@ -41,6 +41,10 @@ export function resolveShortcut(event: ShortcutKeys): CanvasShortcut | null {
 
   if (key === "-") {
     return "zoom-out";
+  }
+
+  if (key === "n") {
+    return "add-note";
   }
 
   return null;

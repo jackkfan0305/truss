@@ -55,16 +55,6 @@ function pickModel(id: string) {
   window.dispatchEvent(new Event(ASSISTANT_MODEL_CHANGE_EVENT))
 }
 
-/**
- * Starters for an empty conversation. Two ask for a diagram and one asks a
- * question, because the panel answers as well as draws.
- */
-const STARTER_PROMPTS = [
-  "Design an e-commerce backend",
-  "Create a chat app architecture",
-  "What would you add to this system?",
-]
-
 /** The Clerk profile menu, with Disconnect OpenRouter while a key is stored. */
 export function ProfileButton() {
   const apiKey = useSyncExternalStore(subscribeToKey, () => getKey(), () => null)
@@ -228,8 +218,8 @@ export function AiSidebar({
       aria-label="Assistant"
       inert={!isOpen}
       className={cn(
-        "absolute inset-y-0 right-0 z-40 flex w-(--assistant-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl md:pt-3.5 shadow-page/80 transition-transform ease-smooth-out motion-reduce:transition-none",
-        isOpen ? "translate-x-0 duration-400" : "translate-x-[calc(100%+2rem)] duration-350"
+        "absolute inset-y-0 right-0 z-40 flex w-(--assistant-sidebar-w) max-w-[calc(100%-1.5rem)] flex-col overflow-hidden border-l border-surface-border bg-elevated pt-16 shadow-2xl md:pt-3.5 shadow-page/80 transition-[translate,filter,opacity] ease-smooth-out motion-reduce:transition-none",
+        isOpen ? "translate-x-0 duration-400" : "translate-x-[calc(100%+2rem)] duration-350 opacity-0 blur-[14px]"
       )}
     >
       {apiKey ? (
@@ -242,7 +232,7 @@ export function AiSidebar({
           <div className="flex min-h-0 flex-1 flex-col px-4 pt-2">
             <AiChatTranscript
               messages={messages}
-              emptyState={<EmptyChat onPick={(prompt) => void send(prompt)} isDisabled={isRunning} />}
+              emptyState={<EmptyChat />}
             />
           </div>
 
@@ -313,45 +303,22 @@ function ConnectOpenRouter({ notice }: { notice: string | null }) {
   )
 }
 
-function EmptyChat({
-  onPick,
-  isDisabled,
-}: {
-  onPick: (prompt: string) => void
-  isDisabled: boolean
-}) {
+/**
+ * Centred, so the orb's glow has room on every side: the transcript scrolls,
+ * which clips sideways overflow, and a left-aligned orb lost the left of its halo.
+ */
+function EmptyChat() {
   return (
-    <div className="flex h-full min-h-80 flex-col justify-center py-8">
+    <div className="flex h-full min-h-80 flex-col items-center justify-center px-6 py-8 text-center">
       {/* `breathing` rather than `working`: nothing is running, and an orb
           animating a phase of work would say otherwise. */}
-      <ThinkingOrb state="breathing" size={64} label="" />
-      <h3 className="mt-4 text-base font-medium text-copy-primary">
+      <ThinkingOrb state="breathing" size={64} label="" gravity />
+      <h3 className="mt-5 text-base font-medium text-copy-primary">
         What should we design?
       </h3>
-      <p className="mt-1 text-sm leading-relaxed text-copy-muted">
-        Describe a system, ask for an edit, or ask a question about what is on
-        the canvas.
+      <p className="mt-1.5 max-w-[30ch] text-sm leading-relaxed text-pretty text-copy-muted">
+        Describe a system, ask for an edit, or ask about what is on the canvas.
       </p>
-
-      {/*
-        Prompts, not a stack of generic outline buttons: no border, a quiet
-        surface that lifts on hover, and the text left-aligned so the three
-        read as a list of things to say rather than as three equal controls.
-      */}
-      <ul className="mt-5 flex flex-col gap-1.5">
-        {STARTER_PROMPTS.map((prompt) => (
-          <li key={prompt}>
-            <button
-              type="button"
-              onClick={() => onPick(prompt)}
-              disabled={isDisabled}
-              className="flex min-h-11 w-full items-center rounded-xl bg-subtle px-3 text-left text-xs text-copy-secondary outline-none hover:bg-surface-border/60 hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {prompt}
-            </button>
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }

@@ -57,14 +57,14 @@ export function LiveCursors() {
                 width="16"
                 height="19"
                 viewBox="0 0 16 19"
-                fill={AI_USER_COLOR}
                 aria-hidden
-                className="drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                // An SVG `fill` attribute can't read a custom property; the class can.
+                className="fill-ai drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
               >
                 <path d="M0.5 0.5 L0.5 15.2 L4.3 11.6 L6.9 17.4 L9.5 16.2 L6.9 10.6 L12 10.6 Z" />
               </svg>
               <span
-                className="absolute left-3 top-4 flex items-center gap-1 whitespace-nowrap rounded-xl px-2 py-0.5 text-[11px] font-medium text-white"
+                className="absolute left-3 top-4 flex items-center gap-1 whitespace-nowrap rounded-xl px-2 py-0.5 text-[11px] font-medium text-page"
                 style={{ backgroundColor: AI_USER_COLOR }}
               >
                 {AI_USER_NAME}

@@ -1,6 +1,8 @@
 import {
   canonicalCanvasSnapshotsEqual,
   parseAgentGraphInput,
+  canvasToAgentGraph,
+  canvasFingerprint,
   type AgentGraphInput,
 } from "@/lib/agent-graph";
 import { resolveAgentGraphLayout } from "@/lib/agent-graph-layout";
@@ -9,12 +11,15 @@ import type { AgentCanvasWriteDependencies } from "@/lib/agent-canvas-write";
 import { isAgentLaunchId } from "@/lib/agent-launch";
 import { jsonError, readJsonBody } from "@/lib/api-requests";
 import type { CanvasEdge, CanvasNode } from "@/types/canvas";
+import { buildDiagramSpatialContext, invalidGeometryResponse } from "@/lib/diagram-spatial-context";
+import { DiagramLayoutError } from "@/lib/diagram-geometry";
+import { isSupportedGraphVersion, unsupportedGraphVersionResponse } from "@/lib/agent-graph-version";
 
 export type AgentGraphImportDependencies = AgentCanvasWriteDependencies;
 
 type ImportDecision = "empty" | "exact" | "resume" | "conflict";
 
-function parseImportRequest(value: unknown): AgentGraphInput | null {
+function parseImportRequest(value: unknown, requestedVersion: number = 1): AgentGraphInput | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
@@ -31,7 +36,7 @@ function parseImportRequest(value: unknown): AgentGraphInput | null {
     return null;
   }
 
-  return parseAgentGraphInput(graph);
+  return parseAgentGraphInput(graph, false, requestedVersion);
 }
 
 function isExactNode(
@@ -108,6 +113,7 @@ export async function handleAgentGraphImportPost(
   request: Request,
   diagramId: string,
   dependencies: AgentGraphImportDependencies,
+  version: number = 1,
 ): Promise<Response> {
   const access = await dependencies.authorizeDiagram(diagramId);
 
@@ -115,13 +121,25 @@ export async function handleAgentGraphImportPost(
     return access.response;
   }
 
-  const graph = parseImportRequest(await readJsonBody(request));
+  if (!isSupportedGraphVersion(version)) {
+    return unsupportedGraphVersionResponse(400, "Unsupported graph version.");
+  }
+
+  const body = await readJsonBody(request);
+
+  if (version === 1 && (body as { graph?: { version?: unknown } } | null)?.graph?.version === 2) {
+    return unsupportedGraphVersionResponse(409, "This graph uses version 2.");
+  }
+
+  const graph = parseImportRequest(body, version);
 
   if (!graph) {
     return jsonError("Invalid graph import request", 400);
   }
 
   let decision: ImportDecision = "conflict";
+  let committedSnapshot: CanvasSnapshot | null = null;
+
   try {
     const requestedSnapshot = await resolveAgentGraphLayout(graph);
     await dependencies.mutateCanvas(diagramId, (flow) => {
@@ -135,6 +153,7 @@ export async function handleAgentGraphImportPost(
 
       if (missingItems.nodes.length === 0 && missingItems.edges.length === 0) {
         decision = "exact";
+        committedSnapshot = existingSnapshot;
         return;
       }
 
@@ -150,10 +169,16 @@ export async function handleAgentGraphImportPost(
       if (missingItems.edges.length > 0) {
         flow.addEdges(missingItems.edges);
       }
+
+      committedSnapshot = { nodes: [...flow.nodes], edges: [...flow.edges] };
     });
   } catch (error: unknown) {
     if (error instanceof CanvasVersionConflictError) {
       return jsonError("The canvas changed since it was read", 409);
+    }
+
+    if (error instanceof DiagramLayoutError) {
+      return invalidGeometryResponse(error);
     }
 
     return jsonError("Could not import the graph", 502);
@@ -161,6 +186,23 @@ export async function handleAgentGraphImportPost(
 
   if (decision === "conflict") {
     return jsonError("Canvas already contains a different graph", 409);
+  }
+
+  // Version 1 keeps the original `{ imported }` body; version 2 adds the committed geometry.
+  if (committedSnapshot && version === 2) {
+    const snapshot: CanvasSnapshot = committedSnapshot;
+    const view = canvasToAgentGraph(snapshot, 2);
+    const spatial = buildDiagramSpatialContext(
+      snapshot,
+      new Set(view.opaqueNodeIds),
+      new Set(view.opaqueEdgeIds),
+    );
+    return Response.json({
+      imported: decision === "empty" || decision === "resume",
+      ...view,
+      spatial,
+      fingerprint: canvasFingerprint(snapshot),
+    });
   }
 
   return Response.json({ imported: decision === "empty" || decision === "resume" });

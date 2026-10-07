@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import {
   AssistantStopError,
   createAssistantActions,
+  createAssistantTools,
   type AssistantFetch,
 } from "../lib/assistant-tools";
+import { canvasFingerprint, canvasToAgentGraph } from "../lib/agent-graph";
+import { AWS_CATALOG } from "../lib/aws-catalog";
+import { buildDiagramSpatialContext } from "../lib/diagram-spatial-context";
+import { nestedSnapshot } from "./testing/aws-diagram-fixtures";
 
 interface Call {
   input: string;
@@ -49,8 +54,8 @@ async function main() {
   {
     const { fetch, calls } = stubFetch([[200, { graph, opaqueNodeIds: [], opaqueEdgeIds: [], fingerprint: "f1" }]]);
     const result = await createAssistantActions({ fetch }).getDiagram({ diagramId: "a b" });
-    assert.deepEqual(result, { graph, opaqueNodeIds: [], fingerprint: "f1" });
-    assert.equal(calls[0].input, "/api/diagrams/a%20b/agent-graph");
+    assert.deepEqual(result, { graph, opaqueNodeIds: [], opaqueEdgeIds: [], fingerprint: "f1" });
+    assert.equal(calls[0].input, "/api/diagrams/a%20b/agent-graph?version=2");
   }
 
   // edit: success, review focus 3 conflict, and validation rejection go back to the model
@@ -114,7 +119,7 @@ async function main() {
       createLaunchId: () => "00000000-0000-4000-8000-000000000000",
     }).createDiagram({ title: "Checkout flow", graph });
 
-    assert.deepEqual(result, { diagramId: "checkout-flow-bbbbbb", url: "/editor/checkout-flow-bbbbbb" });
+    assert.deepEqual(result, { imported: true, diagramId: "checkout-flow-bbbbbb", url: "/editor/checkout-flow-bbbbbb" });
     assert.deepEqual(calls[0].body, { id: "checkout-flow-aaaaaa", name: "Checkout flow" });
     assert.deepEqual(calls[1].body, { id: "checkout-flow-bbbbbb", name: "Checkout flow" });
     assert.equal(calls[2].input, "/api/diagrams/checkout-flow-bbbbbb/agent-launch-import");
@@ -162,6 +167,17 @@ async function main() {
     assert.equal(calls.length, 0);
   }
 
+  // catalog
+  {
+    const response = { catalogVersion: 1, entries: AWS_CATALOG };
+    const { fetch, calls } = stubFetch([[200, response]]);
+    assert.deepEqual(await createAssistantActions({ fetch }).getAwsCatalog(), response);
+    assert.equal(calls[0].input, "/api/agent/catalog");
+    assert.equal(calls[0].method, "GET");
+  }
+
+  await checkNested();
+
   console.log("verify-assistant-tools: ok");
 }
 
@@ -169,3 +185,125 @@ void main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+/** A real committed view: the same builders the server handlers use. */
+function committedView(snapshot = nestedSnapshot()) {
+  const view = canvasToAgentGraph(snapshot, 2);
+  return {
+    ...view,
+    spatial: buildDiagramSpatialContext(snapshot, new Set(view.opaqueNodeIds), new Set(view.opaqueEdgeIds)),
+    fingerprint: canvasFingerprint(snapshot),
+  };
+}
+
+const nestedGraph = {
+  version: 2 as const,
+  nodes: [
+    { id: "vpc", kind: "boundary" as const, catalogId: "boundary-vpc", label: "VPC" },
+    { id: "subnet", kind: "boundary" as const, catalogId: "boundary-subnet", label: "Subnet", parentId: "vpc" },
+    { id: "worker", kind: "aws-service" as const, catalogId: "aws-eks", label: "Worker", parentId: "subnet" },
+    { id: "queue", kind: "aws-service" as const, catalogId: "aws-s3", label: "Uploads", parentId: "vpc" },
+  ],
+  edges: [{ id: "worker-to-queue", source: "worker", target: "queue", label: "Writes" }],
+};
+
+async function checkNested() {
+  const committed = { ...committedView(), opaqueNodeIds: ["Opaque_Item"] };
+
+  // create preserves the committed view and uses the negotiated import endpoint
+  {
+    const { fetch, calls } = stubFetch([
+      [201, { diagram: { id: "aws-bbbbbb" } }],
+      [200, { imported: true, ...committed }],
+    ]);
+    const result = await createAssistantActions({ fetch, createSuffix: () => "bbbbbb" }).createDiagram({
+      title: "AWS",
+      graph: nestedGraph,
+    });
+    assert.deepEqual(result, { ...committed, imported: true, diagramId: "aws-bbbbbb", url: "/editor/aws-bbbbbb" });
+    assert.equal(calls[1].input, "/api/diagrams/aws-bbbbbb/agent-launch-import?version=2");
+    assert.deepEqual((calls[1].body as { graph: unknown }).graph, nestedGraph);
+  }
+
+  // stale 409, then a fresh read and a revised edit with the new fingerprint that keeps a concurrent node
+  {
+    const concurrent = nestedSnapshot();
+    concurrent.nodes.push({ ...concurrent.nodes[4], id: "added-elsewhere" });
+    const fresh = committedView(concurrent);
+    const revised = { ...fresh.graph, nodes: [...fresh.graph.nodes, nestedGraph.nodes[3]] };
+    const after = committedView(concurrent);
+    const { fetch, calls } = stubFetch([
+      [409, { error: "The canvas changed since it was read" }],
+      [200, fresh],
+      [200, { applied: true, ...after }],
+    ]);
+    const actions = createAssistantActions({ fetch });
+    const stale = await actions.applyDiagramEdit({
+      diagramId: "aws-1", fingerprint: "a".repeat(64), graph: committedView().graph,
+    });
+    assert.ok("conflict" in stale && /get_diagram/.test(stale.conflict));
+    const read = await actions.getDiagram({ diagramId: "aws-1" });
+    assert.ok("fingerprint" in read);
+    const applied = await actions.applyDiagramEdit({
+      diagramId: "aws-1", fingerprint: read.fingerprint, graph: revised as never,
+    });
+    assert.deepEqual(applied, { applied: true, ...after, url: "/editor/aws-1" });
+    const body = calls[2].body as { fingerprint: string; graph: { nodes: { id: string }[] } };
+    assert.equal(body.fingerprint, fresh.fingerprint);
+    assert.ok(body.graph.nodes.some((node) => node.id === "added-elsewhere"));
+    assert.equal(calls[2].input, "/api/diagrams/aws-1/agent-graph-edit?version=2");
+  }
+
+  // recoverable geometry rejection keeps its code and item IDs
+  {
+    const rejection = {
+      error: "Generated items overlap",
+      code: "invalidGeometry",
+      issues: [{ code: "siblingCollision", itemIds: ["worker", "queue"] }],
+    };
+    const { fetch } = stubFetch([[422, { ...rejection, retry: "ignored" }]]);
+    const result = await createAssistantActions({ fetch }).applyDiagramEdit({
+      diagramId: "aws-1", fingerprint: "a".repeat(64), graph: nestedGraph,
+    });
+    assert.deepEqual(result, rejection);
+  }
+
+  // an unsupported-version refusal is not mistaken for a stale read
+  {
+    const { fetch } = stubFetch([[409, { code: "unsupportedGraphVersion", requiredVersion: 2, message: "Upgrade" }]]);
+    const result = await createAssistantActions({ fetch }).applyDiagramEdit({
+      diagramId: "aws-1", fingerprint: "a".repeat(64), graph: nestedGraph,
+    });
+    assert.deepEqual(result, { error: "Upgrade", code: "unsupportedGraphVersion", requiredVersion: 2 });
+  }
+
+  // unknown catalog IDs and unknown keys never reach the network
+  {
+    const { fetch, calls } = stubFetch([]);
+    const actions = createAssistantActions({ fetch });
+    const unknown = { ...nestedGraph, nodes: [{ ...nestedGraph.nodes[0], catalogId: "aws-made-up" }] };
+    const result = await actions.createDiagram({ title: "AWS", graph: unknown });
+    assert.ok("error" in result && result.error.includes("catalogId"), JSON.stringify(result));
+    const extra = { ...nestedGraph, nodes: [{ ...nestedGraph.nodes[0], iconUrl: "https://x/y.svg" }] };
+    const forged = await actions.applyDiagramEdit({
+      diagramId: "aws-1", fingerprint: "a".repeat(64), graph: extra as never,
+    });
+    assert.ok("error" in forged);
+    assert.equal(calls.length, 0);
+  }
+
+  // the model-visible schema accepts nested input and lets unknown keys through to strict validation
+  {
+    const tools = createAssistantTools(createAssistantActions({ fetch: stubFetch([]).fetch }));
+    const schema = tools.create_diagram.inputSchema as unknown as {
+      safeParse(value: unknown): { success: boolean; data?: { graph: { nodes: object[] } } };
+    };
+    assert.ok(schema.safeParse({ title: "AWS", graph: nestedGraph }).success);
+    const loose = schema.safeParse({
+      title: "AWS",
+      graph: { ...nestedGraph, nodes: [{ ...nestedGraph.nodes[0], iconUrl: "x" }] },
+    });
+    assert.ok(loose.success && "iconUrl" in loose.data!.graph.nodes[0]);
+    assert.ok("get_aws_catalog" in tools);
+  }
+}

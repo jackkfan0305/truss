@@ -8,6 +8,7 @@ import {
   pushCanvasHistory,
   redoCanvasHistory,
   undoCanvasHistory,
+  type CanvasHistoryCheckpointOptions,
   type CanvasHistoryStacks,
 } from "@/lib/canvas-history";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
@@ -18,7 +19,7 @@ export interface CanvasHistoryControls {
   canUndo: boolean;
   canRedo: boolean;
   /** Call from an event handler *before* applying an edit. */
-  checkpoint: () => void;
+  checkpoint: (options?: CanvasHistoryCheckpointOptions) => void;
   /** Forget everything, after the canvas was replaced from outside this tab. */
   reset: () => void;
 }
@@ -35,16 +36,19 @@ export function useCanvasHistory(
   const [stacks, setStacks] = useState<CanvasHistoryStacks>(EMPTY_CANVAS_HISTORY);
   const lastEditAt = useRef(Number.NEGATIVE_INFINITY);
 
-  const checkpoint = useCallback(() => {
-    const now = Date.now();
-    const isSameBurst = now - lastEditAt.current < CANVAS_HISTORY_COALESCE_MS;
+  const checkpoint = useCallback(
+    (options?: CanvasHistoryCheckpointOptions) => {
+      const now = Date.now();
+      const isSameBurst = now - lastEditAt.current < CANVAS_HISTORY_COALESCE_MS;
 
-    lastEditAt.current = now;
+      lastEditAt.current = now;
 
-    if (!isSameBurst) {
-      setStacks((previous) => pushCanvasHistory(previous, current));
-    }
-  }, [current]);
+      if (options?.force || !isSameBurst) {
+        setStacks((previous) => pushCanvasHistory(previous, current));
+      }
+    },
+    [current],
+  );
 
   const step = useCallback(
     (move: typeof undoCanvasHistory) => {

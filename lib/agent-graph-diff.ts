@@ -1,21 +1,40 @@
-import type { AgentGraphEdge, AgentGraphNode, AgentGraphView } from "@/lib/agent-graph";
+import type {
+  AgentGraphEdge,
+  AgentGraphNode,
+  AgentGraphNodeV2,
+  AgentGraphView,
+  AgentGraphViewV2,
+} from "@/lib/agent-graph";
+
+type GraphNode = AgentGraphNode | AgentGraphNodeV2;
+type GraphView = AgentGraphView | AgentGraphViewV2;
+type Graph = GraphView["graph"];
 
 export interface AgentGraphDiff {
-  addedNodes: AgentGraphNode[];
-  updatedNodes: AgentGraphNode[];
+  addedNodes: GraphNode[];
+  updatedNodes: GraphNode[];
   removedNodeIds: string[];
   addedEdges: AgentGraphEdge[];
   updatedEdges: AgentGraphEdge[];
   removedEdgeIds: string[];
 }
 
-function nodesEqual(a: AgentGraphNode, b: AgentGraphNode): boolean {
+function v2Fields(node: GraphNode) {
+  const { kind, catalogId, parentId, width, height } = node as Record<string, unknown>;
+  return [kind, catalogId, parentId, width, height];
+}
+
+function nodesEqual(left: GraphNode, right: GraphNode): boolean {
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
   return (
     a.label === b.label &&
     a.shape === b.shape &&
     a.color === b.color &&
     a.x === b.x &&
-    a.y === b.y
+    a.y === b.y &&
+    // Version 2 fields; both sides read undefined on a version 1 node.
+    JSON.stringify(v2Fields(left)) === JSON.stringify(v2Fields(right))
   );
 }
 
@@ -32,16 +51,16 @@ function edgesEqual(a: AgentGraphEdge, b: AgentGraphEdge): boolean {
  * shape, not a check that could be forgotten.
  */
 export function diffAgentGraph(
-  live: AgentGraphView,
-  desired: AgentGraphView["graph"],
+  live: GraphView,
+  desired: Graph,
 ): AgentGraphDiff {
   const liveNodes = new Map(live.graph.nodes.map((node) => [node.id, node]));
   const desiredNodes = new Map(desired.nodes.map((node) => [node.id, node]));
   const liveEdges = new Map(live.graph.edges.map((edge) => [edge.id, edge]));
   const desiredEdges = new Map(desired.edges.map((edge) => [edge.id, edge]));
 
-  const addedNodes: AgentGraphNode[] = [];
-  const updatedNodes: AgentGraphNode[] = [];
+  const addedNodes: GraphNode[] = [];
+  const updatedNodes: GraphNode[] = [];
 
   // Iterating the deduped maps rather than the raw arrays. A duplicate ID in
   // `desired` would otherwise emit two entries for one item, and the apply step
@@ -92,8 +111,8 @@ export function diffAgentGraph(
  * overwrite the very item the removal rule exists to protect.
  */
 export function collidesWithOpaque(
-  live: AgentGraphView,
-  desired: AgentGraphView["graph"],
+  live: GraphView,
+  desired: Graph,
 ): boolean {
   const opaqueNodes = new Set(live.opaqueNodeIds);
   const opaqueEdges = new Set(live.opaqueEdgeIds);

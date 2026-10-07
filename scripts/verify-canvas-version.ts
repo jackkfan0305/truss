@@ -102,3 +102,15 @@ checkCanonicalPayloadIgnoresRuntimeFields();
 checkReadResponseParsing();
 checkSnapshotFlow();
 console.log("✅ canvas version helpers verified");
+
+// A write with a broken hierarchy is rejected; the tolerant read path is untouched.
+{
+  const node = (id: string, kind: "boundary" | "generic", parentId?: string) => ({
+    id, position: { x: 0, y: 0 }, ...(parentId ? { parentId } : {}), data: { label: id, kind },
+  });
+  const write = (nodes: unknown[]) => parseCanvasWrite({ version: 1, canvas: { nodes, edges: [] } });
+  assert.ok(write([node("b", "boundary"), node("n", "generic", "b")]), "valid parent accepted");
+  assert.equal(write([node("n", "generic", "missing")]), null, "missing parent rejected");
+  assert.equal(write([node("g", "generic"), node("n", "generic", "g")]), null, "non-boundary parent rejected");
+  assert.equal(write([node("a", "boundary", "b"), node("b", "boundary", "a")]), null, "cycle rejected");
+}

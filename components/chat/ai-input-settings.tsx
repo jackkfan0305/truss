@@ -44,7 +44,7 @@ export function AiInputSettings({
           aria-label="Choose model"
           title={model?.label ?? modelId}
           style={{ borderRadius: 9999 }}
-          className="h-9 min-w-0 gap-1.5 rounded-full border border-surface-border bg-surface-border/70 px-3 text-xs text-copy-secondary shadow-none hover:bg-surface-border hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-surface-border/70 dark:hover:bg-surface-border [&_svg]:size-3"
+          className="h-9 min-w-0 gap-1.5 rounded-full border border-surface-border bg-surface-border/70 px-3 text-xs text-copy-secondary shadow-none hover:bg-surface-border hover:text-copy-primary focus-visible:ring-2 focus-visible:ring-copy-primary/30 dark:bg-surface-border/70 dark:hover:bg-surface-border [&_svg]:size-3 [&_svg]:transition-transform [&_svg]:duration-200 [&_svg]:ease-[var(--ease-smooth-out)] data-[popup-open]:[&_svg]:rotate-180 motion-reduce:[&_svg]:transition-none"
         >
           <span className="truncate">{model?.label ?? modelId}</span>
         </SelectTrigger>

@@ -3,6 +3,12 @@ import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { Authorization } from "@/lib/access";
 import { jsonError } from "@/lib/api-requests";
 import type { DesignContext } from "@/types/canvas";
+import { buildDiagramSpatialContext } from "@/lib/diagram-spatial-context";
+import {
+  isSupportedGraphVersion,
+  NESTED_V1_DETAIL,
+  unsupportedGraphVersionResponse,
+} from "@/lib/agent-graph-version";
 
 export interface AgentGraphReadDependencies {
   authorizeDiagram: (diagramId: string) => Promise<Authorization>;
@@ -27,11 +33,16 @@ export interface AgentGraphReadDependencies {
 export async function handleAgentGraphGet(
   diagramId: string,
   dependencies: AgentGraphReadDependencies,
+  version: number = 1,
 ): Promise<Response> {
   const access = await dependencies.authorizeDiagram(diagramId);
 
   if (!access.ok) {
     return access.response;
+  }
+
+  if (!isSupportedGraphVersion(version)) {
+    return unsupportedGraphVersionResponse(400, "Unsupported graph version.");
   }
 
   let context: DesignContext;
@@ -51,7 +62,26 @@ export async function handleAgentGraphGet(
     nodes: [...context.nodes],
     edges: [...context.edges],
   };
-  const view = canvasToAgentGraph(snapshot);
 
-  return Response.json({ ...view, fingerprint: canvasFingerprint(snapshot) });
+  // Check if diagram has AWS/nested content and v1 access is attempted
+  const hasAwsOrNested = snapshot.nodes.some(
+    (node) => node.data?.kind || node.data?.catalogId || node.parentId,
+  );
+
+  if (version === 1 && hasAwsOrNested) {
+    return unsupportedGraphVersionResponse(409, NESTED_V1_DETAIL);
+  }
+
+  const view = canvasToAgentGraph(snapshot, version === 2 ? 2 : 1);
+  const spatial = buildDiagramSpatialContext(
+    snapshot,
+    new Set(view.opaqueNodeIds),
+    new Set(view.opaqueEdgeIds),
+  );
+
+  return Response.json({
+    ...view,
+    spatial,
+    fingerprint: canvasFingerprint(snapshot),
+  });
 }

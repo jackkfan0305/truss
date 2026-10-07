@@ -6,37 +6,56 @@ import { z } from "zod";
 import {
   applyDiagramEdit,
   createDiagram,
+  getAwsCatalog,
   getDiagram,
   listDiagrams,
   login,
   deleteDiagram,
 } from "./core.mjs";
 
-// Loose on purpose: the wire-level authority is `validateGraph` inside
-// core.mjs, which rejects anything outside the compact graph contract with a
-// specific reason. This schema exists to shape tool-call arguments for the
-// calling model, not to duplicate that contract's exact bounds.
-const nodeShape = z.object({
+// Shapes the tool-call arguments for the calling model and rejects unknown
+// keys at the transport. The wire-level authority is `validateGraph` inside
+// core.mjs, which checks the exact contract with a specific reason. Catalog IDs
+// are not enumerated here: truss_get_aws_catalog is the one source.
+const shapeShape = z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]);
+const colorShape = z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]);
+const NOTE_GUIDELINE =
+  "Add a note only when the diagram cannot show something important, such as a key design decision or a caveat. Keep it short and plain: one or two sentences a person can read at a glance. Never connect notes.";
+
+const nodeShapeV1 = z.strictObject({
   id: z.string(),
   label: z.string(),
-  shape: z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]),
-  color: z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]),
+  shape: shapeShape,
+  color: colorShape,
   x: z.number().int().optional().describe("Omit both coordinates for new nodes so Truss arranges them. Preserve coordinates returned for existing nodes when editing."),
   y: z.number().int().optional().describe("Supply only together with x; omit both for automatic layout."),
 });
 
-const edgeShape = z.object({
+const nodeShapeV2 = z.strictObject({
+  id: z.string(),
+  kind: z.enum(["generic", "aws-service", "boundary", "note"]),
+  label: z.string().describe("Short label, at most 80 characters. A note's text may run to 1000 characters."),
+  catalogId: z.string().optional().describe("Required for aws-service and boundary nodes, taken from truss_get_aws_catalog. Never send it for generic nodes."),
+  shape: shapeShape.optional().describe("Generic nodes only."),
+  color: z.enum([...colorShape.options, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
+  parentId: z.string().optional().describe("The boundary that visually holds this node. Never on a note."),
+  x: z.number().optional().describe("Top-left, relative to the parent (the canvas for roots). Omit x and y for new nodes."),
+  y: z.number().optional().describe("Supply only together with x."),
+  width: z.number().optional().describe("Omit unless resizing; supply only together with height."),
+  height: z.number().optional().describe("Supply only together with width."),
+});
+
+const edgeShape = z.strictObject({
   id: z.string(),
   source: z.string(),
   target: z.string(),
   label: z.string(),
 });
 
-const graphShape = z.object({
-  version: z.literal(1),
-  nodes: z.array(nodeShape),
-  edges: z.array(edgeShape),
-});
+const graphShape = z.union([
+  z.strictObject({ version: z.literal(1), nodes: z.array(nodeShapeV1), edges: z.array(edgeShape) }),
+  z.strictObject({ version: z.literal(2), nodes: z.array(nodeShapeV2), edges: z.array(edgeShape) }),
+]);
 
 const baseUrlShape = z
   .string()
@@ -74,11 +93,22 @@ server.registerTool(
 );
 
 server.registerTool(
+  "truss_get_aws_catalog",
+  {
+    title: "Read the AWS service and boundary catalog",
+    description:
+      "Returns every AWS service and boundary the canvas supports: id, name, description, aliases, category and kind. Use the ids as `catalogId` in version 2 graphs and the descriptions to choose between similar services. Public metadata: needs no sign-in and opens no browser tab.",
+    inputSchema: { baseUrl: baseUrlShape },
+  },
+  async ({ baseUrl }) => textResult(await getAwsCatalog(baseUrl)),
+);
+
+server.registerTool(
   "truss_get_diagram",
   {
     title: "Read one Truss diagram's graph",
     description:
-      "Fetches one diagram's current compact graph plus a fingerprint for optimistic-concurrency edits. `opaqueNodeIds` lists canvas items the compact contract cannot express — never assign one of those ids to a node in an edit. Pass the returned `fingerprint` straight into truss_apply_diagram_edit; never invent one.",
+      "Fetches one diagram's current version 2 graph, its `spatial` geometry and a fingerprint for optimistic-concurrency edits. `spatial` is read-only: never echo bounds or routes into a graph write. `opaqueNodeIds` lists canvas items the compact contract cannot express; treat their bounds as obstacles and never assign one of those ids to a node in an edit. Pass the returned `fingerprint` straight into truss_apply_diagram_edit; never invent one.",
     inputSchema: {
       baseUrl: baseUrlShape,
       diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
@@ -92,7 +122,7 @@ server.registerTool(
   {
     title: "Apply a full graph to an existing Truss diagram",
     description:
-      "Updates a diagram using the complete desiredGraph. Start with truss_get_diagram, preserve IDs and coordinates for existing nodes, and omit coordinates for new nodes. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo.",
+      "Updates a diagram using the complete desiredGraph (use version 2 for AWS services and boundaries). Start with truss_get_diagram, preserve IDs, parent IDs and coordinates for existing nodes, and omit coordinates for new nodes. A successful call returns the committed graph, spatial geometry and new fingerprint; use them for the next edit. Removing a boundary removes its readable descendants, so confirm every affected label first. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo. " + NOTE_GUIDELINE,
     inputSchema: {
       baseUrl: baseUrlShape,
       diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
@@ -109,7 +139,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels.",
+      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use graph version 2 with catalog ids from truss_get_aws_catalog for AWS services and nested boundaries. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels. " + NOTE_GUIDELINE,
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),

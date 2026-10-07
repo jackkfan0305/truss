@@ -23,6 +23,15 @@ its diagram geometry and label match; manual changes use interactive routing.
 Positioned legacy imports remain supported. Coordinate-free agent edits resolve
 against live state after fingerprint validation.
 
+Nested diagrams: node positions are parent-relative, route and label
+coordinates canvas-absolute, and the geometry key hashes absolute rectangles.
+Bundled ELK cannot route around fixed geometry, so a nested edit re-lays out
+only the innermost boundary holding changed content; ancestors grow, siblings
+and opaque items never move, and a collision fails with a 422 `invalidGeometry`
+error. Routes inside the re-laid boundary are ELK's; routes leaving it are
+simple and may overlap fixed blocks. Agent reads and writes return a `spatial`
+projection of the same snapshot as the fingerprint.
+
 The local MCP keeps browser linking and cached bearer credentials. Its delete
 operation uses the existing owner-only diagram deletion endpoint. Edit conflicts
 require a fresh read and revised edit, without automatic fingerprint replacement.
@@ -213,6 +222,16 @@ No backoff loop, no page-side state machine beyond "waiting."
   full stored canvas state, opaque items included, used for optimistic
   concurrency on apply.
 
+- Capability negotiation: `?version=2` selects the v2 projection (AWS kind,
+  catalog ID, parent, dimensions, `spatial` geometry). An omitted version is
+  v1. A nested or AWS diagram read, edited or imported as v1, a v2 graph sent
+  without `?version=2`, and an unknown version all answer
+  `unsupportedGraphVersion` with `requiredVersion: 2`. Version 2 edit and
+  import return `graph`, `opaqueNodeIds`, `opaqueEdgeIds`, `spatial` and
+  `fingerprint` of the exact committed snapshot; a layout that cannot fit is a
+  422 `invalidGeometry` with item IDs and nothing saved. Catalog metadata for
+  both agents comes from the public `GET /api/agent/catalog`.
+
 ### Applying the edit
 
 - `POST /api/diagrams/:id/agent-graph-edit` writes to the stored canvas
@@ -240,16 +259,7 @@ canvas change is replayed (detected through polling), the undo stack is
 cleared. This prevents undo from resurrecting nodes the agent removed or
 deleting nodes the agent added. Two tabs on the same diagram keep separate
 stacks; the one that saves second gets a conflict and is told to reload.
-The canvas blocks local mutations during agent replay, including template
-imports and undo, until the remote snapshot has landed.
-
-## Starter System Designs
-
-- Prebuilt templates are static canvas snapshots stored in the codebase.
-- Templates are loaded into the canvas through the agent-launch-import route.
-- Import can occur on canvas creation or from within the editor at any time.
-- Template data follows the same node/edge schema as user-created canvas content.
-- Templates do not require a separate database record; they are resolved by template ID at import time.
+The canvas blocks local mutations during agent replay, including undo, until the remote snapshot has landed.
 
 ## Agent Canvas Writes
 
@@ -274,6 +284,10 @@ Every canvas write arrives through the graph import and edit routes they call.
   and avatar on the canvas during replay. It is cosmetic; if the replay stalls,
   the next poll will replay from the stored canvas again.
 
+
+## Sticky Notes
+
+A note is a fourth node kind (`data.kind: "note"`, React Flow type `canvasNote`), so selection, drag, undo, autosave and replay treat it as any other node. Its text lives in `data.label` (up to 1,000 characters) and its colour in `data.noteColor`. Three chokepoints keep notes out of the diagram's structure: `parseCanvasSnapshot` drops a note's parent and any edge touching a note, `finishCanvasDrop` never reparents a note, and `resolveAgentGraphLayout` keeps notes out of ELK, placing new ones 80px right of the diagram. In the v2 agent graph a note is `{ kind: "note", id, label, color?, x?, y?, width?, height? }`; an edge to one fails with "Notes cannot be connected."
 
 ## Invariants
 

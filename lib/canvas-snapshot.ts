@@ -1,3 +1,4 @@
+import { sortParentsBeforeChildren } from "@/lib/canvas-hierarchy";
 import { parseDiagramEdgeLayout } from "@/lib/diagram-route";
 
 /**
@@ -14,11 +15,15 @@ import { parseDiagramEdgeLayout } from "@/lib/diagram-route";
  */
 
 import {
+  CANVAS_BOUNDARY_TYPE,
   CANVAS_EDGE_MARKER,
   CANVAS_EDGE_STYLE,
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
+  CANVAS_NOTE_TYPE,
   DEFAULT_NODE_COLOR,
+  DEFAULT_NOTE_COLOR,
+  MAX_NOTE_TEXT_LENGTH,
   DEFAULT_NODE_SHAPE,
   NODE_COLORS,
   NODE_SHAPES,
@@ -27,6 +32,7 @@ import {
   type NodeColor,
   type NodeShape,
 } from "@/types/canvas";
+import { isNoteColor } from "@/lib/canvas-note";
 
 export interface CanvasSnapshot {
   nodes: CanvasNode[];
@@ -64,7 +70,7 @@ function parseNode(value: unknown): CanvasNode | null {
     return null;
   }
 
-  const { id, position, width, height, data } = value;
+  const { id, position, width, height, parentId, data } = value;
 
   if (typeof id !== "string" || !id) {
     return null;
@@ -81,21 +87,33 @@ function parseNode(value: unknown): CanvasNode | null {
   const nodeData = isRecord(data) ? data : {};
   const color = nodeData.color;
   const shape = nodeData.shape;
+  const kind = nodeData.kind;
+  const catalogId = nodeData.catalogId;
+
+  const isNote = kind === "note";
+  const nodeType = isNote ? CANVAS_NOTE_TYPE : kind === "boundary" ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE;
+  const label = typeof nodeData.label === "string" ? nodeData.label : "";
 
   return {
     id,
     // Rebuilt field by field rather than spread: an unknown key from a stored
     // blob would otherwise flow straight into React Flow's node store.
-    type: CANVAS_NODE_TYPE,
+    type: nodeType,
     position: { x: position.x, y: position.y },
     ...(isFiniteNumber(width) ? { width } : {}),
     ...(isFiniteNumber(height) ? { height } : {}),
+    // Notes float free: a stored parent is dropped rather than trusted.
+    ...(!isNote && typeof parentId === "string" && parentId ? { parentId } : {}),
     data: {
-      label: typeof nodeData.label === "string" ? nodeData.label : "",
+      // An over-long note is cut rather than failing the whole snapshot.
+      label: isNote ? label.slice(0, MAX_NOTE_TEXT_LENGTH) : label,
       // An unknown colour or shape degrades to the default instead of failing
       // the whole snapshot — one retired palette key must not cost the diagram.
       color: isNodeColor(color) ? color : DEFAULT_NODE_COLOR,
       shape: isNodeShape(shape) ? shape : DEFAULT_NODE_SHAPE,
+      ...(kind === "generic" || kind === "aws-service" || kind === "boundary" || kind === "note" ? { kind } : {}),
+      ...(isNote ? { noteColor: isNoteColor(nodeData.noteColor) ? nodeData.noteColor : DEFAULT_NOTE_COLOR } : {}),
+      ...(typeof catalogId === "string" && catalogId ? { catalogId } : {}),
     },
   };
 }
@@ -184,11 +202,13 @@ export function parseCanvasSnapshot(value: unknown): CanvasSnapshot | null {
     }
   }
 
+  // Notes cannot be connected, so an edge touching one drops like a dangling edge.
+  const connectableIds = new Set(nodes.filter((node) => node.type !== CANVAS_NOTE_TYPE).map((node) => node.id));
   const edges: CanvasEdge[] = [];
   const seenEdgeIds = new Set<string>();
 
   for (const candidate of value.edges) {
-    const edge = parseEdge(candidate, seenNodeIds);
+    const edge = parseEdge(candidate, connectableIds);
 
     if (edge && !seenEdgeIds.has(edge.id)) {
       seenEdgeIds.add(edge.id);
@@ -237,7 +257,21 @@ export function parseCanvasWrite(
   const version = parseCanvasVersion(body.version);
   const snapshot = parseCanvasSnapshot(body.canvas);
 
-  return version === null || !snapshot ? null : { version, snapshot };
+  if (version === null || !snapshot) return null;
+
+  // Old flat snapshots load tolerantly; a write must carry a sound hierarchy.
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const parentsOk = snapshot.nodes.every(
+    (n) => !n.parentId || byId.get(n.parentId)?.type === CANVAS_BOUNDARY_TYPE,
+  );
+  if (!parentsOk) return null;
+  try {
+    sortParentsBeforeChildren(snapshot.nodes);
+  } catch {
+    return null;
+  }
+
+  return { version, snapshot };
 }
 
 /**

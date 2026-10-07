@@ -6,7 +6,7 @@ import {
   agentGraphInputUnionSchema,
   agentGraphModelSchema,
 } from "@/lib/agent-graph-schema";
-import type { AwsCatalogResponse } from "@/lib/aws-catalog";
+import type { CatalogResponse } from "@/lib/catalog";
 import { buildRoomId, createRoomIdSuffix } from "@/lib/room-id";
 
 const NOTE_GUIDELINE =
@@ -51,7 +51,7 @@ export interface AssistantGraphView {
 
 export interface AssistantActions {
   listDiagrams(): Promise<{ diagrams: { id: string; name: string }[] } | ErrorResult>;
-  getAwsCatalog(): Promise<AwsCatalogResponse | ErrorResult>;
+  getAwsCatalog(): Promise<CatalogResponse | ErrorResult>;
   getDiagram(input: {
     diagramId: string;
     signal?: AbortSignal;
@@ -165,7 +165,7 @@ export function createAssistantActions(
     async getAwsCatalog() {
       const result = await call("/api/agent/catalog", { method: "GET" });
       if (result.status !== 200 || !result.body) return failure(result.body);
-      return result.body as unknown as AwsCatalogResponse;
+      return result.body as unknown as CatalogResponse;
     },
 
     async getDiagram({ diagramId, signal }) {

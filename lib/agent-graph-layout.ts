@@ -7,6 +7,7 @@ import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { CanvasNode } from "@/types/canvas";
 import { layoutDiagramAdditions } from "@/lib/layout-diagram-additions";
 import { layoutDiagramContents } from "@/lib/layout-diagram-contents";
+import { isNote, placeNotes } from "@/lib/canvas-note";
 
 /** The v1 graph, or a v2 graph whose nodes may name a parent boundary. */
 export interface AgentGraphLayoutInput {
@@ -50,22 +51,31 @@ export async function resolveAgentGraphLayout(
       } : edge;
     }),
   };
-  const opaqueIds = new Set(canvasToAgentGraph(existing).opaqueNodeIds);
-  const desiredIds = new Set(desired.nodes.map((node) => node.id));
-  const obstacles = existing.nodes.filter((node) => opaqueIds.has(node.id) && !desiredIds.has(node.id));
+  // Notes never enter ELK: lay out the diagram without them, then place them beside it.
+  const notes = desired.nodes.filter(isNote);
+  const diagram: CanvasSnapshot = { ...desired, nodes: desired.nodes.filter((node) => !isNote(node)) };
+  const liveDiagram: CanvasSnapshot = { ...existing, nodes: existing.nodes.filter((node) => !isNote(node)) };
+  const withNotes = (result: CanvasSnapshot): CanvasSnapshot => {
+    const laid = result.nodes.filter((node) => desiredIds.has(node.id));
+    return { ...result, nodes: [...laid, ...placeNotes(laid, notes, addedIds)] };
+  };
+
+  const opaqueIds = new Set(canvasToAgentGraph(liveDiagram).opaqueNodeIds);
+  const desiredIds = new Set(diagram.nodes.map((node) => node.id));
+  const obstacles = liveDiagram.nodes.filter((node) => opaqueIds.has(node.id) && !desiredIds.has(node.id));
 
   // Nested graphs re-lay out the boundary holding the change; flat ones keep the additions-only path.
-  if (graph.nodes.some((node) => node.parentId) || existing.nodes.some((node) => node.parentId)) {
-    const result = await layoutDiagramContents(desired, {
-      previous: existing,
+  if (graph.nodes.some((node) => node.parentId) || liveDiagram.nodes.some((node) => node.parentId)) {
+    const result = await layoutDiagramContents(diagram, {
+      previous: liveDiagram,
       changedNodeIds: addedIds,
-      changedEdgeIds: new Set(desired.edges.filter((edge) => !existingEdges.has(edge.id)).map((edge) => edge.id)),
+      changedEdgeIds: new Set(diagram.edges.filter((edge) => !existingEdges.has(edge.id)).map((edge) => edge.id)),
       opaqueNodeIds: opaqueIds,
       pinnedNodeIds: new Set(graph.nodes.filter((node) => node.x !== undefined).map((node) => node.id)),
     });
-    return { ...result, nodes: result.nodes.filter((node) => desiredIds.has(node.id)) };
+    return withNotes(result);
   }
 
-  const result = await layoutDiagramAdditions({ ...desired, nodes: [...desired.nodes, ...obstacles] }, addedIds);
-  return { ...result, nodes: result.nodes.filter((node) => desiredIds.has(node.id)) };
+  const result = await layoutDiagramAdditions({ ...diagram, nodes: [...diagram.nodes, ...obstacles] }, addedIds);
+  return withNotes(result);
 }

@@ -17,7 +17,7 @@ export interface DiagramSpatialContext {
   nodePositions: "parent-relative";
   routePositions: "canvas-absolute";
   nodes: Array<
-    DiagramNodeGeometry & { position: { x: number; y: number }; editable: boolean }
+    DiagramNodeGeometry & { kind: string; position: { x: number; y: number }; editable: boolean }
   >;
   edges: Array<{
     id: string;
@@ -42,6 +42,7 @@ export function buildDiagramSpatialContext(
     const geom = geometry.get(node.id);
     return {
       id: node.id,
+      kind: node.data.kind ?? "generic",
       parentId: node.parentId ?? null,
       bounds: geom?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
       interior: geom?.interior ?? null,

@@ -53,6 +53,53 @@ function request(body: unknown): Request {
   });
 }
 
+async function postV2(flow: SnapshotFlow, state: { readonly nodes: readonly CanvasNode[]; readonly edges: readonly CanvasEdge[] }, nodes: unknown[]): Promise<void> {
+  const response = await handleAgentGraphEditPost(
+    request({ fingerprint: canvasFingerprint({ nodes: [...state.nodes], edges: [...state.edges] }), graph: { version: 2, nodes, edges: [] } }),
+    "d", deps(flow, {}), 2,
+  );
+  assert.equal(response.status, 200, await response.clone().text());
+}
+
+async function checkAgentNoteLifecycle(): Promise<void> {
+  const api = { id: "api", kind: "generic", shape: "rectangle", color: "neutral", label: "API", x: 0, y: 0, width: 180, height: 100 };
+  const start = materializeAgentGraph({ version: 2, nodes: [api as never], edges: [] });
+  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
+  const todo = () => state.nodes.find((node) => node.id === "todo");
+
+  await postV2(flow, state, [api, { id: "todo", kind: "note", label: "Retry" }]);
+  assert.deepEqual(todo()!.position, { x: 260, y: 0 }, "80px right of the diagram, top-aligned");
+  assert.equal(todo()!.type, "canvasNote");
+
+  const placed = { id: "todo", kind: "note", label: "Retry twice", color: "blue", x: 260, y: 0, width: 200, height: 200 };
+  await postV2(flow, state, [api, placed]);
+  assert.equal(todo()!.data.label, "Retry twice");
+  assert.equal(todo()!.data.noteColor, "blue");
+
+  await postV2(flow, state, [{ ...api, label: "Gateway" }, placed]);
+  assert.deepEqual(todo()!.position, { x: 260, y: 0 }, "untouched note keeps its spot");
+
+  await postV2(flow, state, [api]);
+  assert.equal(todo(), undefined, "note removed");
+}
+
+async function checkUnplacedNotesStackOnAnEmptyCanvas(): Promise<void> {
+  const { flow, state } = makeFlow([], []);
+  await postV2(flow, state, [{ id: "a", kind: "note", label: "One" }, { id: "b", kind: "note", label: "Two" }]);
+  assert.deepEqual(state.nodes.map((node) => node.position), [{ x: 0, y: 0 }, { x: 0, y: 224 }]);
+}
+
+async function checkRemovingABoundaryLeavesNotes(): Promise<void> {
+  const vpc = { id: "vpc", kind: "boundary", catalogId: "boundary-vpc", label: "VPC", x: 0, y: 0, width: 400, height: 240 };
+  const fn = { id: "fn", kind: "aws-service", catalogId: "aws-lambda", label: "Fn", parentId: "vpc", x: 40, y: 60, width: 120, height: 100 };
+  const note = { id: "why", kind: "note", label: "Private subnets only.", color: "yellow", x: 500, y: 0, width: 200, height: 200 };
+  const start = materializeAgentGraph({ version: 2, nodes: [vpc, fn, note] as never, edges: [] });
+  const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
+  await postV2(flow, state, [note]);
+  assert.deepEqual(state.nodes.map((node) => node.id), ["why"]);
+  assert.deepEqual(state.nodes[0].position, { x: 500, y: 0 });
+}
+
 async function checkMatchingFingerprintAppliesTheDelta(): Promise<void> {
   const start = materializeAgentGraph({ version: 1, nodes: [n("web")], edges: [] });
   const { flow, state } = makeFlow([...start.nodes], [...start.edges]);
@@ -616,6 +663,10 @@ async function main(): Promise<void> {
   await checkV2GraphWithoutVersionIsRefused();
   await checkV1SuccessBodyIsUnchanged();
   await checkStaleNestedEditIs409AndPersistsNothing();
+
+  await checkAgentNoteLifecycle();
+  await checkUnplacedNotesStackOnAnEmptyCanvas();
+  await checkRemovingABoundaryLeavesNotes();
 
   console.log("verify-agent-graph-edit: ok");
 }

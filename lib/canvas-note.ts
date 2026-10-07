@@ -43,3 +43,31 @@ export function createNoteNode(center: XYPosition): CanvasNode {
     },
   };
 }
+
+/** Gaps between the diagram and the column of agent-placed notes, and between notes. */
+const NOTE_GAP_X = 80;
+const NOTE_GAP_Y = 24;
+
+/**
+ * Puts unplaced notes in a column 80px right of the laid-out diagram, top
+ * aligned; placed notes keep their spot. Roots bound the diagram because every
+ * child sits inside its root boundary.
+ */
+export function placeNotes(
+  laidOut: readonly CanvasNode[],
+  notes: readonly CanvasNode[],
+  unplaced: ReadonlySet<string>,
+): CanvasNode[] {
+  const roots = laidOut.filter((node) => !node.parentId);
+  const right = roots.length
+    ? Math.max(...roots.map((node) => node.position.x + (node.width ?? 0))) + NOTE_GAP_X
+    : 0;
+  let y = roots.length ? Math.min(...roots.map((node) => node.position.y)) : 0;
+
+  return notes.map((note) => {
+    if (!unplaced.has(note.id)) return note;
+    const placed = { ...note, position: { x: right, y } };
+    y += (note.height ?? NOTE_DEFAULT_SIZE.height) + NOTE_GAP_Y;
+    return placed;
+  });
+}

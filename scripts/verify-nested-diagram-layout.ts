@@ -11,6 +11,7 @@ import { layoutDiagramContents } from "@/lib/layout-diagram-contents";
 import { DiagramLayoutError, deriveDiagramGeometry, validateDiagramGeometry, type DiagramBounds } from "@/lib/diagram-geometry";
 import { buildDiagramSpatialContext, invalidGeometryResponse } from "@/lib/diagram-spatial-context";
 import { getDiagramEdgeLayout } from "@/lib/diagram-route";
+import { resolveAgentGraphLayout } from "@/lib/agent-graph-layout";
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import { CANVAS_EDGE_TYPE, type CanvasEdge, type CanvasNode } from "@/types/canvas";
 
@@ -183,6 +184,49 @@ async function main(): Promise<void> {
   assert.equal(response.status, 422);
   assert.equal(body.code, "invalidGeometry");
   assert.deepEqual(body.issues[0].itemIds, ["a", "b"]);
+
+  // Detail view: entry → functions → class with methods → types, laid out left to right.
+  const detail = await resolveAgentGraphLayout({
+    version: 2,
+    nodes: [
+      { id: "checkout", kind: "code", catalogId: "code-entry", label: "checkout" },
+      { id: "validate", kind: "code", catalogId: "code-function", label: "validate" },
+      { id: "inventory", kind: "boundary", catalogId: "code-class", label: "Inventory" },
+      { id: "ctor", kind: "code", catalogId: "code-method", label: "constructor", parentId: "inventory" },
+      { id: "reserve", kind: "code", catalogId: "code-method", label: "reserve", parentId: "inventory" },
+      { id: "order", kind: "code", catalogId: "code-type", label: "Order", rows: ["id: string", "items: OrderItem[]"] },
+    ],
+    edges: [
+      { id: "a", source: "checkout", target: "validate", label: "", kind: "calls" },
+      { id: "b", source: "validate", target: "reserve", label: "", kind: "calls" },
+      { id: "c", source: "reserve", target: "order", label: "", kind: "uses" },
+    ],
+  } as never);
+  assert.deepEqual(hardIssues(detail), [], "code detail layout is valid");
+  const codeAbs = (id: string) => boundsOf(detail, id);
+  assert.ok(codeAbs("checkout").x < codeAbs("validate").x, "entry point comes first");
+  assert.ok(codeAbs("validate").x < codeAbs("inventory").x);
+  assert.ok(codeAbs("inventory").x < codeAbs("order").x);
+  assert.equal(detail.nodes.find((n) => n.id === "reserve")!.parentId, "inventory");
+
+  // 80 nodes: eight classes of six methods plus 24 free functions, chained.
+  const codeBig = { version: 2, nodes: [] as object[], edges: [] as object[] };
+  for (let c = 0; c < 8; c += 1) {
+    codeBig.nodes.push({ id: `class-${c}`, kind: "boundary", catalogId: "code-class", label: `Class${c}` });
+    for (let m = 0; m < 6; m += 1) codeBig.nodes.push({ id: `m-${c}-${m}`, kind: "code", catalogId: "code-method", label: `m${m}`, parentId: `class-${c}` });
+  }
+  for (let f = 0; f < 24; f += 1) codeBig.nodes.push({ id: `fn-${f}`, kind: "code", catalogId: "code-function", label: `fn${f}` });
+  const leaves = codeBig.nodes.filter((n) => (n as { kind: string }).kind === "code").map((n) => (n as { id: string }).id);
+  for (let i = 0; i + 1 < leaves.length && codeBig.edges.length < 120; i += 1) {
+    codeBig.edges.push({ id: `e-${i}`, source: leaves[i], target: leaves[i + 1], label: "", kind: "calls" });
+  }
+  assert.equal(codeBig.nodes.length, 80);
+  const started = performance.now();
+  const bigLaid = await resolveAgentGraphLayout(codeBig as never);
+  const elapsed = performance.now() - started;
+  assert.deepEqual(hardIssues(bigLaid), [], "80-node layout is valid");
+  assert.ok(elapsed < 5000, `80-node layout took ${Math.round(elapsed)}ms`);
+  console.log(`80-node code layout: ${Math.round(elapsed)}ms`);
 
   console.log("nested diagram layout verified");
 }

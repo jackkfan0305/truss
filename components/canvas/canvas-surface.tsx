@@ -9,8 +9,6 @@ import { useStoredCanvas } from "@/hooks/use-stored-canvas";
 interface CanvasSurfaceProps {
   diagramId: string;
   /** Owned by the editor shell, since the navbar is what opens the picker. */
-  isTemplatesOpen: boolean;
-  onTemplatesOpenChange: (open: boolean) => void;
   /** Mounted only once the stored canvas has loaded. */
   children?: ReactNode;
 }
@@ -18,8 +16,6 @@ interface CanvasSurfaceProps {
 /** The canvas, with its loading and failure states around it. */
 export function CanvasSurface({
   diagramId,
-  isTemplatesOpen,
-  onTemplatesOpenChange,
   children,
 }: CanvasSurfaceProps) {
   const stored = useStoredCanvas(diagramId);
@@ -43,8 +39,6 @@ export function CanvasSurface({
       <Canvas
         diagramId={diagramId}
         initial={stored.canvas}
-        isTemplatesOpen={isTemplatesOpen}
-        onTemplatesOpenChange={onTemplatesOpenChange}
       />
       {children}
     </>

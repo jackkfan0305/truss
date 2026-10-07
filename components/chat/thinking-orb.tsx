@@ -1,6 +1,7 @@
 "use client"
 
-import { ThinkingOrb as ThinkingOrbCanvas, type OrbState } from "thinking-orbs"
+import { useEffect } from "react"
+import { ThinkingOrb as ThinkingOrbCanvas, setGravitySprite, type OrbState } from "thinking-orbs"
 
 import { useReducedMotion } from "@/hooks/use-reduced-motion"
 import { cn } from "@/lib/utils"
@@ -11,8 +12,18 @@ export interface ThinkingOrbProps {
   size: 64 | 20
   /** What the orb is saying, for a reader who cannot see it. Empty hides it from assistive tech. */
   label: string
+  /** The pointer bends toward the orb as it nears (thinking-orbs' gravity). */
+  gravity?: boolean
   className?: string
 }
+
+/**
+ * Gravity hides the OS pointer and draws this raster in its place, so it must
+ * be the platform's real arrow pixel for pixel. Only macOS has one here
+ * (`public/cursor-arrow-macos.png`, exported from `NSCursor.arrow` at 2x);
+ * elsewhere no sprite is set and the library leaves the cursor alone.
+ */
+const MAC_ARROW = { src: "/cursor-arrow-macos.png", width: 28, height: 40, hotX: 5, hotY: 5 }
 
 /**
  * The thinking orb, bound to this app's accent and motion preference.
@@ -26,8 +37,12 @@ export interface ThinkingOrbProps {
  * `paused` rather than unmounting under reduced motion: the orb is still the
  * shape that says "working", and freezing it keeps that without the movement.
  */
-export function ThinkingOrb({ state, size, label, className }: ThinkingOrbProps) {
+export function ThinkingOrb({ state, size, label, gravity = false, className }: ThinkingOrbProps) {
   const prefersReducedMotion = useReducedMotion()
+
+  useEffect(() => {
+    if (gravity && /Mac/.test(navigator.platform)) setGravitySprite(MAC_ARROW)
+  }, [gravity])
 
   return (
     <span
@@ -48,6 +63,7 @@ export function ThinkingOrb({ state, size, label, className }: ThinkingOrbProps)
         // The app is dark only, so the palette is pinned rather than detected.
         theme="dark"
         paused={prefersReducedMotion}
+        gravity={gravity && !prefersReducedMotion}
         // An empty label means the words beside the orb already say it. The
         // package defaults to role="img" with its own label, so clear the role.
         {...(label ? { role: "img", "aria-label": label } : { role: undefined, "aria-hidden": true })}

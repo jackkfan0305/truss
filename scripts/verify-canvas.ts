@@ -11,11 +11,6 @@ import {
   parseShapeDragPayload,
 } from "../lib/canvas-drag";
 import {
-  CANVAS_TEMPLATES,
-  getNodeBox,
-  getTemplateBounds,
-} from "../components/editor/starter-templates";
-import {
   SVG_SHAPES,
   buildShapeGeometry,
   isSvgShape,
@@ -688,68 +683,6 @@ function checkShortcutsMatchTheSpecTable() {
 }
 
 /**
- * The starter templates (18-starter-templates). This is hand-written data that
- * nothing type-checks past its shape: an edge naming a node that is not in the
- * template renders as nothing at all, and a duplicate ID makes React Flow drop
- * a node — both silent, and both invisible in a preview that "looks fine".
- */
-function checkTemplatesAreWellFormed() {
-  assert.ok(CANVAS_TEMPLATES.length >= 3, "at least three templates ship");
-
-  const templateIds = CANVAS_TEMPLATES.map((template) => template.id);
-  assert.equal(
-    new Set(templateIds).size,
-    templateIds.length,
-    "template IDs are unique",
-  );
-
-  // Node IDs are namespaced by template rather than generated, so uniqueness is
-  // checked across the whole library, not just within one template.
-  const nodeIds = CANVAS_TEMPLATES.flatMap((template) =>
-    template.nodes.map((node) => node.id),
-  );
-  assert.equal(
-    new Set(nodeIds).size,
-    nodeIds.length,
-    "node IDs are unique across every template",
-  );
-
-  for (const template of CANVAS_TEMPLATES) {
-    assert.ok(template.name.length > 0, `${template.id} has a name`);
-    assert.ok(
-      template.description.length > 0,
-      `${template.id} has a description`,
-    );
-    assert.ok(template.nodes.length > 0, `${template.id} has nodes`);
-    assert.ok(template.edges.length > 0, `${template.id} has edges`);
-
-    const ids = new Set(template.nodes.map((node) => node.id));
-
-    for (const edge of template.edges) {
-      assert.ok(ids.has(edge.source), `${edge.id} has a real source`);
-      assert.ok(ids.has(edge.target), `${edge.id} has a real target`);
-      assert.notEqual(
-        edge.source,
-        edge.target,
-        `${edge.id} is not a self-loop`,
-      );
-    }
-
-    const edgeIds = template.edges.map((edge) => edge.id);
-    assert.equal(
-      new Set(edgeIds).size,
-      edgeIds.length,
-      `${template.id} has unique edge IDs`,
-    );
-  }
-}
-
-/**
- * Preview fitting is a `viewBox` built from these bounds, so a box that does not
- * enclose every node crops the preview silently — and a zero-size one on an
- * empty template divides the browser's aspect fit by nothing.
- */
-/**
  * The avatar fallback is the only thing standing between a photo-less
  * collaborator and an empty circle, and an empty circle looks like a rendering
  * bug rather than a person. Every one of these degrades silently.
@@ -902,39 +835,6 @@ function checkSnapshotsRejectJunkAndSurviveRoundTrips() {
   assert.equal(canvasBlobPath("my-diagram"), "canvas/my-diagram.json");
 }
 
-function checkTemplateBoundsEncloseEveryNode() {
-  assert.deepEqual(
-    getTemplateBounds([]),
-    { x: 0, y: 0, width: 0, height: 0 },
-    "an empty template has a zero box rather than an Infinity one",
-  );
-
-  for (const template of CANVAS_TEMPLATES) {
-    const bounds = getTemplateBounds(template.nodes);
-
-    assert.ok(
-      bounds.width > 0 && bounds.height > 0,
-      `${template.id} has a positive bounding box`,
-    );
-
-    for (const node of template.nodes) {
-      const box = getNodeBox(node);
-
-      assert.ok(
-        box.width > 0 && box.height > 0,
-        `${node.id} has a resolved size`,
-      );
-      assert.ok(
-        box.x >= bounds.x &&
-          box.y >= bounds.y &&
-          box.x + box.width <= bounds.x + bounds.width &&
-          box.y + box.height <= bounds.y + bounds.height,
-        `${node.id} is inside ${template.id}'s bounding box`,
-      );
-    }
-  }
-}
-
 function checkCanvasBrandingIsHidden() {
   const source = readFileSync(
     new URL("../components/canvas/canvas.tsx", import.meta.url),
@@ -967,13 +867,11 @@ function main() {
   checkNestedEdgesRouteInCanvasSpace();
   checkSnapRadiusCoversEveryNodeCentre();
   checkShortcutsMatchTheSpecTable();
-  checkTemplatesAreWellFormed();
-  checkTemplateBoundsEncloseEveryNode();
   checkInitialsAlwaysRenderSomething();
   checkSnapshotsRejectJunkAndSurviveRoundTrips();
   checkCanvasBrandingIsHidden();
   console.log(
-    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, starter templates, presence initials and snapshot validation verified",
+    "✅ Canvas shape drag contract, shape geometry, edge defaults, shortcuts, presence initials and snapshot validation verified",
   );
 }
 

@@ -15,10 +15,6 @@ import { DiagramSidebar } from "@/components/editor/diagram-sidebar"
 import { SaveStatusButton } from "@/components/editor/save-status-button"
 import { Button } from "@/components/ui/button"
 import { useDiagramActions } from "@/hooks/use-diagram-actions"
-import {
-  initialEditorSidebar,
-  type EditorSidebar,
-} from "@/lib/editor-sidebar-state"
 import type { DiagramSummary } from "@/types/diagram"
 
 interface EditorShellProps {
@@ -32,7 +28,13 @@ interface EditorShellProps {
   launchId?: string
 }
 
-type OpenSidebar = EditorSidebar
+/**
+ * Below `md` each panel spans nearly the full width, so opening one closes the
+ * other there. On wider screens both can stay open beside the canvas.
+ */
+function isNarrowViewport() {
+  return window.matchMedia("(max-width: 767px)").matches
+}
 
 /**
  * Owns the sidebar open/close state for the editor workspace and the diagram
@@ -44,12 +46,9 @@ export function EditorShell({
   activeDiagram,
   launchId,
 }: EditorShellProps) {
-  const [openSidebar, setOpenSidebar] = useState<OpenSidebar>(
-    () => initialEditorSidebar()
-  )
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false)
   const actions = useDiagramActions()
-  const isSidebarOpen = openSidebar === "diagrams"
 
   return (
     <AgentPresenceProvider>
@@ -61,22 +60,18 @@ export function EditorShell({
         <div className="relative flex flex-1 overflow-hidden">
           <EditorNavbar
             isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() =>
-              setOpenSidebar((current) =>
-                current === "diagrams" ? null : "diagrams"
-              )
-            }
+            onToggleSidebar={() => {
+              if (!isSidebarOpen && isNarrowViewport()) setIsAssistantOpen(false)
+              setIsSidebarOpen(!isSidebarOpen)
+            }}
             diagramName={activeDiagram?.name}
-            onOpenTemplates={
-              activeDiagram ? () => setIsTemplatesOpen(true) : undefined
-            }
-            isAssistantOpen={openSidebar === "assistant"}
+            isAssistantOpen={isAssistantOpen}
             onToggleAssistant={
               activeDiagram
-                ? () =>
-                    setOpenSidebar((current) =>
-                      current === "assistant" ? null : "assistant"
-                    )
+                ? () => {
+                    if (!isAssistantOpen && isNarrowViewport()) setIsSidebarOpen(false)
+                    setIsAssistantOpen(!isAssistantOpen)
+                  }
                 : undefined
             }
             // Only the workspace shows the agent avatar; the home page has no canvas for it to draw on.
@@ -112,8 +107,6 @@ export function EditorShell({
               <CanvasSurface
                 key={activeDiagram.id}
                 diagramId={activeDiagram.id}
-                isTemplatesOpen={isTemplatesOpen}
-                onTemplatesOpenChange={setIsTemplatesOpen}
               >
                 <AgentLaunchImportController
                   launchId={launchId}
@@ -142,7 +135,7 @@ export function EditorShell({
           {activeDiagram ? (
             <AiSidebar
               key={activeDiagram.id}
-              isOpen={openSidebar === "assistant"}
+              isOpen={isAssistantOpen}
               diagramId={activeDiagram.id}
             />
           ) : null}

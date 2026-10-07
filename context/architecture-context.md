@@ -259,16 +259,7 @@ canvas change is replayed (detected through polling), the undo stack is
 cleared. This prevents undo from resurrecting nodes the agent removed or
 deleting nodes the agent added. Two tabs on the same diagram keep separate
 stacks; the one that saves second gets a conflict and is told to reload.
-The canvas blocks local mutations during agent replay, including template
-imports and undo, until the remote snapshot has landed.
-
-## Starter System Designs
-
-- Prebuilt templates are static canvas snapshots stored in the codebase.
-- Templates are loaded into the canvas through the agent-launch-import route.
-- Import can occur on canvas creation or from within the editor at any time.
-- Template data follows the same node/edge schema as user-created canvas content.
-- Templates do not require a separate database record; they are resolved by template ID at import time.
+The canvas blocks local mutations during agent replay, including undo, until the remote snapshot has landed.
 
 ## Agent Canvas Writes
 

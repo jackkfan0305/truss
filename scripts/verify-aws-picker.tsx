@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { act, useState } from "react";
+import { act } from "react";
 
 import { AWS_CATALOG, searchAwsCatalog } from "../lib/aws-catalog";
 import { AWS_DRAG_MIME, buildAwsDragPayload, parseAwsDragPayload } from "../lib/canvas-drag";
@@ -21,7 +21,8 @@ assert.ok(vpcs.some((entry) => entry.kind === "service"));
 assert.ok(vpcs.some((entry) => entry.kind === "boundary"));
 assert.equal(searchAwsCatalog("").length, AWS_CATALOG.length);
 
-const dom = new JSDOM('<!doctype html><div id="root"></div>');
+// pretendToBeVisual gives jsdom the animation frames liquid-gooey schedules.
+const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
@@ -29,14 +30,21 @@ Object.assign(globalThis, {
   Element: dom.window.Element,
   Node: dom.window.Node,
   ShadowRoot: dom.window.ShadowRoot,
+  requestAnimationFrame: dom.window.requestAnimationFrame,
+  cancelAnimationFrame: dom.window.cancelAnimationFrame,
+  getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+  MutationObserver: dom.window.MutationObserver,
+  SVGElement: dom.window.SVGElement,
+  // jsdom has no layout, so there is nothing for liquid-gooey to observe.
+  ResizeObserver: class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 const added: string[] = [];
 
-function Harness({ AwsPanel }: { AwsPanel: typeof import("../components/canvas/aws-panel").AwsPanel }) {
-  const [open, setOpen] = useState(false);
-  return <AwsPanel open={open} onOpenChange={setOpen} onAddEntry={(id) => added.push(id)} />;
-}
 
 function typeInto(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
@@ -47,20 +55,22 @@ function typeInto(input: HTMLInputElement, value: string) {
 async function main() {
   // React decides whether `input` events work when it loads, so it loads after jsdom.
   const { createRoot } = await import("react-dom/client");
-  const { AwsPanel } = await import("../components/canvas/aws-panel");
+  const { SectionDock } = await import("../components/canvas/section-dock");
   const root = createRoot(document.getElementById("root")!);
-  await act(async () => root.render(<Harness AwsPanel={AwsPanel} />));
-  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="AWS items"]')!;
-  assert.equal(trigger.getAttribute("aria-expanded"), "false");
-  assert.equal(document.querySelector("#aws-panel"), null);
-
-  await act(async () => trigger.click());
-  assert.equal(trigger.getAttribute("aria-expanded"), "true");
-  const panel = document.querySelector("#aws-panel")!;
-  assert.deepEqual(
-    [...panel.querySelectorAll("section > h3")].map((h) => h.textContent),
-    ["Services", "Boundaries"],
+  await act(async () =>
+    root.render(<SectionDock onAddShape={() => {}} onAddAws={(id) => added.push(id)} />),
   );
+  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="AWS items"]')!;
+  const region = () => document.querySelector<HTMLElement>('[role="region"]')!;
+  // Closed, the panel layer stays mounted for its blur-out but is inert (jsdom has no `inert` property).
+  assert.ok(region().hasAttribute("inert"));
+
+  // Opening the section hides the tabs and activates its panel.
+  await act(async () => trigger.click());
+  assert.ok(!region().hasAttribute("inert"));
+  assert.ok(trigger.closest("[inert]"));
+  assert.equal(region().getAttribute("aria-label"), "AWS items");
+  const panel = document.querySelector("#aws-panel")!;
 
   // Items are native, draggable buttons whose description is reachable by name.
   const s3 = [...panel.querySelectorAll("button")].find((b) => b.textContent?.includes("Amazon S3"))!;
@@ -69,19 +79,27 @@ async function main() {
   await act(async () => s3.click());
   assert.deepEqual(added, ["aws-s3"]);
 
-  // Aliases search; no match shows the empty state.
-  const input = panel.querySelector<HTMLInputElement>('input[aria-label="Search AWS items"]')!;
-  await act(async () => typeInto(input, "ec2"));
-  assert.ok(panel.textContent?.includes("Amazon EC2"));
-  assert.ok(!panel.textContent?.includes("Amazon S3"));
-  await act(async () => typeInto(input, "zzzz-nothing"));
-  assert.ok(panel.textContent?.includes("No AWS items match your search"));
+  // Category chips filter; "All" restores.
+  const chip = (name: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Categories"] button')].find((b) => b.textContent === name)!;
+  await act(async () => chip("Boundaries").click());
+  assert.equal(chip("Boundaries").getAttribute("aria-pressed"), "true");
+  assert.ok(!document.querySelector("#aws-panel")!.textContent?.includes("Amazon S3"));
+  await act(async () => chip("All").click());
 
-  // Escape closes and restores focus to the trigger.
+  // Aliases search; no match shows the empty state.
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Search AWS items"]')!;
+  await act(async () => typeInto(input, "ec2"));
+  assert.ok(document.querySelector("#aws-panel")!.textContent?.includes("Amazon EC2"));
+  assert.ok(!document.querySelector("#aws-panel")!.textContent?.includes("Amazon S3"));
+  await act(async () => typeInto(input, "zzzz-nothing"));
+  assert.ok(region().textContent?.includes("No AWS items match your search"));
+
+  // Escape closes and restores focus to the section's tab.
   await act(async () => {
     input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
-  assert.equal(document.querySelector("#aws-panel"), null);
+  assert.ok(region().hasAttribute("inert"));
   assert.equal(document.activeElement, trigger);
 
   await act(async () => root.unmount());

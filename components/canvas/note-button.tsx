@@ -3,6 +3,8 @@
 import { StickyNote } from "lucide-react";
 
 import { NOTE_DRAG_MIME } from "@/lib/canvas-drag";
+import { FLOATING_SURFACE } from "@/lib/floating-surface";
+import { cn } from "@/lib/utils";
 
 interface NoteButtonProps {
   onAdd: () => void;
@@ -15,8 +17,7 @@ interface NoteButtonProps {
  */
 export function NoteButton({ onAdd }: NoteButtonProps) {
   return (
-    // ponytail: same classes as FLOATING_SURFACE in lib/floating-surface.ts; import it once that file is committed.
-    <div className="rounded-[28px] border border-surface-border bg-elevated p-1.5 shadow-lg shadow-page/60">
+    <div className={cn(FLOATING_SURFACE, "rounded-[24px] p-[5px]")}>
       <button
         type="button"
         aria-label="Add sticky note"
@@ -27,7 +28,7 @@ export function NoteButton({ onAdd }: NoteButtonProps) {
           event.dataTransfer.setData(NOTE_DRAG_MIME, "note");
           event.dataTransfer.effectAllowed = "copy";
         }}
-        className="flex h-11 w-11 items-center justify-center rounded-full text-copy-secondary transition-colors hover:bg-subtle hover:text-copy-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-copy-secondary transition-colors hover:bg-subtle hover:text-copy-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
         <StickyNote className="h-5 w-5" aria-hidden />
       </button>

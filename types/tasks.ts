@@ -15,8 +15,8 @@ export const AI_USER_ID = "truss-ai-architect";
 
 export const AI_USER_NAME = "AI Architect";
 
-/** `--accent-ai`, as a raw hex because inline styles need a value, not a token. */
-export const AI_USER_COLOR = "#6457f9";
+/** `--accent-ai` for inline styles, which resolve custom properties. */
+export const AI_USER_COLOR = "var(--accent-ai)";
 
 /**
  * How long the agent cursor takes to travel to its next target, in

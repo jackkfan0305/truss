@@ -56,6 +56,17 @@ async function main() {
   await act(async () => root.render(render()))
   assert.equal(viewport.scrollTop, 600, "new lines follow to the bottom")
 
+  // A small nudge up (100px from the bottom) releases follow but shows no button.
+  viewport.scrollTop = 300
+  await act(async () => viewport.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    key: "ArrowUp",
+  })))
+  assert.ok(
+    !Array.from(container.querySelectorAll("button")).some((b) => b.textContent?.includes("Jump to latest")),
+    "a short scroll up does not offer the jump"
+  )
+
   viewport.scrollTop = 120
   await act(async () => viewport.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     bubbles: true,

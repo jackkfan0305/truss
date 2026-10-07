@@ -12,6 +12,9 @@ interface AiChatTranscriptProps {
 }
 
 const FOLLOW_THRESHOLD_PX = 48
+/** How far up the reader must be before Jump to latest appears. A nudge up to
+ * reread the last line releases follow without putting a button over it. */
+const JUMP_THRESHOLD_PX = 240
 /** Fraction of the remaining distance closed per frame, plus a floor so the
  * tail of the ease still lands instead of crawling sub-pixel. */
 const FOLLOW_EASE = 0.2
@@ -26,16 +29,23 @@ export function AiChatTranscript({ messages, emptyState }: AiChatTranscriptProps
   const shouldFollow = useRef(true)
   const [showJump, setShowJump] = useState(false)
 
-  const isNearBottom = useCallback(() => {
+  const distanceFromBottom = useCallback(() => {
     const element = scrollRef.current
 
-    if (!element) return true
+    if (!element) return 0
 
-    return (
-      element.scrollHeight - element.scrollTop - element.clientHeight <=
-      FOLLOW_THRESHOLD_PX
-    )
+    return element.scrollHeight - element.scrollTop - element.clientHeight
   }, [])
+
+  const isNearBottom = useCallback(
+    () => distanceFromBottom() <= FOLLOW_THRESHOLD_PX,
+    [distanceFromBottom]
+  )
+
+  /** Called on scroll and on growth: new lines can push a released reader past the threshold. */
+  const syncJump = useCallback(() => {
+    setShowJump(!shouldFollow.current && distanceFromBottom() > JUMP_THRESHOLD_PX)
+  }, [distanceFromBottom])
 
   /*
    * Rides the bottom while a turn streams, on its own rAF ease rather than CSS
@@ -92,7 +102,10 @@ export function AiChatTranscript({ messages, emptyState }: AiChatTranscriptProps
     []
   )
 
-  useEffect(followToBottom, [followToBottom, messages])
+  useEffect(() => {
+    followToBottom()
+    syncJump()
+  }, [followToBottom, syncJump, messages])
 
   /*
    * The smooth reveal grows the reply after the messages prop has settled, so
@@ -106,11 +119,14 @@ export function AiChatTranscript({ messages, emptyState }: AiChatTranscriptProps
 
     if (!viewport || !content) return
 
-    const observer = new ResizeObserver(followToBottom)
+    const observer = new ResizeObserver(() => {
+      followToBottom()
+      syncJump()
+    })
 
     observer.observe(content)
     return () => observer.disconnect()
-  }, [followToBottom, hasMessages])
+  }, [followToBottom, syncJump, hasMessages])
 
   /*
    * Follow is driven by what the reader *did*, not by where the viewport is.
@@ -125,15 +141,18 @@ export function AiChatTranscript({ messages, emptyState }: AiChatTranscriptProps
    */
   const releaseFollow = useCallback(() => {
     shouldFollow.current = false
-    setShowJump(true)
-  }, [])
+    syncJump()
+  }, [syncJump])
 
   const resumeFollowAtBottom = useCallback(() => {
-    if (!isNearBottom()) return
+    if (!isNearBottom()) {
+      syncJump()
+      return
+    }
 
     shouldFollow.current = true
     setShowJump(false)
-  }, [isNearBottom])
+  }, [isNearBottom, syncJump])
 
   const jumpToLatest = () => {
     const element = scrollRef.current

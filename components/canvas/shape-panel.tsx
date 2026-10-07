@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { DOCK_GRID_CLASS, DOCK_TILE_CLASS, tileDelay } from "@/components/canvas/aws-panel";
 import { NodeShapeFrame } from "@/components/canvas/node-shape";
 import { SHAPE_DRAG_MIME, buildShapeDragPayload } from "@/lib/canvas-drag";
 import {
@@ -62,6 +63,7 @@ function handleDragStart(
 }
 
 interface ShapePanelProps {
+  query: string;
   /**
    * Keyboard path for the same action as the drag: adds the shape at the centre
    * of the current viewport. Drag-and-drop alone is unreachable without a
@@ -71,10 +73,10 @@ interface ShapePanelProps {
 }
 
 /**
- * Floating shape palette at the bottom of the canvas (12-shape-panel). Each
+ * The Basic section of the bottom dock (12-shape-panel). Each
  * button is an HTML5 drag source carrying the shape and its default size.
  */
-export function ShapePanel({ onAddShape }: ShapePanelProps) {
+export function ShapePanel({ query, onAddShape }: ShapePanelProps) {
   const ghostRefs = useRef<Partial<Record<NodeShape, HTMLDivElement | null>>>(
     {}
   );
@@ -82,12 +84,11 @@ export function ShapePanel({ onAddShape }: ShapePanelProps) {
   return (
     <>
       <div
-        role="toolbar"
+        role="group"
         aria-label="Add a shape"
-        aria-orientation="horizontal"
-        className="flex items-center gap-1 rounded-full border border-surface-border bg-elevated/90 p-1.5 shadow-lg backdrop-blur"
+        className={DOCK_GRID_CLASS}
       >
-        {NODE_SHAPES.map((shape) => {
+        {NODE_SHAPES.filter((shape) => shape.includes(query.trim().toLowerCase())).map((shape, index) => {
           const Icon = SHAPE_ICONS[shape];
 
           return (
@@ -101,9 +102,11 @@ export function ShapePanel({ onAddShape }: ShapePanelProps) {
                 handleDragStart(event, shape, ghostRefs.current[shape] ?? null)
               }
               onClick={() => onAddShape(shape)}
-              className="flex h-9 w-9 cursor-grab items-center justify-center rounded-full text-copy-muted transition-colors hover:bg-subtle hover:text-copy-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand active:cursor-grabbing"
+              className={`${DOCK_TILE_CLASS} capitalize`}
+              style={tileDelay(index)}
             >
-              <Icon className="h-5 w-5" aria-hidden />
+              <Icon className="h-8 w-8 p-1" strokeWidth={1.5} aria-hidden />
+              {shape}
             </button>
           );
         })}

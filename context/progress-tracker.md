@@ -1256,6 +1256,16 @@ Update this file whenever the current phase, active feature, or implementation s
 - `02-editor-chrome` — `components/editor/` created with three client components: `editor-navbar.tsx` (fixed `h-14` bar, three sections, sidebar toggle with `PanelLeftOpen`/`PanelLeftClose`, right section empty), `project-sidebar.tsx` (absolute overlay, `translate-x` slide, `isOpen`/`onClose` props, Projects header + close button, `Tabs` for My Projects / Shared with empty states, full-width `New Project` button with `Plus`), and `editor-dialog.tsx` (reusable title/description/footer shell — no concrete dialogs built yet).
 - `01-design-system` — shadcn/ui initialized (`components.json`, `base-nova` style, `neutral` base, CSS variables). UI primitives added unmodified in `components/ui/`: Button, Card, Dialog, Input, Tabs, Textarea, ScrollArea. `lucide-react` installed. `lib/utils.ts` exports `cn()` (clsx + tailwind-merge). Dark theme tokens from `ui-context.md` defined in `app/globals.css`.
 
+## Bottom bar revamp — 2026-10-06
+
+- Canvas controls fold into one gooey `+` button (`liquid-gooey`); keyboard shortcuts still work while it is closed.
+- `SectionDock` replaces the separate shape toolbar and AWS picker button: Basic and AWS tabs open in place into tile grids. `AwsPanel` and `ShapePanel` are now its section bodies.
+- The navbar Templates button, the starter templates modal and its template data (18-starter-templates) are removed.
+- Floating chrome is consistent: one `FLOATING_SURFACE` token for the navbar chips, dock and goo. The diagrams toggle and title share a chip that mirrors the utility chip. Navbar icons moved from Hugeicons to Lucide, and the Hugeicons packages are removed.
+- The diagrams sidebar and the assistant panel open independently, so both can be open at once. Below `md` opening one still closes the other, since each spans nearly the full width. `lib/editor-sidebar-state.ts` is removed.
+- Colour: neutrals rebuilt as one evenly spaced OKLCH graphite ramp (muted text on `bg-elevated` measures 5.49:1, up from 4.56:1). Electric lime (`#b1ef4a`) is the only accent; the indigo AI colour is gone and AI states, the agent cursor and avatar ring use `--accent-ai`, which points at it. The dock tabs and note button shrank to 48px to match the controls blob. Canvas edges use `--text-primary`.
+- `scripts/verify-aws-picker.tsx` drives the dock and stubs the browser APIs liquid-gooey needs under jsdom.
+
 ## Sticky notes — 2026-10-06
 
 - Notes are a `note` node kind rendered by `canvasNote` (`components/canvas/canvas-note.tsx`), with no parent, no edges and no layout.

@@ -34,7 +34,6 @@ import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasEdgeRouteProvider } from "@/components/canvas/canvas-edge-routes";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
-import { AwsPanel } from "@/components/canvas/aws-panel";
 import {
   BoundaryResizeContext,
   CanvasBoundaryRenderer,
@@ -43,9 +42,12 @@ import {
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
 import { useSetAgentPresence } from "@/components/canvas/agent-presence";
-import { ShapePanel } from "@/components/canvas/shape-panel";
-import { StarterTemplatesModal } from "@/components/editor/starter-templates-modal";
-import type { CanvasTemplate } from "@/components/editor/starter-templates";
+import { SectionDock } from "@/components/canvas/section-dock";
+import { CanvasNoteRenderer, markNoteForEditing } from "@/components/canvas/canvas-note";
+import { NoteButton } from "@/components/canvas/note-button";
+import { NoteContextMenu } from "@/components/canvas/note-context-menu";
+import { useAddNoteShortcut } from "@/hooks/use-keyboard-shortcuts";
+import { createNoteNode } from "@/lib/canvas-note";
 import { useCanvasSave } from "@/components/canvas/canvas-save-context";
 import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
 import { useCanvasHistory } from "@/hooks/use-canvas-history";
@@ -57,6 +59,7 @@ import { planCanvasEdits, playCanvasEdits } from "@/lib/canvas-replay";
 import { getAwsCatalogEntry } from "@/lib/aws-catalog";
 import {
   AWS_DRAG_MIME,
+  NOTE_DRAG_MIME,
   SHAPE_DRAG_MIME,
   parseAwsDragPayload,
   createNodeId,
@@ -69,11 +72,11 @@ import {
   CANVAS_EDGE_TYPE,
   CANVAS_NODE_TYPE,
   CANVAS_BOUNDARY_TYPE,
+  CANVAS_NOTE_TYPE,
   CONNECTION_SNAP_RADIUS,
   DEFAULT_NODE_COLOR,
   MIN_ZOOM,
   NODE_DEFAULT_SIZES,
-  VIEWPORT_TRANSITION_MS,
   type CanvasEdge,
   type CanvasNode,
   type NodeShape,
@@ -92,6 +95,7 @@ import "@xyflow/react/dist/style.css";
 const NODE_TYPES: NodeTypes = {
   [CANVAS_NODE_TYPE]: CanvasNodeRenderer,
   [CANVAS_BOUNDARY_TYPE]: CanvasBoundaryRenderer,
+  [CANVAS_NOTE_TYPE]: CanvasNoteRenderer,
 };
 
 const EDGE_TYPES: EdgeTypes = {
@@ -151,12 +155,9 @@ interface CanvasProps {
   diagramId: string;
   /** The stored canvas this editor opened on, loaded by `CanvasSurface`. */
   initial: RemoteCanvas;
-  /** Opened from the navbar, but importing writes flow state, which lives here (18-starter-templates). */
-  isTemplatesOpen: boolean;
-  onTemplatesOpenChange: (open: boolean) => void;
 }
 
-function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange }: CanvasProps) {
+function CanvasFlow({ diagramId, initial }: CanvasProps) {
   /*
    * Autosave state reaches the navbar through context rather than a callback
    * prop: the indicator lives outside `ReactFlowProvider` and cannot read the
@@ -165,12 +166,10 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
   const { setStatus: setSaveStatus, registerSaveNow, registerSyncNow } = useCanvasSave();
   const [nodes, setNodes, applyNodeChanges] = useNodesState<CanvasNode>(initial.snapshot.nodes);
   const [edges, setEdges, applyEdgeChanges] = useEdgesState<CanvasEdge>(initial.snapshot.edges);
-  const { fitView, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
+  const { screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const isAwaitingImportedNodes = useRef(false);
   const replaying = useRef(false);
   const [isReplaying, setIsReplaying] = useState(false);
-  const [isAwsOpen, setIsAwsOpen] = useState(false);
 
   const current = useMemo(() => ({ nodes, edges }), [nodes, edges]);
   const payload = useMemo(() => canonicalCanvasPayload(current), [current]);
@@ -297,36 +296,6 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
     [history, commitSnapshot],
   );
 
-  /**
-   * A template replaces the canvas. Nodes and edges are copied so the template
-   * constants are never aliased into flow state.
-   */
-  const handleImportTemplate = useCallback(
-    (template: CanvasTemplate) => {
-      if (replaying.current) return;
-      history.checkpoint();
-      setNodes(template.nodes.map((node) => ({ ...node, data: { ...node.data } })));
-      setEdges(
-        template.edges.map((edge) => ({
-          ...edge,
-          data: { ...edge.data, label: edge.data?.label ?? "" },
-        })),
-      );
-      isAwaitingImportedNodes.current = true;
-    },
-    [history, setEdges, setNodes],
-  );
-
-  /** `fitView` must wait for the imported nodes to render, or it measures the old canvas. */
-  useEffect(() => {
-    if (!isAwaitingImportedNodes.current || nodes.length === 0) {
-      return;
-    }
-
-    isAwaitingImportedNodes.current = false;
-    void fitView({ duration: VIEWPORT_TRANSITION_MS });
-  }, [fitView, nodes]);
-
   const autosave = useCanvasAutosave(diagramId, payload, initial.version, setSaveStatus);
 
   useEffect(() => {
@@ -431,9 +400,32 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
     return () => registerSyncNow(null);
   }, [registerSyncNow, syncNow]);
 
+  /** Every way of adding a note lands here: a yellow 200×200 note, selected and in its editor. */
+  const addNote = useCallback(
+    (center: XYPosition) => {
+      if (replaying.current) return;
+      history.checkpoint({ force: true });
+      const note: CanvasNode = { ...createNoteNode(center), selected: true };
+      markNoteForEditing(note.id);
+      commitSnapshot({
+        ...latest.current,
+        nodes: [...latest.current.nodes.map((node) => (node.selected ? { ...node, selected: false } : node)), note],
+      });
+    },
+    [history, commitSnapshot],
+  );
+
+  const addNoteAtCenter = useCallback(() => {
+    const bounds = wrapperRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    addNote(screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }));
+  }, [addNote, screenToFlowPosition]);
+
+  useAddNoteShortcut(addNoteAtCenter);
+
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const { types } = event.dataTransfer;
-    if (!types.includes(SHAPE_DRAG_MIME) && !types.includes(AWS_DRAG_MIME)) {
+    if (!types.includes(SHAPE_DRAG_MIME) && !types.includes(AWS_DRAG_MIME) && !types.includes(NOTE_DRAG_MIME)) {
       return;
     }
 
@@ -444,6 +436,12 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
 
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
+      if (event.dataTransfer.types.includes(NOTE_DRAG_MIME)) {
+        event.preventDefault();
+        addNote(screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+        return;
+      }
+
       const aws = parseAwsDragPayload(event.dataTransfer.getData(AWS_DRAG_MIME));
 
       if (aws) {
@@ -466,7 +464,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
         screenToFlowPosition({ x: event.clientX, y: event.clientY }),
       );
     },
-    [addAwsEntry, addNode, screenToFlowPosition],
+    [addAwsEntry, addNode, addNote, screenToFlowPosition],
   );
 
   /** Keyboard/click path: drop the shape into the middle of what is on screen. */
@@ -517,6 +515,7 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
     >
       <BoundaryResizeContext.Provider value={boundaryResize}>
       <CanvasEdgeRouteProvider nodes={nodes} edges={edges}>
+        <NoteContextMenu onAdd={(point) => addNote(screenToFlowPosition(point))}>
         <ReactFlow<CanvasNode, CanvasEdge>
           nodes={nodes}
           edges={edges}
@@ -561,25 +560,20 @@ function CanvasFlow({ diagramId, initial, isTemplatesOpen, onTemplatesOpenChange
           />
           <MiniMap pannable zoomable />
           <Panel position="bottom-center">
-            <div className="flex items-center gap-2">
-              <ShapePanel onAddShape={handleAddShape} />
-              <AwsPanel open={isAwsOpen} onOpenChange={setIsAwsOpen} onAddEntry={handleAddAws} />
+            <div className="flex items-end gap-2">
+              <SectionDock onAddShape={handleAddShape} onAddAws={handleAddAws} />
+              <NoteButton onAdd={addNoteAtCenter} />
             </div>
           </Panel>
           <Panel position="bottom-left">
             <CanvasControls history={history} />
           </Panel>
         </ReactFlow>
+        </NoteContextMenu>
       </CanvasEdgeRouteProvider>
       </BoundaryResizeContext.Provider>
 
       <LiveCursors />
-
-      <StarterTemplatesModal
-        open={isTemplatesOpen && !isReplaying}
-        onOpenChange={onTemplatesOpenChange}
-        onImport={handleImportTemplate}
-      />
     </div>
   );
 }

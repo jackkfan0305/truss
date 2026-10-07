@@ -17,7 +17,7 @@
     /*
      * Named `page`, not `base`: a `--color-base` entry would register `base` as
      * a color and make Tailwind's built-in `text-base` paint text
-     * `--bg-base` (#080809) on top of setting the font size. Four generated
+     * `--bg-base` (#07080a) on top of setting the font size. Four generated
      * components in components/ui (input, textarea, card, dialog) use
      * `text-base`, so the collision turned their text near-black.
      */
@@ -96,30 +96,38 @@
     /* Sidebar widths; SidebarResizeHandle overrides them on <html>. */
     --diagrams-sidebar-w: 18rem;
     --assistant-sidebar-w: 26rem;
-    --bg-base: #080809;
-    --bg-surface: #111114;
-    --bg-elevated: #18181c;
-    --bg-subtle: #1e1e23;
+    /*
+     * One graphite ramp: OKLCH hue 264 at chroma 0.004, so it reads as neutral
+     * with the faintest cool cast. Lightness: base 0.135, surface 0.175,
+     * elevated 0.21, subtle 0.245, borders 0.29 / 0.36, text 0.47 / 0.65 /
+     * 0.83 / 0.965. Regenerate rather than nudging a single hex.
+     */
+    --bg-base: #07080a;
+    --bg-surface: #101012;
+    --bg-elevated: #17181a;
+    --bg-subtle: #1f2022;
 
-    --border-default: #2a2a30;
-    --border-subtle: #3a3a42;
+    --border-default: #2a2b2d;
+    --border-subtle: #3c3d3f;
 
-    --text-primary: #f0f0f4;
-    --text-secondary: #c0c0cc;
-    --text-muted: #808090;
-    --text-faint: #505060;
+    --text-primary: #f2f3f6;
+    --text-secondary: #c6c7ca;
+    --text-muted: #8e8f92;
+    --text-faint: #5a5b5d;
 
-    --accent-primary: #00c8d4;
-    --accent-primary-dim: rgba(0, 200, 212, 0.12);
-    --accent-ai: #6457f9;
-    --accent-ai-text: #8b82ff;
+    /* The one accent. AI states use it too, carried by icons and words. */
+    /* Electric lime, oklch(0.88 0.2 128). Text on it uses --bg-base. */
+    --accent-primary: #b1ef4a;
+    --accent-primary-dim: rgba(177, 239, 74, 0.12);
+    --accent-ai: var(--accent-primary);
+    --accent-ai-text: var(--accent-primary);
 
     --state-error: #ff4d4f;
     --state-success: #34d399;
     --state-warning: #fbbf24;
 
     /* Canvas edge stroke and arrowhead (context/ui-context.md). */
-    --canvas-edge: #f8fafc;
+    --canvas-edge: var(--text-primary);
 
     /*
      * React Flow's own handle theming hooks, so the connection dots take the
@@ -294,6 +302,31 @@
  * React Flow owns that element's `transform` for positioning, and animating it
  * there would drag the node across the canvas as it appeared.
  */
+/* Bottom dock tiles: each blurs in, staggered by an inline animation-delay. */
+.dock-tile {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(6px);
+    animation: dock-tile-in 450ms var(--ease-smooth-out) forwards;
+}
+
+@keyframes dock-tile-in {
+    to {
+        opacity: 1;
+        filter: blur(0);
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dock-tile {
+        animation: none;
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+}
+
 @keyframes canvas-node-arrive {
     from {
         opacity: 0;

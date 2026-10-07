@@ -232,6 +232,24 @@ No backoff loop, no page-side state machine beyond "waiting."
   422 `invalidGeometry` with item IDs and nothing saved. Catalog metadata for
   both agents comes from the public `GET /api/agent/catalog`.
 
+- Code diagrams: the v2 graph has a fifth node kind, `code` (catalog ids
+  `code-entry`, `code-function`, `code-method`, `code-type`, `code-enum`),
+  with optional `signature` (one line, 120 characters), `rows` (12 rows of 60
+  characters) and `source` (`path`, `line`, `url` that starts with
+  `https://github.com/`). `code-class` and `code-module` are boundaries, and a
+  `code-method` must sit inside a `code-class`. A v2 edge may carry
+  `kind: "calls" | "uses"`. Version 2 limits are 80 nodes and 120 edges;
+  version 1 keeps 40 and 60. The new fields travel through the schema,
+  `materializeAgentGraph`, `parseCanvasSnapshot`, `canvasToAgentGraph`,
+  `canvasFingerprint` and `diffAgentGraph`, so no new endpoint exists. The
+  snapshot parser re-checks the URL prefix and cuts oversize fields, and a
+  method outside a class projects as opaque so a read graph is always a valid
+  edit. The catalog read returns both catalogs (`lib/catalog.ts`), each entry
+  tagged `family: "aws" | "code"`; the tools are `truss_get_catalog` (MCP) and
+  `get_catalog` (browser). Truss never receives, parses or stores source code,
+  only the finished graph. Code diagrams come from the terminal agent; the
+  browser assistant reads and edits them but does not generate them.
+
 ### Applying the edit
 
 - `POST /api/diagrams/:id/agent-graph-edit` writes to the stored canvas

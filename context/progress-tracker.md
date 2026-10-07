@@ -1980,3 +1980,15 @@ result is observed.
   missing generated Prisma client errors remain) and eslint on touched files
   pass. Not run: `npm test` as a whole, build, `verify:integration`, and the
   plan's browser checks (no signed-in session).
+
+## Code diagrams
+
+Shipped on the `code-diagrams` branch. The terminal agent can draw a codebase as entry points, functions, classes with methods, and types, joined in call order.
+
+- `lib/code-catalog.ts` holds the seven code entries and `isGithubSourceUrl`. `lib/catalog.ts` combines it with `AWS_CATALOG`. `GET /api/agent/catalog` returns both, tagged by `family`. `truss_get_catalog` (MCP) and `get_catalog` (browser) replace the AWS-only tools.
+- The v2 graph gained the `code` node kind, `signature`, `rows`, `source` and edge `kind`. Version 2 limits are 80 nodes and 120 edges. Fields round-trip through snapshot parse, projection, fingerprint and diff. A method outside a class reads as opaque.
+- Canvas: `CodeBlockRenderer`, the code boundary look, dashed `uses` edges, and a Code tab in the dock (`code-panel.tsx`, `buildCatalogNode` in `lib/canvas-drag.ts`).
+- Skill: `references/code-diagrams.md` covers zoom level, reading depth, source links and limits. The browser assistant names the skill instead of generating code diagrams.
+- Tests: `verify-catalog.ts`, `verify-section-dock.tsx` (renamed from the AWS-only scripts), plus code cases in the v2, rendering, layout, assistant and skill verifiers. An 80-node detail layout takes about 50ms.
+- Deferred: hand editing of signature, rows and source; re-sync when the code changes; non-GitHub hosts.
+- Not run in this session: the live check with the MCP server and browser.

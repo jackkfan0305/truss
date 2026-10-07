@@ -112,6 +112,10 @@ Smooth-step path with an arrow marker. Default edge color: `--canvas-edge`, whic
 
 AWS service blocks are a rectangular elevated surface with the local catalog icon in its official colours above an editable name. They get no colour toolbar, since icon colours are fixed. Boundaries are a dashed `copy-muted` outline with a transparent interior; the icon and title sit in a patch of the page background (`bg-page`) straddling the top edge. Both use the standard four connection handles. A failed icon load shows the catalog name as text. Workspace controls (the bottom dock's AWS section) keep the monochrome palette styling.
 
+### Code Blocks and Boundaries
+
+A code block is an elevated rectangle with the catalog icon and an editable name, then the signature (or the field rows of a type or enum) in monospace `text-xs`, then a muted `path:line` line at the bottom. With a pinned GitHub URL the source line is a link that opens a new tab; without one it is a button that copies `path:line` and shows "Copied" for 1.5 seconds. An entry point has a lime left border and a `data-code-entry` marker. A code boundary (`code-class`, `code-module`) is a thin solid outline with a monospace header strip holding the icon and title, instead of the dashed AWS look. A `uses` edge is dashed (`6 4`); `calls` and unkinded edges stay solid. The dock's Code tab lists the seven code catalog entries with search and no category chips. The tab places blocks by click or drag; signature, rows and source are written only by the terminal agent.
+
 ### Sticky Notes
 
 Notes are light paper on the dark canvas with dark ink: yellow (default), pink, blue or green (`NOTE_COLORS`). A 4px radius, a soft shadow and a folded top-right corner set them apart from diagram blocks. A new note is 200×200 and resizes down to 120×80; text past the edge scrolls inside the note. Double-click edits; Escape or clicking away commits, and Enter adds a line. Selected, a note shows the colour toolbar and resize handles. It has no connection handles.

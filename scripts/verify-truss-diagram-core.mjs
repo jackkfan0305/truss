@@ -1080,7 +1080,8 @@ rejectsGraph(codeNodeAt(0, { signature: "x".repeat(121) }), "long signature");
 rejectsGraph(codeNodeAt(3, { rows: Array.from({ length: 13 }, () => "r") }), "too many rows");
 rejectsGraph(codeNodeAt(3, { rows: ["padded "] }), "padded row");
 {
-  const { parentId: _parentId, ...looseMethod } = CODE_GRAPH.nodes[2];
+  const looseMethod = { ...CODE_GRAPH.nodes[2] };
+  delete looseMethod.parentId;
   rejectsGraph({ ...CODE_GRAPH, nodes: CODE_GRAPH.nodes.map((n, j) => (j === 2 ? looseMethod : n)) }, "method at root");
 }
 rejectsGraph({ ...CODE_GRAPH, nodes: [...CODE_GRAPH.nodes, { id: "g", kind: "generic", label: "G", shape: "circle", color: "blue", signature: "x" }] }, "signature on generic");

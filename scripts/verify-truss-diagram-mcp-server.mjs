@@ -86,7 +86,7 @@ const graph = {
 };
 const fingerprint = "a".repeat(64);
 
-const catalog = { catalogVersion: 1, entries: [{ id: "aws-lambda", name: "AWS Lambda", kind: "service" }] };
+const catalog = { catalogVersion: 1, entries: [{ id: "aws-lambda", family: "aws", name: "AWS Lambda", kind: "service" }, { id: "code-entry", family: "code", name: "Entry point", kind: "block" }] };
 const nestedGraph = {
   version: 2,
   nodes: [
@@ -182,7 +182,7 @@ try {
       "truss_apply_diagram_edit",
       "truss_create_diagram",
       "truss_delete_diagram",
-      "truss_get_aws_catalog",
+      "truss_get_catalog",
       "truss_get_diagram",
       "truss_list_diagrams",
       "truss_login",
@@ -219,7 +219,7 @@ try {
   assert.equal(editResult.structuredContent.editorUrl, `${stub.origin}/editor/p1`);
 
   // Nested v2: catalog, read, create, edit and error surfaces over the real transport.
-  const catalogResult = await client.callTool({ name: "truss_get_aws_catalog", arguments: {} });
+  const catalogResult = await client.callTool({ name: "truss_get_catalog", arguments: {} });
   assert.deepEqual(catalogResult.structuredContent, catalog);
 
   const v2Read = await client.callTool({ name: "truss_get_diagram", arguments: { diagramId: "p1" } });
@@ -247,6 +247,34 @@ try {
   assert.equal(nestedEdit.structuredContent.fingerprint, freshFingerprint);
   assert.deepEqual(posts[1].body, { fingerprint, graph: nestedGraph });
   assert.equal(posts[1].pathname, "/api/diagrams/p1/agent-graph-edit");
+
+  // Code diagrams: the request body carries signature, rows, source and edge kind unchanged.
+  const codeGraph = {
+    version: 2,
+    nodes: [
+      { id: "main", kind: "code", catalogId: "code-entry", label: "main", signature: "main()", source: { path: "src/main.ts", line: 1, url: "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
+      { id: "svc", kind: "boundary", catalogId: "code-class", label: "Service" },
+      { id: "run", kind: "code", catalogId: "code-method", label: "run", parentId: "svc" },
+      { id: "cfg", kind: "code", catalogId: "code-type", label: "Config", rows: ["port: number"] },
+    ],
+    edges: [
+      { id: "e1", source: "main", target: "run", label: "", kind: "calls" },
+      { id: "e2", source: "run", target: "cfg", label: "", kind: "uses" },
+    ],
+  };
+  scripted.push({ status: 200, body: { imported: true, ...committed, graph: codeGraph } });
+  const codeCreated = await client.callTool({ name: "truss_create_diagram", arguments: { title: "Code", graph: codeGraph } });
+  assert.equal(codeCreated.isError, undefined, codeCreated.content[0].text);
+  assert.deepEqual(posts.at(-1).body.graph, codeGraph, "the code create body is exactly the input graph");
+  scripted.push({ status: 200, body: committed });
+  const codeEdit = await client.callTool({ name: "truss_apply_diagram_edit", arguments: { diagramId: "p1", fingerprint, desiredGraph: codeGraph } });
+  assert.equal(codeEdit.isError, undefined, codeEdit.content[0].text);
+  assert.deepEqual(posts.at(-1).body.graph, codeGraph);
+  const badSource = await client.callTool({
+    name: "truss_create_diagram",
+    arguments: { title: "Code", graph: { ...codeGraph, nodes: [{ ...codeGraph.nodes[0], source: { path: "a.ts", url: "javascript:x" } }, ...codeGraph.nodes.slice(1)] } },
+  });
+  assert.equal(badSource.isError, true);
 
   // A recoverable geometry refusal keeps the server code and the actionable item IDs.
   scripted.push({

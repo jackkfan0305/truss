@@ -263,7 +263,7 @@ type Spatial = { nodes: { id: string; bounds: { x: number; y: number; width: num
 
     // The catalog is public and identical from both clients.
     const browserCatalog = await browser.getAwsCatalog();
-    assert.deepEqual(await terminal.getAwsCatalog(origin), browserCatalog);
+    assert.deepEqual(await terminal.getCatalog(origin), browserCatalog);
   } finally {
     process.env.HOME = previousHome;
     rmSync(home, { recursive: true, force: true });

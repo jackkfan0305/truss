@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
   applyDiagramEdit,
   createDiagram,
-  getAwsCatalog,
+  getCatalog,
   getDiagram,
   listDiagrams,
   login,
@@ -16,7 +16,7 @@ import {
 // Shapes the tool-call arguments for the calling model and rejects unknown
 // keys at the transport. The wire-level authority is `validateGraph` inside
 // core.mjs, which checks the exact contract with a specific reason. Catalog IDs
-// are not enumerated here: truss_get_aws_catalog is the one source.
+// are not enumerated here: truss_get_catalog is the one source.
 const shapeShape = z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]);
 const colorShape = z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]);
 const NOTE_GUIDELINE =
@@ -33,9 +33,13 @@ const nodeShapeV1 = z.strictObject({
 
 const nodeShapeV2 = z.strictObject({
   id: z.string(),
-  kind: z.enum(["generic", "aws-service", "boundary", "note"]),
+  kind: z.enum(["generic", "aws-service", "boundary", "note", "code"]),
   label: z.string().describe("Short label, at most 80 characters. A note's text may run to 1000 characters."),
-  catalogId: z.string().optional().describe("Required for aws-service and boundary nodes, taken from truss_get_aws_catalog. Never send it for generic nodes."),
+  catalogId: z.string().optional().describe("Required for aws-service, boundary and code nodes, taken from truss_get_catalog. Never send it for generic nodes."),
+  signature: z.string().optional().describe("Code nodes only. One line, at most 120 characters, e.g. reserve(sku, qty)."),
+  rows: z.array(z.string()).optional().describe("Code type or enum nodes only. At most 12 rows of at most 60 characters: fields like items: OrderItem[] or enum values."),
+  source: z.strictObject({ path: z.string(), line: z.number().int().optional(), url: z.string().optional() }).optional()
+    .describe("Code nodes only. Repository-relative path, optional 1-based line, optional https://github.com/ URL pinned to a commit."),
   shape: shapeShape.optional().describe("Generic nodes only."),
   color: z.enum([...colorShape.options, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
   parentId: z.string().optional().describe("The boundary that visually holds this node. Never on a note."),
@@ -45,16 +49,19 @@ const nodeShapeV2 = z.strictObject({
   height: z.number().optional().describe("Supply only together with width."),
 });
 
-const edgeShape = z.strictObject({
+const edgeShapeV1 = z.strictObject({
   id: z.string(),
   source: z.string(),
   target: z.string(),
   label: z.string(),
 });
+const edgeShapeV2 = edgeShapeV1.extend({
+  kind: z.enum(["calls", "uses"]).optional().describe("Code diagrams: calls (default, solid) or uses (dashed, a reference to a type)."),
+});
 
 const graphShape = z.union([
-  z.strictObject({ version: z.literal(1), nodes: z.array(nodeShapeV1), edges: z.array(edgeShape) }),
-  z.strictObject({ version: z.literal(2), nodes: z.array(nodeShapeV2), edges: z.array(edgeShape) }),
+  z.strictObject({ version: z.literal(1), nodes: z.array(nodeShapeV1), edges: z.array(edgeShapeV1) }),
+  z.strictObject({ version: z.literal(2), nodes: z.array(nodeShapeV2), edges: z.array(edgeShapeV2) }),
 ]);
 
 const baseUrlShape = z
@@ -93,14 +100,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "truss_get_aws_catalog",
+  "truss_get_catalog",
   {
-    title: "Read the AWS service and boundary catalog",
+    title: "Read the block catalog",
     description:
-      "Returns every AWS service and boundary the canvas supports: id, name, description, aliases, category and kind. Use the ids as `catalogId` in version 2 graphs and the descriptions to choose between similar services. Public metadata: needs no sign-in and opens no browser tab.",
+      "Returns every catalog block Truss supports, tagged family aws or code: id, name, description, aliases, kind, and for AWS the category. Use the ids as `catalogId` in version 2 graphs and the descriptions to choose between similar blocks. Public metadata: needs no sign-in and opens no browser tab.",
     inputSchema: { baseUrl: baseUrlShape },
   },
-  async ({ baseUrl }) => textResult(await getAwsCatalog(baseUrl)),
+  async ({ baseUrl }) => textResult(await getCatalog(baseUrl)),
 );
 
 server.registerTool(
@@ -139,7 +146,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use graph version 2 with catalog ids from truss_get_aws_catalog for AWS services and nested boundaries. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels. " + NOTE_GUIDELINE,
+      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use graph version 2 with catalog ids from truss_get_catalog for AWS services and nested boundaries. For code diagrams, follow references/code-diagrams.md in the truss-diagram skill. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels. " + NOTE_GUIDELINE,
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),

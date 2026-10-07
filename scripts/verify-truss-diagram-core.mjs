@@ -57,7 +57,7 @@ const {
   buildRoomId,
   createDiagram,
   deleteDiagram,
-  getAwsCatalog,
+  getCatalog,
   getDiagram,
   listDiagrams,
   login,
@@ -1053,11 +1053,39 @@ for (const forged of [{ iconUrl: "https://x/y.svg" }, { svg: "<svg/>" }, { shape
 rejectsGraph({ ...V2_GRAPH, nodes: [{ ...V2_GRAPH.nodes[1], catalogId: "boundary-vpc" }] }, "wrong catalog prefix");
 rejectsGraph({ ...V2_GRAPH, nodes: [{ id: "g", kind: "generic", label: "G", shape: "circle", color: "blue", catalogId: "aws-ec2" }] }, "generic with catalog");
 rejectsGraph({ ...V2_GRAPH, unknown: true }, "unknown graph key");
-rejectsGraph({
+const boundaries = (count) => Array.from({ length: count }, (_, index) => ({ id: `b${index}`, kind: "boundary", catalogId: "boundary-vpc", label: "B" }));
+assert.equal(validateGraph({ version: 2, nodes: boundaries(80), edges: [] }).nodes.length, 80, "80 v2 nodes pass");
+rejectsGraph({ version: 2, nodes: boundaries(81), edges: [] }, "81 nodes including boundaries");
+
+const CODE_GRAPH = {
   version: 2,
-  nodes: Array.from({ length: 41 }, (_, index) => ({ id: `b${index}`, kind: "boundary", catalogId: "boundary-vpc", label: "B" })),
-  edges: [],
-}, "41 nodes including boundaries");
+  nodes: [
+    { id: "main", kind: "code", catalogId: "code-entry", label: "main", signature: "main()", source: { path: "src/main.ts", line: 1, url: "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
+    { id: "svc", kind: "boundary", catalogId: "code-class", label: "Service" },
+    { id: "run", kind: "code", catalogId: "code-method", label: "run", parentId: "svc" },
+    { id: "cfg", kind: "code", catalogId: "code-type", label: "Config", rows: ["port: number"] },
+  ],
+  edges: [
+    { id: "e1", source: "main", target: "run", label: "", kind: "calls" },
+    { id: "e2", source: "run", target: "cfg", label: "", kind: "uses" },
+  ],
+};
+assert.deepEqual(validateGraph(CODE_GRAPH), CODE_GRAPH, "code graph passes unchanged");
+const codeNodeAt = (i, patch) => ({ ...CODE_GRAPH, nodes: CODE_GRAPH.nodes.map((n, j) => (j === i ? { ...n, ...patch } : n)) });
+rejectsGraph(codeNodeAt(0, { catalogId: "aws-lambda" }), "code node with an AWS id");
+rejectsGraph(codeNodeAt(0, { source: { path: "a.ts", url: "http://github.com/o" } }), "non-GitHub URL");
+rejectsGraph(codeNodeAt(0, { source: { path: "a.ts", line: 0 } }), "line zero");
+rejectsGraph(codeNodeAt(0, { signature: "a\nb" }), "multi-line signature");
+rejectsGraph(codeNodeAt(0, { signature: "x".repeat(121) }), "long signature");
+rejectsGraph(codeNodeAt(3, { rows: Array.from({ length: 13 }, () => "r") }), "too many rows");
+rejectsGraph(codeNodeAt(3, { rows: ["padded "] }), "padded row");
+{
+  const { parentId: _parentId, ...looseMethod } = CODE_GRAPH.nodes[2];
+  rejectsGraph({ ...CODE_GRAPH, nodes: CODE_GRAPH.nodes.map((n, j) => (j === 2 ? looseMethod : n)) }, "method at root");
+}
+rejectsGraph({ ...CODE_GRAPH, nodes: [...CODE_GRAPH.nodes, { id: "g", kind: "generic", label: "G", shape: "circle", color: "blue", signature: "x" }] }, "signature on generic");
+rejectsGraph({ ...CODE_GRAPH, edges: [{ ...CODE_GRAPH.edges[0], kind: "imports" }] }, "unknown edge kind");
+rejectsGraph({ version: 1, nodes: [{ id: "a", label: "A", shape: "circle", color: "blue" }, { id: "b", label: "B", shape: "circle", color: "blue" }], edges: [{ id: "e", source: "a", target: "b", label: "", kind: "calls" }] }, "edge kind on v1");
 assert.throws(() => validateGraph({ ...GRAPH, version: 3 }), Error, "unknown version");
 
 {
@@ -1077,11 +1105,11 @@ await withHome(async () => {
     }
     return null;
   });
-  assert.deepEqual(await getAwsCatalog(stub.origin), catalog);
-  await assert.rejects(getAwsCatalog("http://127.0.0.1:1/path"), /origin/);
+  assert.deepEqual(await getCatalog(stub.origin), catalog);
+  await assert.rejects(getCatalog("http://127.0.0.1:1/path"), /origin/);
   await stub.close();
   const broken = await createStubServerDynamic(() => ({ status: 200, body: { nope: true } }));
-  await assert.rejects(getAwsCatalog(broken.origin), /AWS catalog/);
+  await assert.rejects(getCatalog(broken.origin), /catalog/);
   await broken.close();
 });
 
@@ -1167,7 +1195,7 @@ const schemaMarkdown = await readFile(join(SKILL_DIR, "references", "graph-schem
 for (const [, id] of schemaMarkdown.matchAll(/"catalogId": "([^"]+)"/g)) {
   assert.ok(catalogIds.has(id), `graph-schema.md example uses unknown catalog id ${id}`);
 }
-assert.match(skillMarkdown, /truss_get_aws_catalog/, "SKILL.md lists the catalog tool");
+assert.match(skillMarkdown, /truss_get_catalog/, "SKILL.md lists the catalog tool");
 assert.match(schemaMarkdown, /parent \(the canvas for root nodes\)/, "schema doc explains parent-relative coordinates");
 for (const file of ["core.mjs", "mcp-server.mjs"]) {
   const source = await readFile(join(SKILL_DIR, "scripts", file), "utf8");

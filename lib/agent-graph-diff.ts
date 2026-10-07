@@ -20,8 +20,8 @@ export interface AgentGraphDiff {
 }
 
 function v2Fields(node: GraphNode) {
-  const { kind, catalogId, parentId, width, height } = node as Record<string, unknown>;
-  return [kind, catalogId, parentId, width, height];
+  const { kind, catalogId, parentId, width, height, signature, rows, source } = node as Record<string, unknown>;
+  return [kind, catalogId, parentId, width, height, signature, rows, source];
 }
 
 function nodesEqual(left: GraphNode, right: GraphNode): boolean {
@@ -39,7 +39,8 @@ function nodesEqual(left: GraphNode, right: GraphNode): boolean {
 }
 
 function edgesEqual(a: AgentGraphEdge, b: AgentGraphEdge): boolean {
-  return a.source === b.source && a.target === b.target && a.label === b.label;
+  const kindOf = (edge: AgentGraphEdge) => (edge as { kind?: string }).kind ?? "";
+  return a.source === b.source && a.target === b.target && a.label === b.label && kindOf(a) === kindOf(b);
 }
 
 /**

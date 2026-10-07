@@ -141,14 +141,21 @@ export const MIN_ZOOM = 0.05;
  * `Record<string, unknown>`, and only type aliases get the implicit index
  * signature that satisfies it.
  */
+export type CodeEdgeKind = "calls" | "uses";
+export interface CodeSource { path: string; line?: number; url?: string }
+
 export type CanvasNodeData = {
   label: string;
   color: NodeColor;
   shape: NodeShape;
-  kind?: "generic" | "aws-service" | "boundary" | "note";
+  kind?: "generic" | "aws-service" | "boundary" | "note" | "code";
   catalogId?: string;
   /** Notes only; the note's text lives in `label`. */
   noteColor?: NoteColor;
+  /** Code blocks only; written by the terminal agent, never by hand. */
+  signature?: string;
+  rows?: string[];
+  source?: CodeSource;
 };
 
 /** Same reason as `CanvasNodeData`: a `type` gets the index signature React
@@ -156,6 +163,8 @@ export type CanvasNodeData = {
 export type CanvasEdgeData = {
   label: string;
   layout?: DiagramEdgeLayout;
+  /** Code diagrams: `uses` renders dashed. Absent renders as a plain edge. */
+  kind?: CodeEdgeKind;
 };
 
 export const CANVAS_NODE_TYPE = "canvasNode";

@@ -4,6 +4,7 @@ import type { z } from "zod";
 
 import {
   agentGraphEdgeSchema,
+  agentGraphEdgeV2Schema,
   agentGraphEditSchema,
   agentGraphInputSchema,
   agentGraphNodeSchema,
@@ -26,11 +27,14 @@ import {
   NODE_DEFAULT_SIZES,
   NOTE_DEFAULT_SIZE,
   type CanvasNode,
+  type CodeEdgeKind,
+  type CodeSource,
   type NodeColor,
   type NodeShape,
   type NoteColor,
 } from "@/types/canvas";
 import { isNoteColor } from "@/lib/canvas-note";
+import { getCodeCatalogEntry } from "@/lib/code-catalog";
 
 export {
   agentGraphSchema,
@@ -91,10 +95,13 @@ export interface MaterializableNode {
   parentId?: string;
   kind?: CanvasNode["data"]["kind"];
   catalogId?: string;
+  signature?: string;
+  rows?: string[];
+  source?: CodeSource;
 }
 
 export function materializeAgentGraph(
-  graph: { version: number; nodes: MaterializableNode[]; edges: AgentGraphView["graph"]["edges"] },
+  graph: { version: number; nodes: MaterializableNode[]; edges: Array<AgentGraphEdge & { kind?: CodeEdgeKind }> },
 ): CanvasSnapshot {
   const isV2 = graph.version === 2;
 
@@ -141,8 +148,11 @@ export function materializeAgentGraph(
     // For V2, use provided dimensions; for V1, use shape defaults
     let width = node.width;
     let height = node.height;
+    const codeEntry = node.catalogId ? getCodeCatalogEntry(node.catalogId) : undefined;
     if (!width || !height) {
-      if (isBoundary) {
+      if (codeEntry) {
+        ({ width, height } = codeEntry.defaultSize);
+      } else if (isBoundary) {
         width = 400;
         height = 240;
       } else if (isV2) {
@@ -167,6 +177,9 @@ export function materializeAgentGraph(
         color: (node.color as NodeColor | undefined) || "neutral",
         ...(node.kind ? { kind: node.kind } : {}),
         ...(node.catalogId ? { catalogId: node.catalogId } : {}),
+        ...(node.signature ? { signature: node.signature } : {}),
+        ...(node.rows ? { rows: node.rows } : {}),
+        ...(node.source ? { source: node.source } : {}),
       },
       ...(isV2 && node.parentId ? { parentId: node.parentId } : {}),
     };
@@ -179,7 +192,7 @@ export function materializeAgentGraph(
       type: CANVAS_EDGE_TYPE,
       source: edge.source,
       target: edge.target,
-      data: { label: edge.label },
+      data: { label: edge.label, ...(edge.kind ? { kind: edge.kind } : {}) },
       style: { ...CANVAS_EDGE_STYLE },
       markerEnd: { ...CANVAS_EDGE_MARKER },
     })),
@@ -221,6 +234,8 @@ export function canonicalCanvasSnapshotsEqual(
         (node.parentId ?? "") === (other.parentId ?? "") &&
         (node.data.kind ?? "") === (other.data.kind ?? "") &&
         (node.data.catalogId ?? "") === (other.data.catalogId ?? "") &&
+        JSON.stringify([node.data.signature, node.data.rows, node.data.source]) ===
+          JSON.stringify([other.data.signature, other.data.rows, other.data.source]) &&
         (node.data.noteColor ?? "") === (other.data.noteColor ?? "")
       );
     }) &&
@@ -233,6 +248,7 @@ export function canonicalCanvasSnapshotsEqual(
         edge.source === other.source &&
         edge.target === other.target &&
         (edge.data?.label ?? "") === (other.data?.label ?? "") &&
+        (edge.data?.kind ?? "") === (other.data?.kind ?? "") &&
         (edge.sourceHandle ?? "") === (other.sourceHandle ?? "") &&
         (edge.targetHandle ?? "") === (other.targetHandle ?? "") &&
         edge.style?.stroke === other.style?.stroke &&
@@ -246,6 +262,7 @@ export function canonicalCanvasSnapshotsEqual(
 
 export type AgentGraphNode = AgentGraph["nodes"][number];
 export type AgentGraphEdge = AgentGraph["edges"][number];
+export type AgentGraphEdgeV2 = z.infer<typeof agentGraphEdgeV2Schema>;
 
 export type AgentGraphNodeV2 = z.infer<typeof agentGraphNodeV2Schema>;
 
@@ -257,7 +274,7 @@ export interface AgentGraphView {
 
 /** The version 2 projection: AWS identity, parent links, dimensions and fractional positions. */
 export interface AgentGraphViewV2 {
-  graph: { version: 2; nodes: AgentGraphNodeV2[]; edges: AgentGraphEdge[] };
+  graph: { version: 2; nodes: AgentGraphNodeV2[]; edges: AgentGraphEdgeV2[] };
   opaqueNodeIds: string[];
   opaqueEdgeIds: string[];
 }
@@ -283,6 +300,9 @@ function projectNodeV2(node: CanvasNode): unknown {
     ...(kind === "generic"
       ? { shape: node.data?.shape, color: node.data?.color }
       : { catalogId: node.data?.catalogId }),
+    ...(kind === "code" && node.data.signature ? { signature: node.data.signature } : {}),
+    ...(kind === "code" && node.data.rows ? { rows: node.data.rows } : {}),
+    ...(kind === "code" && node.data.source ? { source: node.data.source } : {}),
     ...(node.parentId ? { parentId: node.parentId } : {}),
     x: node.position?.x,
     y: node.position?.y,
@@ -356,7 +376,12 @@ export function canvasToAgentGraph(
       const readable = new Map(nodes.map((node) => [node.id, node]));
       for (const node of [...nodes]) {
         const parentId = (node as { parentId?: string }).parentId;
-        if (parentId !== undefined && (readable.get(parentId) as AgentGraphNodeV2 | undefined)?.kind !== "boundary") {
+        const parent = parentId === undefined ? undefined : (readable.get(parentId) as AgentGraphNodeV2 | undefined);
+        const orphanedParent = parentId !== undefined && parent?.kind !== "boundary";
+        // A method only validates inside a class, so a hand-dropped one stays opaque.
+        const looseMethod = (node as { kind?: string }).kind === "code" && (node as { catalogId?: string }).catalogId === "code-method" &&
+          (parent?.kind !== "boundary" || parent.catalogId !== "code-class");
+        if (orphanedParent || looseMethod) {
           nodes.splice(nodes.indexOf(node), 1);
           opaqueNodeIds.push(node.id);
           changed = true;
@@ -366,17 +391,18 @@ export function canvasToAgentGraph(
   }
 
   const representableNodeIds = new Set(nodes.map((node) => node.id));
-  const edges: AgentGraphEdge[] = [];
+  const edges: AgentGraphEdgeV2[] = [];
   const opaqueEdgeIds: string[] = [];
   const seenEdgeIds = new Set<string>();
   const seenPairs = new Set<string>();
 
   for (const edge of snapshot.edges) {
-    const parsed = agentGraphEdgeSchema.safeParse({
+    const parsed = (version === 2 ? agentGraphEdgeV2Schema : agentGraphEdgeSchema).safeParse({
       id: edge.id,
       source: edge.source,
       target: edge.target,
       label: edge.data?.label ?? "",
+      ...(version === 2 && edge.data?.kind ? { kind: edge.data.kind } : {}),
     });
     // NUL-joined, matching the schema's own pair key above: unambiguous by
     // construction rather than by relying on the ID pattern excluding spaces.
@@ -396,7 +422,7 @@ export function canvasToAgentGraph(
 
     seenEdgeIds.add(parsed.data.id);
     seenPairs.add(pair);
-    edges.push(parsed.data);
+    edges.push(parsed.data as AgentGraphEdgeV2);
   }
 
   return version === 2
@@ -429,6 +455,9 @@ export function canvasFingerprint(snapshot: CanvasSnapshot): string {
       node.data?.kind ?? "",
       node.data?.catalogId ?? "",
       node.data?.noteColor ?? "",
+      node.data?.signature ?? "",
+      node.data?.rows ?? [],
+      node.data?.source ?? null,
     ]);
   const edges = [...snapshot.edges]
     .sort((left, right) => left.id.localeCompare(right.id))
@@ -440,6 +469,7 @@ export function canvasFingerprint(snapshot: CanvasSnapshot): string {
       edge.data?.label ?? "",
       edge.sourceHandle ?? "",
       edge.targetHandle ?? "",
+      edge.data?.kind ?? "",
     ]);
 
   return createHash("sha256").update(JSON.stringify({ nodes, edges })).digest("hex");

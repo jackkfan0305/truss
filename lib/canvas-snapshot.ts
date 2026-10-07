@@ -29,10 +29,18 @@ import {
   NODE_SHAPES,
   type CanvasEdge,
   type CanvasNode,
+  type CodeSource,
   type NodeColor,
   type NodeShape,
 } from "@/types/canvas";
 import { isNoteColor } from "@/lib/canvas-note";
+import {
+  MAX_CODE_ROW_LENGTH,
+  MAX_CODE_ROWS,
+  MAX_CODE_SIGNATURE_LENGTH,
+  MAX_CODE_SOURCE_PATH_LENGTH,
+} from "@/lib/agent-graph-schema";
+import { isGithubSourceUrl } from "@/lib/code-catalog";
 
 export interface CanvasSnapshot {
   nodes: CanvasNode[];
@@ -63,6 +71,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Rejects `NaN` and `Infinity` as well as non-numbers — both break layout. */
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function parseSignature(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_SIGNATURE_LENGTH);
+  return line || undefined;
+}
+
+function parseRows(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const rows = value
+    .filter((row): row is string => typeof row === "string")
+    .map((row) => row.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_ROW_LENGTH))
+    .filter(Boolean)
+    .slice(0, MAX_CODE_ROWS);
+  return rows.length ? rows : undefined;
+}
+
+/** A stored URL is re-checked: data written before the rule, or by hand, must not become a link. */
+function parseSource(value: unknown): CodeSource | undefined {
+  if (!isRecord(value) || typeof value.path !== "string") return undefined;
+  const path = value.path.trim().slice(0, MAX_CODE_SOURCE_PATH_LENGTH);
+  if (!path) return undefined;
+  return {
+    path,
+    ...(Number.isInteger(value.line) && (value.line as number) > 0 ? { line: value.line as number } : {}),
+    ...(isGithubSourceUrl(value.url) && value.url.length <= 500 ? { url: value.url } : {}),
+  };
+}
+
+function codeFields(data: Record<string, unknown>) {
+  const signature = parseSignature(data.signature);
+  const rows = parseRows(data.rows);
+  const source = parseSource(data.source);
+  return { ...(signature ? { signature } : {}), ...(rows ? { rows } : {}), ...(source ? { source } : {}) };
 }
 
 function parseNode(value: unknown): CanvasNode | null {
@@ -111,9 +154,10 @@ function parseNode(value: unknown): CanvasNode | null {
       // the whole snapshot — one retired palette key must not cost the diagram.
       color: isNodeColor(color) ? color : DEFAULT_NODE_COLOR,
       shape: isNodeShape(shape) ? shape : DEFAULT_NODE_SHAPE,
-      ...(kind === "generic" || kind === "aws-service" || kind === "boundary" || kind === "note" ? { kind } : {}),
+      ...(kind === "generic" || kind === "aws-service" || kind === "boundary" || kind === "note" || kind === "code" ? { kind } : {}),
       ...(isNote ? { noteColor: isNoteColor(nodeData.noteColor) ? nodeData.noteColor : DEFAULT_NOTE_COLOR } : {}),
       ...(typeof catalogId === "string" && catalogId ? { catalogId } : {}),
+      ...(kind === "code" ? codeFields(nodeData) : {}),
     },
   };
 }
@@ -160,6 +204,7 @@ function parseEdge(value: unknown, nodeIds: ReadonlySet<string>): CanvasEdge | n
     data: {
       label: typeof edgeData.label === "string" ? edgeData.label : "",
       ...(layout ? { layout } : {}),
+      ...(edgeData.kind === "calls" || edgeData.kind === "uses" ? { kind: edgeData.kind } : {}),
     },
     // Reapplied from the constants rather than trusted from the blob: they are
     // the same for every edge, so storing them would only create a way for a

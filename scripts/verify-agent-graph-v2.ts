@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { canvasFingerprint, canvasToAgentGraph, materializeAgentGraph, canonicalCanvasSnapshotsEqual } from "../lib/agent-graph";
 import { agentGraphV2Schema, agentGraphV2EditSchema } from "../lib/agent-graph-schema";
+import { parseCanvasSnapshot, serializeCanvasSnapshot } from "../lib/canvas-snapshot";
+import { diffAgentGraph } from "../lib/agent-graph-diff";
+import { resolveAgentGraphLayout } from "../lib/agent-graph-layout";
 
 // Test basic v2 acceptance
 const graph = {
@@ -191,3 +194,65 @@ assert.ok(!agentGraphV2Schema.safeParse({ version: 2, nodes: many(81), edges: []
 assert.ok(agentGraphV2Schema.safeParse({ version: 2, nodes: many(80), edges: pairs(120) }).success);
 assert.ok(!agentGraphV2Schema.safeParse({ version: 2, nodes: many(80), edges: [...pairs(120), { id: "extra", source: "f0", target: "f3", label: "" }] }).success);
 console.log("verify-agent-graph-v2 code contract: ok");
+
+// Round trip: graph → canvas → blob → canvas → graph keeps every code field.
+const codeSnapshot = materializeAgentGraph(codeGraph as never);
+const stored = parseCanvasSnapshot(JSON.parse(serializeCanvasSnapshot(codeSnapshot)))!;
+const view = canvasToAgentGraph(stored, 2);
+assert.deepEqual(view.opaqueNodeIds, []);
+assert.deepEqual(view.opaqueEdgeIds, []);
+const byId = new Map(view.graph.nodes.map((n) => [n.id, n as Record<string, unknown>]));
+assert.equal(byId.get("checkout")!.signature, "checkout(req)");
+assert.deepEqual(byId.get("checkout")!.source, codeGraph.nodes[0].source);
+assert.deepEqual(byId.get("order")!.rows, ["id: string", "items: OrderItem[]"]);
+assert.equal(view.graph.edges.find((e) => e.id === "e2")!.kind, "uses");
+assert.equal("kind" in view.graph.edges.find((e) => e.id === "e3")!, false, "no kind stays no kind");
+assert.equal(stored.nodes.find((n) => n.id === "order")!.width, 220, "code catalog default size");
+assert.ok(agentGraphV2EditSchema.safeParse(view.graph).success, "a read graph is a valid edit");
+
+// Hostile stored data: bad URLs drop, oversize fields are cut, unknown edge kinds drop.
+const hostile = parseCanvasSnapshot({
+  nodes: [{ id: "x", position: { x: 0, y: 0 }, data: { kind: "code", catalogId: "code-function", label: "x",
+    signature: "s".repeat(500), rows: Array.from({ length: 40 }, () => "r".repeat(90)),
+    source: { path: "a.ts", line: -3, url: "javascript:alert(1)" } } },
+    { id: "y", position: { x: 0, y: 0 }, data: { kind: "code", catalogId: "code-function", label: "y", source: { url: "https://github.com.evil.com/a" } } }],
+  edges: [{ id: "xy", source: "x", target: "y", data: { label: "", kind: "imports" } }],
+})!;
+const hostileX = hostile.nodes.find((n) => n.id === "x")!.data;
+assert.equal(hostileX.source?.url, undefined);
+assert.equal(hostileX.source?.line, undefined);
+assert.equal(hostileX.signature?.length, 120);
+assert.equal(hostileX.rows?.length, 12);
+assert.ok(hostileX.rows!.every((row) => row.length <= 60));
+assert.equal(hostile.nodes.find((n) => n.id === "y")!.data.source, undefined, "source without a path drops");
+assert.equal(hostile.edges[0].data?.kind, undefined);
+
+// A hand-placed method outside a class is opaque, so read-then-edit still validates.
+const looseMethod = parseCanvasSnapshot({
+  nodes: [{ id: "m", position: { x: 0, y: 0 }, data: { kind: "code", catalogId: "code-method", label: "m" } }], edges: [],
+})!;
+const looseView = canvasToAgentGraph(looseMethod, 2);
+assert.deepEqual(looseView.opaqueNodeIds, ["m"]);
+assert.ok(agentGraphV2EditSchema.safeParse(looseView.graph).success);
+
+// Field-only changes reach the diff and the fingerprint.
+const changed = structuredClone(stored);
+changed.nodes.find((n) => n.id === "reserve")!.data.signature = "reserve(sku, qty, hold)";
+assert.notEqual(canvasFingerprint(changed), canvasFingerprint(stored));
+assert.equal(diffAgentGraph(view, canvasToAgentGraph(changed, 2).graph).updatedNodes.length, 1);
+assert.ok(!canonicalCanvasSnapshotsEqual(changed, stored));
+const rekinded = structuredClone(stored);
+rekinded.edges.find((e) => e.id === "e1")!.data!.kind = "uses";
+assert.notEqual(canvasFingerprint(rekinded), canvasFingerprint(stored));
+assert.equal(diffAgentGraph(view, canvasToAgentGraph(rekinded, 2).graph).updatedEdges.length, 1);
+console.log("verify-agent-graph-v2 code round trip: ok");
+
+void (async () => {
+  const laid = await resolveAgentGraphLayout(codeGraph as never);
+  const laidView = canvasToAgentGraph(laid, 2);
+  const unkinded = { ...laidView.graph, edges: laidView.graph.edges.map((e) => (e.id === "e2" ? { id: e.id, source: e.source, target: e.target, label: e.label } : e)) };
+  const relaid = await resolveAgentGraphLayout(unkinded as never, laid);
+  assert.equal(relaid.edges.find((e) => e.id === "e2")!.data?.kind, undefined, "an edit can clear an edge kind");
+  assert.equal(relaid.edges.find((e) => e.id === "e1")!.data?.kind, "calls");
+  console.log("verify-agent-graph-v2 edge kind clear: ok");
+})();

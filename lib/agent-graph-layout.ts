@@ -47,10 +47,10 @@ export async function resolveAgentGraphLayout(
     }),
     edges: materialized.edges.map((edge) => {
       const previous = existingEdges.get(edge.id);
-      return previous ? {
-        ...previous, source: edge.source, target: edge.target,
-        data: { ...previous.data, ...edge.data! },
-      } : edge;
+      if (!previous) return edge;
+      // The graph states an edge's kind, so a missing one clears the stored kind.
+      const { kind: _previousKind, ...previousData } = previous.data ?? { label: "" };
+      return { ...previous, source: edge.source, target: edge.target, data: { ...previousData, ...edge.data! } };
     }),
   };
   // Notes never enter ELK: lay out the diagram without them, then place them beside it.

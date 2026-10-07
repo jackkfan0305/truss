@@ -204,7 +204,7 @@ function codeLine(maximumLength: number) {
 }
 
 export const codeSourceSchema = z.strictObject({
-  path: canonicalTrimmedString(1, MAX_CODE_SOURCE_PATH_LENGTH),
+  path: codeLine(MAX_CODE_SOURCE_PATH_LENGTH),
   line: z.number().int().positive().optional(),
   url: z.string().max(500).refine(isGithubSourceUrl, { message: "Source URL must start with https://github.com/." }).optional(),
 });

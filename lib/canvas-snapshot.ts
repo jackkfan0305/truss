@@ -92,7 +92,7 @@ function parseRows(value: unknown): string[] | undefined {
 /** A stored URL is re-checked: data written before the rule, or by hand, must not become a link. */
 function parseSource(value: unknown): CodeSource | undefined {
   if (!isRecord(value) || typeof value.path !== "string") return undefined;
-  const path = value.path.trim().slice(0, MAX_CODE_SOURCE_PATH_LENGTH);
+  const path = value.path.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_SOURCE_PATH_LENGTH);
   if (!path) return undefined;
   return {
     path,

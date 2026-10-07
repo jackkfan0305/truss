@@ -1076,6 +1076,7 @@ rejectsGraph(codeNodeAt(0, { catalogId: "aws-lambda" }), "code node with an AWS 
 rejectsGraph(codeNodeAt(0, { source: { path: "a.ts", url: "http://github.com/o" } }), "non-GitHub URL");
 rejectsGraph(codeNodeAt(0, { source: { path: "a.ts", line: 0 } }), "line zero");
 rejectsGraph(codeNodeAt(0, { signature: "a\nb" }), "multi-line signature");
+rejectsGraph(codeNodeAt(0, { source: { path: "a\nb.ts" } }), "multi-line path");
 rejectsGraph(codeNodeAt(0, { signature: "x".repeat(121) }), "long signature");
 rejectsGraph(codeNodeAt(3, { rows: Array.from({ length: 13 }, () => "r") }), "too many rows");
 rejectsGraph(codeNodeAt(3, { rows: ["padded "] }), "padded row");

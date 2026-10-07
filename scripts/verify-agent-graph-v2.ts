@@ -159,6 +159,7 @@ assert.ok(issuePaths({ ...codeGraph, nodes: [...codeGraph.nodes, { id: "g", kind
 assert.ok(issuePaths(withNode(0, { source: { path: "a.ts", url: "javascript:alert(1)" } })).includes("nodes.0.source.url"));
 assert.ok(issuePaths(withNode(0, { source: { path: "a.ts", line: 0 } })).includes("nodes.0.source.line"));
 assert.ok(issuePaths(withNode(0, { source: { path: "x".repeat(201) } })).includes("nodes.0.source.path"));
+assert.ok(issuePaths(withNode(0, { source: { path: "a\nb.ts" } })).includes("nodes.0.source.path"), "multi-line path");
 assert.ok(issuePaths(withNode(0, { signature: "x".repeat(121) })).includes("nodes.0.signature"));
 assert.ok(issuePaths(withNode(0, { signature: "a(\nb)" })).includes("nodes.0.signature"), "multi-line signature");
 assert.ok(issuePaths(withNode(3, { rows: Array.from({ length: 13 }, (_, i) => `f${i}`) })).includes("nodes.3.rows"));

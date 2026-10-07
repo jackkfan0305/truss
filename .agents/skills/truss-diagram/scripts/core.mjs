@@ -123,7 +123,7 @@ function validateCodeFields(node) {
   if ("source" in node) {
     const source = node.source;
     if (!isPlainObject(source) || !hasOnlyKeys(source, new Set(["path", "line", "url"]))) return false;
-    if (!isTrimmedString(source.path, MAX_SOURCE_PATH_LENGTH)) return false;
+    if (!isSingleLine(source.path, MAX_SOURCE_PATH_LENGTH)) return false;
     if ("line" in source && !(Number.isInteger(source.line) && source.line > 0)) return false;
     if ("url" in source && !(typeof source.url === "string" && source.url.startsWith(GITHUB_PREFIX) && !/\s/.test(source.url))) return false;
   }

@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronLeft, Cloud, Shapes, type LucideIcon } from "lucide-react";
+import { ChevronLeft, Cloud, Code, Shapes, type LucideIcon } from "lucide-react";
 
 import { AwsPanel } from "@/components/canvas/aws-panel";
 import { AWS_CATEGORIES } from "@/lib/dock-ui";
+import { CodePanel } from "@/components/canvas/code-panel";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { AWS_CATALOG } from "@/lib/aws-catalog";
+import { CODE_CATALOG } from "@/lib/code-catalog";
 import { FLOATING_SURFACE } from "@/lib/floating-surface";
 import { cn } from "@/lib/utils";
 import { NODE_SHAPES, type NodeShape } from "@/types/canvas";
 
-type SectionId = "basic" | "aws";
+type SectionId = "basic" | "aws" | "code";
 
 interface Section {
   id: SectionId;
@@ -31,6 +33,7 @@ interface Section {
 const SECTIONS: readonly Section[] = [
   { id: "basic", name: "Basic", label: "Basic shapes", icon: Shapes, count: NODE_SHAPES.length, categories: [], width: 560, height: 240 },
   { id: "aws", name: "AWS", label: "AWS items", icon: Cloud, count: AWS_CATALOG.length, categories: AWS_CATEGORIES, width: 760, height: 340 },
+  { id: "code", name: "Code", label: "Code items", icon: Code, count: CODE_CATALOG.length, categories: [], width: 560, height: 280 },
 ];
 
 /** 46px of tabs plus the 1px border, to match the 48px note button and controls blob. */
@@ -44,6 +47,7 @@ const HIDDEN_LAYER_CLASS = "pointer-events-none scale-[0.96] opacity-0 blur-[14p
 interface SectionDockProps {
   onAddShape: (shape: NodeShape) => void;
   onAddAws: (catalogId: string) => void;
+  onAddCode: (catalogId: string) => void;
 }
 
 /**
@@ -52,7 +56,7 @@ interface SectionDockProps {
  * its tiles unblur one after another. Escape or the back button reverses it and
  * returns focus to the section's tab.
  */
-export function SectionDock({ onAddShape, onAddAws }: SectionDockProps) {
+export function SectionDock({ onAddShape, onAddAws, onAddCode }: SectionDockProps) {
   const [openId, setOpenId] = useState<SectionId | null>(null);
   // The last opened section stays rendered while the panel blurs out.
   const [shownId, setShownId] = useState<SectionId>("basic");
@@ -194,8 +198,10 @@ export function SectionDock({ onAddShape, onAddAws }: SectionDockProps) {
         <div key={openCount} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2.5">
           {shown.id === "basic" ? (
             <ShapePanel query={query} onAddShape={onAddShape} />
-          ) : (
+          ) : shown.id === "aws" ? (
             <AwsPanel query={query} category={category} onAddEntry={onAddAws} />
+          ) : (
+            <CodePanel query={query} onAddEntry={onAddCode} />
           )}
         </div>
       </div>

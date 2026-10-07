@@ -3,7 +3,17 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 
 import { AWS_CATALOG, searchAwsCatalog } from "../lib/aws-catalog";
-import { AWS_DRAG_MIME, buildAwsDragPayload, parseAwsDragPayload } from "../lib/canvas-drag";
+import {
+  AWS_DRAG_MIME,
+  CODE_DRAG_MIME,
+  buildAwsDragPayload,
+  buildCatalogNode,
+  buildCodeDragPayload,
+  parseAwsDragPayload,
+  parseCodeDragPayload,
+} from "../lib/canvas-drag";
+import { getCodeCatalogEntry } from "../lib/code-catalog";
+import { CANVAS_BOUNDARY_TYPE, CANVAS_NODE_TYPE } from "../types/canvas";
 
 assert.deepEqual(parseAwsDragPayload('{"catalogId":"aws-s3"}'), { catalogId: "aws-s3" });
 assert.deepEqual(parseAwsDragPayload(JSON.stringify(buildAwsDragPayload("aws-ec2"))), { catalogId: "aws-ec2" });
@@ -14,6 +24,26 @@ assert.equal(parseAwsDragPayload("{}"), null);
 assert.equal(parseAwsDragPayload("[]"), null);
 assert.equal(parseAwsDragPayload("{"), null);
 assert.equal(AWS_DRAG_MIME, "application/x-truss-aws");
+
+assert.deepEqual(parseCodeDragPayload(JSON.stringify(buildCodeDragPayload("code-type"))), { catalogId: "code-type" });
+assert.equal(parseCodeDragPayload('{"catalogId":"aws-s3"}'), null, "AWS ids are not code ids");
+assert.equal(parseCodeDragPayload('{"catalogId":"code-type","rows":["x"]}'), null);
+assert.equal(parseAwsDragPayload('{"catalogId":"code-type"}'), null, "code ids are not AWS ids");
+assert.equal(CODE_DRAG_MIME, "application/x-truss-code");
+
+// Dropped and clicked nodes come from the catalog alone.
+const typeNode = buildCatalogNode("code-type", { x: 500, y: 300 })!;
+assert.equal(typeNode.type, CANVAS_NODE_TYPE);
+assert.equal(typeNode.data.kind, "code");
+assert.equal(typeNode.data.catalogId, "code-type");
+assert.equal(typeNode.data.label, "Type");
+assert.equal(typeNode.width, getCodeCatalogEntry("code-type")!.defaultSize.width);
+assert.equal(typeNode.height, getCodeCatalogEntry("code-type")!.defaultSize.height);
+const classNode = buildCatalogNode("code-class", { x: 0, y: 0 })!;
+assert.equal(classNode.type, CANVAS_BOUNDARY_TYPE);
+assert.equal(classNode.data.kind, "boundary");
+assert.equal(buildCatalogNode("aws-s3", { x: 0, y: 0 })!.data.kind, "aws-service");
+assert.equal(buildCatalogNode("missing", { x: 0, y: 0 }), null);
 
 // Service and boundary VPC entries stay distinct.
 const vpcs = searchAwsCatalog("vpc");
@@ -44,6 +74,7 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 const added: string[] = [];
+const addedCode: string[] = [];
 
 
 function typeInto(input: HTMLInputElement, value: string) {
@@ -58,7 +89,7 @@ async function main() {
   const { SectionDock } = await import("../components/canvas/section-dock");
   const root = createRoot(document.getElementById("root")!);
   await act(async () =>
-    root.render(<SectionDock onAddShape={() => {}} onAddAws={(id) => added.push(id)} />),
+    root.render(<SectionDock onAddShape={() => {}} onAddAws={(id) => added.push(id)} onAddCode={(id) => addedCode.push(id)} />),
   );
   const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="AWS items"]')!;
   const region = () => document.querySelector<HTMLElement>('[role="region"]')!;
@@ -101,6 +132,33 @@ async function main() {
   });
   assert.ok(region().hasAttribute("inert"));
   assert.equal(document.activeElement, trigger);
+
+  // Code tab comes after AWS, shows seven entries, has no category chips.
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Item sections"] button')].map((b) => b.getAttribute("aria-label"));
+  assert.deepEqual(tabs, ["Basic shapes", "AWS items", "Code items"]);
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Code items"]')!.click());
+  const codePanel = document.querySelector("#code-panel")!;
+  assert.equal(codePanel.querySelectorAll("button").length, 7);
+  assert.equal(document.querySelector('[aria-label="Categories"]'), null);
+
+  // Click adds; tiles are drag sources carrying only the id.
+  const typeTile = [...codePanel.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("Type"))!;
+  assert.ok(typeTile.draggable);
+  await act(async () => typeTile.click());
+  assert.deepEqual(addedCode, ["code-type"]);
+  const { handleCodeDragStart } = await import("../components/canvas/code-panel");
+  const data = new Map<string, string>();
+  handleCodeDragStart(
+    { dataTransfer: { setData: (k: string, v: string) => data.set(k, v), effectAllowed: "" } } as never,
+    "code-type",
+  );
+  assert.deepEqual(JSON.parse(data.get(CODE_DRAG_MIME)!), { catalogId: "code-type" });
+
+  // Search by alias.
+  const codeSearch = document.querySelector<HTMLInputElement>('input[aria-label="Search Code items"]')!;
+  await act(async () => typeInto(codeSearch, "struct"));
+  assert.ok(document.querySelector("#code-panel")!.textContent?.includes("Type"));
+  assert.ok(!document.querySelector("#code-panel")!.textContent?.includes("Enum"));
 
   await act(async () => root.unmount());
   console.log("AWS picker checks passed");

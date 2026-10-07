@@ -54,12 +54,14 @@ import { isCanvasHistoryCommit } from "@/lib/canvas-history";
 import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { RemoteCanvas } from "@/lib/canvas-client";
 import { planCanvasEdits, playCanvasEdits } from "@/lib/canvas-replay";
-import { getAwsCatalogEntry } from "@/lib/aws-catalog";
 import {
   AWS_DRAG_MIME,
+  CODE_DRAG_MIME,
   NOTE_DRAG_MIME,
   SHAPE_DRAG_MIME,
+  buildCatalogNode,
   parseAwsDragPayload,
+  parseCodeDragPayload,
   createNodeId,
   parseShapeDragPayload,
   type ShapeDragPayload,
@@ -255,27 +257,11 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
     [history, commitSnapshot],
   );
 
-  const addAwsEntry = useCallback(
+  const addCatalogEntry = useCallback(
     (catalogId: string, center: XYPosition) => {
       // Size, kind and label come from the catalog, never from a drag payload.
-      const entry = getAwsCatalogEntry(catalogId);
-      if (!entry || replaying.current) return;
-      const node: CanvasNode = {
-        id: `aws-${crypto.randomUUID()}`,
-        type: entry.kind === "boundary" ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE,
-        position: {
-          x: center.x - entry.defaultSize.width / 2,
-          y: center.y - entry.defaultSize.height / 2,
-        },
-        ...entry.defaultSize,
-        data: {
-          kind: entry.kind === "boundary" ? "boundary" : "aws-service",
-          catalogId: entry.id,
-          label: entry.name,
-          color: DEFAULT_NODE_COLOR,
-          shape: "rectangle",
-        },
-      };
+      const node = buildCatalogNode(catalogId, center);
+      if (!node || replaying.current) return;
       history.checkpoint({ force: true });
       commitSnapshot(insertCanvasItem(latest.current, node));
     },
@@ -426,7 +412,7 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     const { types } = event.dataTransfer;
-    if (!types.includes(SHAPE_DRAG_MIME) && !types.includes(AWS_DRAG_MIME) && !types.includes(NOTE_DRAG_MIME)) {
+    if (!types.includes(SHAPE_DRAG_MIME) && !types.includes(AWS_DRAG_MIME) && !types.includes(CODE_DRAG_MIME) && !types.includes(NOTE_DRAG_MIME)) {
       return;
     }
 
@@ -447,7 +433,15 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
 
       if (aws) {
         event.preventDefault();
-        addAwsEntry(aws.catalogId, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+        addCatalogEntry(aws.catalogId, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+        return;
+      }
+
+      const code = parseCodeDragPayload(event.dataTransfer.getData(CODE_DRAG_MIME));
+
+      if (code) {
+        event.preventDefault();
+        addCatalogEntry(code.catalogId, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
         return;
       }
 
@@ -465,7 +459,7 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
         screenToFlowPosition({ x: event.clientX, y: event.clientY }),
       );
     },
-    [addAwsEntry, addNode, addNote, screenToFlowPosition],
+    [addCatalogEntry, addNode, addNote, screenToFlowPosition],
   );
 
   /** Keyboard/click path: drop the shape into the middle of what is on screen. */
@@ -491,16 +485,16 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
     [addNode, screenToFlowPosition],
   );
 
-  const handleAddAws = useCallback(
+  const handleAddCatalogEntry = useCallback(
     (catalogId: string) => {
       const bounds = wrapperRef.current?.getBoundingClientRect();
       if (!bounds) return;
-      addAwsEntry(
+      addCatalogEntry(
         catalogId,
         screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }),
       );
     },
-    [addAwsEntry, screenToFlowPosition],
+    [addCatalogEntry, screenToFlowPosition],
   );
 
   return (
@@ -562,7 +556,7 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
           <MiniMap pannable zoomable />
           <Panel position="bottom-center">
             <div className="flex items-end gap-2">
-              <SectionDock onAddShape={handleAddShape} onAddAws={handleAddAws} />
+              <SectionDock onAddShape={handleAddShape} onAddAws={handleAddCatalogEntry} onAddCode={handleAddCatalogEntry} />
               <NoteButton onAdd={addNoteAtCenter} />
             </div>
           </Panel>

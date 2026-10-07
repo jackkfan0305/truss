@@ -1,7 +1,14 @@
+import type { XYPosition } from "@xyflow/react";
+
 import { getAwsCatalogEntry } from "@/lib/aws-catalog";
+import { getCodeCatalogEntry } from "@/lib/code-catalog";
 import {
+  CANVAS_BOUNDARY_TYPE,
+  CANVAS_NODE_TYPE,
+  DEFAULT_NODE_COLOR,
   NODE_DEFAULT_SIZES,
   NODE_SHAPES,
+  type CanvasNode,
   type NodeShape,
   type NodeSize,
 } from "@/types/canvas";
@@ -86,8 +93,7 @@ export function buildAwsDragPayload(catalogId: string): AwsDragPayload {
   return { catalogId };
 }
 
-/** Untrusted like the shape payload; any extra field or unknown ID is rejected. */
-export function parseAwsDragPayload(raw: string): AwsDragPayload | null {
+function parseCatalogDragPayload(raw: string, isKnown: (id: string) => boolean): { catalogId: string } | null {
   let parsed: unknown;
 
   try {
@@ -100,14 +106,51 @@ export function parseAwsDragPayload(raw: string): AwsDragPayload | null {
     return null;
   }
 
-  const keys = Object.keys(parsed);
   const { catalogId } = parsed as Record<string, unknown>;
 
-  if (keys.length !== 1 || typeof catalogId !== "string" || !getAwsCatalogEntry(catalogId)) {
+  if (Object.keys(parsed).length !== 1 || typeof catalogId !== "string" || !isKnown(catalogId)) {
     return null;
   }
 
   return { catalogId };
+}
+
+/** Untrusted like the shape payload; any extra field or unknown ID is rejected. */
+export function parseAwsDragPayload(raw: string): AwsDragPayload | null {
+  return parseCatalogDragPayload(raw, (id) => getAwsCatalogEntry(id) !== undefined);
+}
+
+/** The code tab → canvas drag contract. Size, kind and label come from the code catalog on drop. */
+export const CODE_DRAG_MIME = "application/x-truss-code";
+
+export function buildCodeDragPayload(catalogId: string): { catalogId: string } {
+  return { catalogId };
+}
+
+export function parseCodeDragPayload(raw: string): { catalogId: string } | null {
+  return parseCatalogDragPayload(raw, (id) => getCodeCatalogEntry(id) !== undefined);
+}
+
+/** One node from a catalog entry, AWS or code. Everything but the id and position comes from the catalog. */
+export function buildCatalogNode(catalogId: string, center: XYPosition): CanvasNode | null {
+  const aws = getAwsCatalogEntry(catalogId);
+  const code = aws ? undefined : getCodeCatalogEntry(catalogId);
+  const entry = aws ?? code;
+  if (!entry) return null;
+  const isBoundary = entry.kind === "boundary";
+  return {
+    id: `${code ? "code" : "aws"}-${crypto.randomUUID()}`,
+    type: isBoundary ? CANVAS_BOUNDARY_TYPE : CANVAS_NODE_TYPE,
+    position: { x: center.x - entry.defaultSize.width / 2, y: center.y - entry.defaultSize.height / 2 },
+    ...entry.defaultSize,
+    data: {
+      kind: isBoundary ? "boundary" : code ? "code" : "aws-service",
+      catalogId: entry.id,
+      label: entry.name,
+      color: DEFAULT_NODE_COLOR,
+      shape: "rectangle",
+    },
+  };
 }
 
 /**

@@ -28,6 +28,7 @@ function chooseDeepestBoundary(
 ): CanvasNode | null {
   let deepest: CanvasNode | null = null;
   let deepestDepth = -1;
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
   for (const node of nodes) {
     if (excluded.has(node.id) || node.type !== CANVAS_BOUNDARY_TYPE) {
@@ -48,8 +49,7 @@ function chooseDeepestBoundary(
         let parentId = node.parentId;
         while (parentId) {
           depth++;
-          const parent = nodes.find((n) => n.id === parentId);
-          parentId = parent?.parentId;
+          parentId = nodeById.get(parentId)?.parentId;
         }
 
         if (depth > deepestDepth) {
@@ -93,31 +93,25 @@ function expandAffectedAncestors(nodes: readonly CanvasNode[], childId: string):
 
     // Check if any child needs more space
     let needsExpansion = false;
-    let maxX = current.position.x + (current.width ?? 400) - BOUNDARY_PADDING;
-    let maxY = current.position.y + (current.height ?? 240) - BOUNDARY_PADDING;
+    // Boundary-local space: children's positions are relative to `current`.
+    let maxX = (current.width ?? 400) - BOUNDARY_PADDING;
+    let maxY = (current.height ?? 240) - BOUNDARY_PADDING;
 
     for (const node of updated) {
       if (node.parentId === current.id) {
-        try {
-          const absoluteBounds = getAbsoluteBounds(node.id, updated);
-          const relativeRight = absoluteBounds.x - current.position.x + absoluteBounds.width;
-          const relativeBottom = absoluteBounds.y - current.position.y + absoluteBounds.height;
-
-          if (relativeRight > maxX || relativeBottom > maxY) {
-            maxX = Math.max(maxX, relativeRight);
-            maxY = Math.max(maxY, relativeBottom);
-            needsExpansion = true;
-          }
-        } catch {
-          // Skip invalid bounds
+        const right = node.position.x + (node.width ?? 180);
+        const bottom = node.position.y + (node.height ?? 100);
+        if (right > maxX || bottom > maxY) {
+          maxX = Math.max(maxX, right);
+          maxY = Math.max(maxY, bottom);
+          needsExpansion = true;
         }
       }
     }
 
     if (needsExpansion) {
-      // Update current with new size
-      const newWidth = maxX + BOUNDARY_PADDING - current.position.x;
-      const newHeight = maxY + BOUNDARY_PADDING - current.position.y;
+      const newWidth = maxX + BOUNDARY_PADDING;
+      const newHeight = maxY + BOUNDARY_PADDING;
 
       expandedCurrent = {
         ...current,

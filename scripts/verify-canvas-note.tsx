@@ -64,7 +64,8 @@ async function main() {
   const { useAddNoteShortcut } = await import("../hooks/use-keyboard-shortcuts");
   const { NoteButton } = await import("../components/canvas/note-button");
   const { NoteContextMenu } = await import("../components/canvas/note-context-menu");
-  const { CanvasNoteRenderer, markNoteForEditing } = await import("../components/canvas/canvas-note");
+  const { CanvasNoteRenderer } = await import("../components/canvas/canvas-note");
+  const { markNoteForEditing } = await import("../lib/canvas-note-edit");
   const root = createRoot(document.getElementById("root")!);
   const query = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T>(selector as never);
 

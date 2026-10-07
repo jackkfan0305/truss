@@ -3,6 +3,7 @@
 import { useCallback, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { NodeResizer, NodeToolbar, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 
+import { consumeNoteEdit } from "@/lib/canvas-note-edit";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_NOTE_COLOR,
@@ -20,21 +21,13 @@ const COLOR_KEYS = Object.keys(NOTE_COLORS) as NoteColor[];
 /** Clear of the note's selected outline and its top resize handle. */
 const TOOLBAR_OFFSET = 14;
 
-// ponytail: module-level, since "start editing" is one-shot UI state that is never saved.
-const pendingEdits = new Set<string>();
-
-/** The next mount of this note opens straight into its editor. */
-export function markNoteForEditing(id: string) {
-  pendingEdits.add(id);
-}
-
 /**
  * A sticky note: paper fill, dark ink, folded top-right corner. No handles, so
  * nothing can connect to it. Text scrolls inside the note (`nowheel`).
  */
 export function CanvasNoteRenderer({ id, data, selected }: NodeProps<CanvasNode>) {
   const { updateNodeData } = useReactFlow<CanvasNode, CanvasEdge>();
-  const [isEditing, setIsEditing] = useState(() => pendingEdits.delete(id));
+  const [isEditing, setIsEditing] = useState(() => consumeNoteEdit(id));
   const noteColor = data.noteColor ?? DEFAULT_NOTE_COLOR;
   const { fill, ink } = NOTE_COLORS[noteColor];
 

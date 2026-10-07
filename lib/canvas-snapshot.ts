@@ -1,3 +1,4 @@
+import { sortParentsBeforeChildren } from "@/lib/canvas-hierarchy";
 import { parseDiagramEdgeLayout } from "@/lib/diagram-route";
 
 /**
@@ -256,7 +257,21 @@ export function parseCanvasWrite(
   const version = parseCanvasVersion(body.version);
   const snapshot = parseCanvasSnapshot(body.canvas);
 
-  return version === null || !snapshot ? null : { version, snapshot };
+  if (version === null || !snapshot) return null;
+
+  // Old flat snapshots load tolerantly; a write must carry a sound hierarchy.
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const parentsOk = snapshot.nodes.every(
+    (n) => !n.parentId || byId.get(n.parentId)?.type === CANVAS_BOUNDARY_TYPE,
+  );
+  if (!parentsOk) return null;
+  try {
+    sortParentsBeforeChildren(snapshot.nodes);
+  } catch {
+    return null;
+  }
+
+  return { version, snapshot };
 }
 
 /**

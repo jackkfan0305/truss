@@ -107,3 +107,15 @@ console.log("✓ All v2 graph schema tests passed");
   assert.ok(!canonicalCanvasSnapshotsEqual(materialized, recoloured));
   console.log("verify-agent-graph-v2 notes: ok");
 }
+
+// A v2 edit's width/height on an existing node survives layout resolution.
+void (async () => {
+  const { resolveAgentGraphLayout } = await import("../lib/agent-graph-layout");
+  const base = { id: "a", kind: "generic" as const, shape: "rectangle" as const, color: "neutral" as const, label: "A", x: 0, y: 0 };
+  const first = await resolveAgentGraphLayout({ version: 2, nodes: [base], edges: [] });
+  const resized = await resolveAgentGraphLayout({ version: 2, nodes: [{ ...base, width: 333, height: 222 }], edges: [] }, first);
+  const out = resized.nodes.find((node) => node.id === "a")!;
+  assert.equal(out.width, 333);
+  assert.equal(out.height, 222);
+  console.log("verify-agent-graph-v2 resize: ok");
+})();

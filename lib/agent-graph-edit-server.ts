@@ -209,11 +209,12 @@ export async function handleAgentGraphEditPost(
 
       // Check for opaque descendant removal (trying to delete a readable boundary with opaque children)
       const liveNodeIds = new Set(live.graph.nodes.map((n) => n.id));
+      const liveById = new Map(liveSnapshot.nodes.map((n) => [n.id, n]));
       const desiredNodeIds = new Set(desiredGraph.nodes.map((n) => n.id));
 
       for (const liveNode of live.graph.nodes) {
         // If this boundary is being removed and it has opaque descendants
-        const isBoundary = liveSnapshot.nodes.find((n) => n.id === liveNode.id)?.data.kind === "boundary";
+        const isBoundary = liveById.get(liveNode.id)?.data.kind === "boundary";
         if (!desiredNodeIds.has(liveNode.id) && isBoundary) {
           const descendants = collectDescendantIds(liveNode.id, liveSnapshot.nodes);
           const opaqueDescendants = [...descendants].filter((id) => !liveNodeIds.has(id));

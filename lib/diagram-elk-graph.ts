@@ -247,7 +247,7 @@ export function flattenDiagramElkGraph(root: ElkNode): {
     const target = owners.get(edge.targets[0]) ?? edge.targets[0];
     const targetChain = new Set(ancestors(target));
     const container = ancestors(source).find((id) => targetChain.has(id)) ?? root.id;
-    edges.set(edge.id, { edge, origin: nodes.get(container)!.origin });
+    edges.set(edge.id, { edge, origin: (nodes.get(container) ?? nodes.get(root.id))?.origin ?? { x: 0, y: 0 } });
   }
   return { nodes, edges };
 }
@@ -264,7 +264,8 @@ export function assembleDiagramElkRoute(edge: ElkExtendedEdge, origin: DiagramPo
 
   const same = (a: DiagramPoint, b: DiagramPoint) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5;
   const next = (current: (typeof sections)[number], remaining: typeof sections) => {
-    const byId = remaining.filter((candidate) => current.outgoingSections?.includes(candidate.id));
+    const outgoing = new Set(current.outgoingSections);
+    const byId = remaining.filter((candidate) => outgoing.has(candidate.id));
     const found = byId.length ? byId : remaining.filter((candidate) => same(candidate.startPoint, current.endPoint));
     if (found.length > 1) throw new Error(`Connection ${edge.id} has branching sections`);
     return found[0];

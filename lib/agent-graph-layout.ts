@@ -12,7 +12,7 @@ import { isNote, placeNotes } from "@/lib/canvas-note";
 /** The v1 graph, or a v2 graph whose nodes may name a parent boundary. */
 export interface AgentGraphLayoutInput {
   version: number;
-  nodes: Array<AgentGraphInput["nodes"][number] & { parentId?: string }>;
+  nodes: Array<AgentGraphInput["nodes"][number] & { parentId?: string; width?: number; height?: number }>;
   edges: AgentGraphInput["edges"];
 }
 
@@ -40,6 +40,8 @@ export async function resolveAgentGraphLayout(
       // A v2 graph states every node's parent, so it overrides the live one.
       const parentId = graph.version === 2 ? node.parentId : previous.parentId;
       const kept: CanvasNode = { ...previous, position: node.position, data: node.data };
+      if (node.width !== undefined) kept.width = node.width;
+      if (node.height !== undefined) kept.height = node.height;
       if (parentId) kept.parentId = parentId; else delete kept.parentId;
       return kept;
     }),

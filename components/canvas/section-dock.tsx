@@ -3,7 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronLeft, Cloud, Shapes, type LucideIcon } from "lucide-react";
 
-import { AWS_CATEGORIES, AwsPanel } from "@/components/canvas/aws-panel";
+import { AwsPanel } from "@/components/canvas/aws-panel";
+import { AWS_CATEGORIES } from "@/lib/dock-ui";
 import { ShapePanel } from "@/components/canvas/shape-panel";
 import { AWS_CATALOG } from "@/lib/aws-catalog";
 import { FLOATING_SURFACE } from "@/lib/floating-surface";

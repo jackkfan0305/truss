@@ -163,9 +163,9 @@ export async function layoutDiagramContents(
     return found;
   };
   const ancestorsOf = (id: string): string[] => {
-    const chain: string[] = [];
-    for (let p = nodes.get(id)?.parentId; p && !chain.includes(p); p = nodes.get(p)?.parentId) chain.push(p);
-    return chain;
+    const chain = new Set<string>();
+    for (let p = nodes.get(id)?.parentId; p && !chain.has(p); p = nodes.get(p)?.parentId) chain.add(p);
+    return [...chain];
   };
 
   // Which boundaries hold changed content, and which new roots need a place.

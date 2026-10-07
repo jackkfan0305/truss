@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 
 import type { CanvasSnapshot } from "@/lib/canvas-snapshot";
 import type { CanvasNode } from "@/types/canvas";
-import { CANVAS_NODE_TYPE, CANVAS_EDGE_TYPE } from "@/types/canvas";
+import { BOUNDARY_PADDING, CANVAS_NODE_TYPE, CANVAS_EDGE_TYPE } from "@/types/canvas";
 import {
   finishCanvasDrop,
   insertCanvasItem,
@@ -327,4 +327,20 @@ console.log("\n✅ All canvas interaction tests passed");
   };
   assert.ok(getDiagramEdgeLayout(edge as never, snapshot.nodes), "route is current before the move");
   assert.equal(getDiagramEdgeLayout(edge as never, moved.nodes), null, "route is obsolete after the group moves");
+}
+
+// Expansion of a nested, offset boundary uses one (boundary-local) coordinate space.
+{
+  const snapshot: CanvasSnapshot = {
+    nodes: [
+      { ...awsNode("cloud", "boundary-aws-cloud"), position: { x: 500, y: 500 }, width: 1200, height: 900 },
+      { ...awsNode("vpc", "boundary-vpc", "cloud"), position: { x: 40, y: 80 }, width: 400, height: 300 },
+      { ...awsNode("ec2", "aws-ec2"), position: { x: 800, y: 680 }, width: 180, height: 100 },
+    ],
+    edges: [],
+  };
+  const dropped = finishCanvasDrop(snapshot, "ec2");
+  const vpc = dropped.nodes.find((n) => n.id === "vpc")!;
+  assert.equal(dropped.nodes.find((n) => n.id === "ec2")!.parentId, "vpc");
+  assert.equal(vpc.width, 260 + 180 + BOUNDARY_PADDING, "vpc grows by the child overhang only, not its ancestors' offset");
 }

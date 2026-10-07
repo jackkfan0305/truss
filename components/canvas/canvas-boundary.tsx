@@ -1,26 +1,15 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { useContext } from "react";
 import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlowState } from "@xyflow/react";
 
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
+import { BoundaryResizeContext } from "@/lib/canvas-boundary-context";
 import { getBoundaryMinimumSize } from "@/lib/canvas-interaction";
-import type { CanvasBounds, CanvasNode } from "@/types/canvas";
+import type { CanvasNode } from "@/types/canvas";
 
 const HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
-
-/**
- * Resizing goes through the canvas, not React Flow's own node changes: a
- * boundary resize has to clamp to its contents and keep descendants at their
- * absolute positions, which is the `resizeCanvasBoundary` transaction.
- */
-export interface BoundaryResizeActions {
-  start: () => void;
-  resize: (id: string, bounds: CanvasBounds) => void;
-}
-
-export const BoundaryResizeContext = createContext<BoundaryResizeActions | null>(null);
 
 /**
  * Dashed AWS boundary (cloud, VPC, subnet, ...). The interior is transparent and

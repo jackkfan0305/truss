@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { DOCK_GRID_CLASS, DOCK_TILE_CLASS, tileDelay } from "@/components/canvas/aws-panel";
+import { DOCK_GRID_CLASS, DOCK_TILE_CLASS, tileDelay } from "@/lib/dock-ui";
 import { NodeShapeFrame } from "@/components/canvas/node-shape";
 import { SHAPE_DRAG_MIME, buildShapeDragPayload } from "@/lib/canvas-drag";
 import {

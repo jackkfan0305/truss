@@ -34,16 +34,14 @@ import { CanvasControls } from "@/components/canvas/canvas-controls";
 import { CanvasEdgeRenderer } from "@/components/canvas/canvas-edge";
 import { CanvasEdgeRouteProvider } from "@/components/canvas/canvas-edge-routes";
 import { CanvasNodeRenderer } from "@/components/canvas/canvas-node";
-import {
-  BoundaryResizeContext,
-  CanvasBoundaryRenderer,
-  type BoundaryResizeActions,
-} from "@/components/canvas/canvas-boundary";
+import { CanvasBoundaryRenderer } from "@/components/canvas/canvas-boundary";
+import { BoundaryResizeContext, type BoundaryResizeActions } from "@/lib/canvas-boundary-context";
 import { CanvasMotionProvider } from "@/components/canvas/canvas-motion-context";
 import { LiveCursors } from "@/components/canvas/live-cursors";
 import { useSetAgentPresence } from "@/components/canvas/agent-presence";
 import { SectionDock } from "@/components/canvas/section-dock";
-import { CanvasNoteRenderer, markNoteForEditing } from "@/components/canvas/canvas-note";
+import { CanvasNoteRenderer } from "@/components/canvas/canvas-note";
+import { markNoteForEditing } from "@/lib/canvas-note-edit";
 import { NoteButton } from "@/components/canvas/note-button";
 import { NoteContextMenu } from "@/components/canvas/note-context-menu";
 import { useAddNoteShortcut } from "@/hooks/use-keyboard-shortcuts";
@@ -349,13 +347,16 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
           .filter((node) => node.selected)
           .map((node) => node.id);
 
-        if (selectedIds.length > 0) {
+        const selectedEdgeIds = new Set(edges.filter((edge) => edge.selected).map((edge) => edge.id));
+
+        if (selectedIds.length > 0 || selectedEdgeIds.size > 0) {
           history.checkpoint({ force: true });
-          commitSnapshot(deleteCanvasSubtrees(latest.current, selectedIds));
+          const next = deleteCanvasSubtrees(latest.current, selectedIds);
+          commitSnapshot({ ...next, edges: next.edges.filter((edge) => !selectedEdgeIds.has(edge.id)) });
         }
       }
     },
-    [nodes, history, commitSnapshot, replaying],
+    [nodes, edges, history, commitSnapshot, replaying],
   );
 
   const applyRemoteCanvas = useCallback(

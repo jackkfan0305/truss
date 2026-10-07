@@ -19,6 +19,8 @@ import {
 // are not enumerated here: truss_get_aws_catalog is the one source.
 const shapeShape = z.enum(["rectangle", "diamond", "circle", "pill", "cylinder", "hexagon"]);
 const colorShape = z.enum(["neutral", "blue", "purple", "orange", "red", "pink", "green", "teal"]);
+const NOTE_GUIDELINE =
+  "Add a note only when the diagram cannot show something important, such as a key design decision or a caveat. Keep it short and plain: one or two sentences a person can read at a glance. Never connect notes.";
 
 const nodeShapeV1 = z.strictObject({
   id: z.string(),
@@ -31,12 +33,12 @@ const nodeShapeV1 = z.strictObject({
 
 const nodeShapeV2 = z.strictObject({
   id: z.string(),
-  kind: z.enum(["generic", "aws-service", "boundary"]),
-  label: z.string(),
+  kind: z.enum(["generic", "aws-service", "boundary", "note"]),
+  label: z.string().describe("Short label, at most 80 characters. A note's text may run to 1000 characters."),
   catalogId: z.string().optional().describe("Required for aws-service and boundary nodes, taken from truss_get_aws_catalog. Never send it for generic nodes."),
   shape: shapeShape.optional().describe("Generic nodes only."),
-  color: colorShape.optional().describe("Generic nodes only."),
-  parentId: z.string().optional().describe("The boundary that visually holds this node."),
+  color: z.enum([...colorShape.options, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
+  parentId: z.string().optional().describe("The boundary that visually holds this node. Never on a note."),
   x: z.number().optional().describe("Top-left, relative to the parent (the canvas for roots). Omit x and y for new nodes."),
   y: z.number().optional().describe("Supply only together with x."),
   width: z.number().optional().describe("Omit unless resizing; supply only together with height."),
@@ -120,7 +122,7 @@ server.registerTool(
   {
     title: "Apply a full graph to an existing Truss diagram",
     description:
-      "Updates a diagram using the complete desiredGraph (use version 2 for AWS services and boundaries). Start with truss_get_diagram, preserve IDs, parent IDs and coordinates for existing nodes, and omit coordinates for new nodes. A successful call returns the committed graph, spatial geometry and new fingerprint; use them for the next edit. Removing a boundary removes its readable descendants, so confirm every affected label first. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo.",
+      "Updates a diagram using the complete desiredGraph (use version 2 for AWS services and boundaries). Start with truss_get_diagram, preserve IDs, parent IDs and coordinates for existing nodes, and omit coordinates for new nodes. A successful call returns the committed graph, spatial geometry and new fingerprint; use them for the next edit. Removing a boundary removes its readable descendants, so confirm every affected label first. Never reuse an opaqueNodeIds value. Pass the fingerprint returned by that read. If the graph changed, read it again and reapply your changes before submitting. Remove only items the user asked to remove. Server edits cannot be reversed with browser undo. " + NOTE_GUIDELINE,
     inputSchema: {
       baseUrl: baseUrlShape,
       diagramId: z.string().describe("A diagram id returned by truss_list_diagrams."),
@@ -137,7 +139,7 @@ server.registerTool(
   {
     title: "Create a new Truss diagram",
     description:
-      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use graph version 2 with catalog ids from truss_get_aws_catalog for AWS services and nested boundaries. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels.",
+      "Creates a new diagram and draws `graph` into it in one call, returning its editor URL. Start with an understandable overview, normally 4-8 blocks, adding detail when requested. Use short block names and concise relationship labels. Omit node coordinates so Truss arranges the diagram. Use graph version 2 with catalog ids from truss_get_aws_catalog for AWS services and nested boundaries. Use stable lowercase kebab-case ids, cylinders for durable stores, diamonds for decisions, and circles for people or external actors. Do not include secrets in labels. " + NOTE_GUIDELINE,
     inputSchema: {
       baseUrl: baseUrlShape,
       title: z.string().describe("The diagram's title, 1-120 trimmed characters."),

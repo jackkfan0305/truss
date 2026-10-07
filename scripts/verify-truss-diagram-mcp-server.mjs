@@ -190,6 +190,13 @@ try {
     "the server registers exactly the documented tools",
   );
 
+  const editTool = tools.find((tool) => tool.name === "truss_apply_diagram_edit");
+  assert.match(editTool.description, /Never connect notes\./);
+  assert.match(tools.find((tool) => tool.name === "truss_create_diagram").description, /Never connect notes\./);
+  const v2Node = editTool.inputSchema.properties.desiredGraph.anyOf[1].properties.nodes.items;
+  assert.ok(v2Node.properties.kind.enum.includes("note"), "the edit tool accepts note nodes");
+  assert.ok(v2Node.properties.color.enum.includes("yellow"), "notes can be yellow");
+
   const listResult = await client.callTool({ name: "truss_list_diagrams", arguments: {} });
   assert.equal(listResult.isError, undefined, "a successful call carries no isError flag");
   assert.deepEqual(listResult.structuredContent, { diagrams: [{ id: "p1", name: "Payments" }] });

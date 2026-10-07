@@ -71,9 +71,18 @@ Writable node fields:
 - `generic`: `id`, `kind`, `label`, `shape`, `color`, optional `parentId`, `x`, `y`, `width`, `height`.
 - `aws-service` and `boundary`: `id`, `kind`, `label`, `catalogId`, and the same optional fields. Never send `shape`, `color`, SVG or icon URLs; the catalog supplies the look.
 - Only a `boundary` can be a `parentId`. Parentage is visual grouping, not an AWS deployment requirement. Parents must exist and cannot form a cycle.
-- Boundaries count toward the 40-node limit.
+- `note`: `id`, `kind`, `label` (the note's text, up to 1,000 characters, line breaks allowed), optional `color` (`yellow`, `pink`, `blue` or `green`; default `yellow`), `x`, `y`, `width`, `height`. A note never has `parentId` or `catalogId`, no edge may touch it, and no node may name it as a parent. Truss puts a note without coordinates to the right of the diagram.
+- Boundaries and notes count toward the 40-node limit.
 - Omit `x` and `y` on new nodes so Truss places them. Version 2 accepts fractional coordinates; send `x` with `y` and `width` with `height`, or neither.
 - `x` and `y` are top-left positions relative to the parent (the canvas for root nodes), in canvas units.
+
+### Notes
+
+```json
+{ "id": "why-dynamodb", "kind": "note", "label": "Chose DynamoDB over RDS: access is key-value and traffic is spiky.", "color": "yellow" }
+```
+
+Add a note only when the diagram cannot show something important, such as a key design decision or a caveat. Keep it short and plain: one or two sentences a person can read at a glance. Never connect notes.
 
 Read-only geometry lives in `spatial` on reads and write results, never in the graph. Do not copy bounds or routes into a write. `spatial.nodes[].bounds` and `spatial.edges[].layout.points` are absolute canvas coordinates. Items listed in `opaqueNodeIds` are obstacles you cannot edit: keep clear of their bounds and never reuse their ids. A boundary with opaque descendants cannot be removed (`opaqueDescendants`).
 

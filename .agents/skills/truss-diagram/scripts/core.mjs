@@ -92,7 +92,15 @@ const NODE_KEYS_V2 = {
   generic: new Set([...COMMON_V2_KEYS, "shape", "color"]),
   "aws-service": new Set([...COMMON_V2_KEYS, "catalogId"]),
   boundary: new Set([...COMMON_V2_KEYS, "catalogId"]),
+  note: new Set(["id", "kind", "label", "color", "x", "y", "width", "height"]),
 };
+const NOTE_COLORS = new Set(["yellow", "pink", "blue", "green"]);
+const MAX_NOTE_LENGTH = 1000;
+
+// Note text keeps its line breaks and trailing spaces; only the length is capped.
+function isNoteText(value) {
+  return typeof value === "string" && value.length >= 1 && value.length <= MAX_NOTE_LENGTH;
+}
 const CATALOG_PREFIX = { "aws-service": "aws-", boundary: "boundary-" };
 
 function isPlainObject(value) {
@@ -135,12 +143,17 @@ function validateNodeV1(node, nodeIds) {
 // Catalog identity is server-authoritative (the .mjs runtime cannot import the
 // TypeScript catalog); this checks only the field shape and the kind's prefix.
 function validateNodeV2(node, nodeIds) {
+  if (isPlainObject(node) && node.kind === "note") {
+    for (const field of ["parentId", "catalogId"]) {
+      if (field in node) throw new Error(`Notes cannot have a ${field}.`);
+    }
+  }
   const keys = isPlainObject(node) ? NODE_KEYS_V2[node.kind] : undefined;
   if (
     !keys ||
     !hasOnlyKeys(node, keys) ||
     !isGraphId(node.id) ||
-    !isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH) ||
+    !(node.kind === "note" ? isNoteText(node.label) : isTrimmedString(node.label, MAX_NODE_LABEL_LENGTH)) ||
     ("parentId" in node && !isGraphId(node.parentId)) ||
     ("x" in node !== "y" in node) ||
     ("x" in node && (!inRange(node.x, MIN_POSITION, MAX_POSITION) || !inRange(node.y, MIN_POSITION, MAX_POSITION))) ||
@@ -155,6 +168,10 @@ function validateNodeV2(node, nodeIds) {
   }
   if (node.kind === "generic") {
     if (!SHAPES.has(node.shape) || !COLORS.has(node.color)) {
+      throw new Error("The graph contains an invalid node.");
+    }
+  } else if (node.kind === "note") {
+    if ("color" in node && !NOTE_COLORS.has(node.color)) {
       throw new Error("The graph contains an invalid node.");
     }
   } else if (

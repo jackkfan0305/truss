@@ -262,6 +262,19 @@ function rejectsGraph(graphCandidate, reason) {
 }
 
 assert.deepEqual(validateGraph(GRAPH), GRAPH);
+
+// Sticky notes: their own keys and colours, never a parent or catalog id.
+const noteGraph = {
+  version: 2,
+  nodes: [{ id: "todo", kind: "note", label: "Chose DynamoDB over RDS: access is key-value.\n", color: "yellow", x: 0, y: 0, width: 200, height: 200 }],
+  edges: [],
+};
+assert.doesNotThrow(() => validateGraph(noteGraph));
+assert.doesNotThrow(() => validateGraph({ ...noteGraph, nodes: [{ ...noteGraph.nodes[0], label: "x".repeat(1000) }] }));
+assert.throws(() => validateGraph({ ...noteGraph, nodes: [{ ...noteGraph.nodes[0], label: "x".repeat(1001) }] }));
+assert.throws(() => validateGraph({ ...noteGraph, nodes: [{ ...noteGraph.nodes[0], parentId: "vpc" }] }), /parentId/);
+assert.throws(() => validateGraph({ ...noteGraph, nodes: [{ ...noteGraph.nodes[0], catalogId: "aws-s3" }] }), /catalogId/);
+assert.throws(() => validateGraph({ ...noteGraph, nodes: [{ ...noteGraph.nodes[0], color: "teal" }] }));
 const semanticGraph = {
   ...GRAPH,
   nodes: GRAPH.nodes.map((node) => ({

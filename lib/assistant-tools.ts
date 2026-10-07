@@ -9,6 +9,9 @@ import {
 import type { AwsCatalogResponse } from "@/lib/aws-catalog";
 import { buildRoomId, createRoomIdSuffix } from "@/lib/room-id";
 
+const NOTE_GUIDELINE =
+  "Add a note only when the diagram cannot show something important, such as a key design decision or a caveat. Keep it short and plain: one or two sentences a person can read at a glance. Never connect notes.";
+
 /**
  * The browser assistant's diagram tools. Each one calls the same endpoint the
  * terminal agent's MCP uses, with the signed-in session cookie, so the server
@@ -247,13 +250,13 @@ export function createAssistantTools(actions: AssistantActions) {
     }),
     apply_diagram_edit: tool({
       description:
-        "Replace a diagram's graph with the full desired graph. Pass the fingerprint from the get_diagram call you edited from. Omit x and y for new blocks.",
+        "Replace a diagram's graph with the full desired graph. Pass the fingerprint from the get_diagram call you edited from. Omit x and y for new blocks. " + NOTE_GUIDELINE,
       inputSchema: z.object({ diagramId: z.string(), fingerprint: z.string(), graph: agentGraphModelSchema }),
       execute: (input) => actions.applyDiagramEdit(input),
     }),
     create_diagram: tool({
       description:
-        "Create a new diagram with a title and a graph. Start with an overview of four to eight blocks and omit all coordinates.",
+        "Create a new diagram with a title and a graph. Start with an overview of four to eight blocks and omit all coordinates. " + NOTE_GUIDELINE,
       inputSchema: z.object({ title: z.string().min(1).max(MAX_TITLE_LENGTH), graph: agentGraphModelSchema }),
       execute: (input) => actions.createDiagram(input),
     }),

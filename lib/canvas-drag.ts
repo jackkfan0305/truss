@@ -109,3 +109,9 @@ export function parseAwsDragPayload(raw: string): AwsDragPayload | null {
 
   return { catalogId };
 }
+
+/**
+ * The note button → canvas drag contract. The payload is only a marker: a
+ * dropped note always starts yellow and 200×200 (`createNoteNode`).
+ */
+export const NOTE_DRAG_MIME = "application/x-truss-note";

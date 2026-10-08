@@ -38,6 +38,9 @@ import {
   MAX_CODE_ROW_LENGTH,
   MAX_CODE_ROWS,
   MAX_CODE_SIGNATURE_LENGTH,
+  MAX_CODE_SUMMARY_LENGTH,
+  MAX_CODE_PSEUDOCODE_LINES,
+  MAX_CODE_PSEUDOCODE_LINE_LENGTH,
   MAX_CODE_SOURCE_PATH_LENGTH,
 } from "@/lib/agent-graph-schema";
 import { isGithubSourceUrl } from "@/lib/code-catalog";
@@ -73,9 +76,9 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function parseSignature(value: unknown): string | undefined {
+function parseSignature(value: unknown, maximumLength = MAX_CODE_SIGNATURE_LENGTH): string | undefined {
   if (typeof value !== "string") return undefined;
-  const line = value.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_SIGNATURE_LENGTH);
+  const line = value.split(/[\r\n]/)[0].trim().slice(0, maximumLength);
   return line || undefined;
 }
 
@@ -101,11 +104,24 @@ function parseSource(value: unknown): CodeSource | undefined {
   };
 }
 
+/** Like rows, but keeps leading spaces: they are the pseudocode's indentation. */
+function parsePseudocode(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const lines = value
+    .filter((line): line is string => typeof line === "string")
+    .map((line) => line.split(/[\r\n]/)[0].trimEnd().slice(0, MAX_CODE_PSEUDOCODE_LINE_LENGTH))
+    .filter((line) => line.trim())
+    .slice(0, MAX_CODE_PSEUDOCODE_LINES);
+  return lines.length ? lines : undefined;
+}
+
 function codeFields(data: Record<string, unknown>) {
   const signature = parseSignature(data.signature);
+  const summary = parseSignature(data.summary, MAX_CODE_SUMMARY_LENGTH);
+  const pseudocode = parsePseudocode(data.pseudocode);
   const rows = parseRows(data.rows);
   const source = parseSource(data.source);
-  return { ...(signature ? { signature } : {}), ...(rows ? { rows } : {}), ...(source ? { source } : {}) };
+  return { ...(signature ? { signature } : {}), ...(summary ? { summary } : {}), ...(pseudocode ? { pseudocode } : {}), ...(rows ? { rows } : {}), ...(source ? { source } : {}) };
 }
 
 function parseNode(value: unknown): CanvasNode | null {

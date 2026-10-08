@@ -17,6 +17,9 @@ export const MAX_AGENT_GRAPH_EDGES = 60;
 export const MAX_AGENT_GRAPH_V2_NODES = 80;
 export const MAX_AGENT_GRAPH_V2_EDGES = 120;
 export const MAX_CODE_SIGNATURE_LENGTH = 120;
+export const MAX_CODE_SUMMARY_LENGTH = 100;
+export const MAX_CODE_PSEUDOCODE_LINES = 16;
+export const MAX_CODE_PSEUDOCODE_LINE_LENGTH = 80;
 export const MAX_CODE_ROWS = 12;
 export const MAX_CODE_ROW_LENGTH = 60;
 export const MAX_CODE_SOURCE_PATH_LENGTH = 200;
@@ -213,6 +216,12 @@ const codeV2Fields = {
   kind: z.literal("code"),
   catalogId: z.string(),
   signature: codeLine(MAX_CODE_SIGNATURE_LENGTH).optional(),
+  summary: codeLine(MAX_CODE_SUMMARY_LENGTH).optional(),
+  // Leading spaces carry the indentation, so lines are not trimmed at the start.
+  pseudocode: z.array(z.string().min(1).max(MAX_CODE_PSEUDOCODE_LINE_LENGTH)
+    .refine((line) => !/[\r\n]/.test(line) && line.trim().length > 0 && line === line.trimEnd(), {
+      message: "Each pseudocode line must be one non-blank line with no trailing spaces.",
+    })).max(MAX_CODE_PSEUDOCODE_LINES).optional(),
   rows: z.array(codeLine(MAX_CODE_ROW_LENGTH)).max(MAX_CODE_ROWS).optional(),
   source: codeSourceSchema.optional(),
 };
@@ -456,6 +465,8 @@ export const agentGraphModelSchema = z.union([
         label: z.string().describe("Short label, at most 80 characters, no surrounding spaces. A note's text may run to 1000 characters."),
         catalogId: z.string().optional().describe("Required for aws-service, boundary and code nodes; an id from get_catalog. Never send it for generic nodes."),
         signature: z.string().optional().describe("Code nodes only. Keep the value you read."),
+        summary: z.string().optional().describe("Code nodes only. Keep the value you read."),
+        pseudocode: z.array(z.string()).optional().describe("Code nodes only. Keep the value you read."),
         rows: z.array(z.string()).optional().describe("Code nodes only. Keep the values you read."),
         source: z.looseObject({ path: z.string(), line: z.number().optional(), url: z.string().optional() }).optional().describe("Code nodes only. Keep the value you read."),
         shape: z.enum(NODE_SHAPES).optional().describe("Generic nodes only."),

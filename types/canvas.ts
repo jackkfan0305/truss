@@ -154,6 +154,10 @@ export type CanvasNodeData = {
   noteColor?: NoteColor;
   /** Code blocks only; written by the terminal agent, never by hand. */
   signature?: string;
+  /** One plain sentence on what the code does. */
+  summary?: string;
+  /** Indented plain-language steps, shown when the block is hovered. */
+  pseudocode?: string[];
   rows?: string[];
   source?: CodeSource;
 };

@@ -20,8 +20,8 @@ export interface AgentGraphDiff {
 }
 
 function v2Fields(node: GraphNode) {
-  const { kind, catalogId, parentId, width, height, signature, rows, source } = node as Record<string, unknown>;
-  return [kind, catalogId, parentId, width, height, signature, rows, source];
+  const { kind, catalogId, parentId, width, height, signature, summary, pseudocode, rows, source } = node as Record<string, unknown>;
+  return [kind, catalogId, parentId, width, height, signature, summary, pseudocode, rows, source];
 }
 
 function nodesEqual(left: GraphNode, right: GraphNode): boolean {

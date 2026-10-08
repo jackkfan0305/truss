@@ -96,6 +96,8 @@ export interface MaterializableNode {
   kind?: CanvasNode["data"]["kind"];
   catalogId?: string;
   signature?: string;
+  summary?: string;
+  pseudocode?: string[];
   rows?: string[];
   source?: CodeSource;
 }
@@ -178,6 +180,8 @@ export function materializeAgentGraph(
         ...(node.kind ? { kind: node.kind } : {}),
         ...(node.catalogId ? { catalogId: node.catalogId } : {}),
         ...(node.signature ? { signature: node.signature } : {}),
+        ...(node.summary ? { summary: node.summary } : {}),
+        ...(node.pseudocode ? { pseudocode: node.pseudocode } : {}),
         ...(node.rows ? { rows: node.rows } : {}),
         ...(node.source ? { source: node.source } : {}),
       },
@@ -234,8 +238,8 @@ export function canonicalCanvasSnapshotsEqual(
         (node.parentId ?? "") === (other.parentId ?? "") &&
         (node.data.kind ?? "") === (other.data.kind ?? "") &&
         (node.data.catalogId ?? "") === (other.data.catalogId ?? "") &&
-        JSON.stringify([node.data.signature, node.data.rows, node.data.source]) ===
-          JSON.stringify([other.data.signature, other.data.rows, other.data.source]) &&
+        JSON.stringify([node.data.signature, node.data.summary, node.data.pseudocode, node.data.rows, node.data.source]) ===
+          JSON.stringify([other.data.signature, other.data.summary, other.data.pseudocode, other.data.rows, other.data.source]) &&
         (node.data.noteColor ?? "") === (other.data.noteColor ?? "")
       );
     }) &&
@@ -301,6 +305,8 @@ function projectNodeV2(node: CanvasNode): unknown {
       ? { shape: node.data?.shape, color: node.data?.color }
       : { catalogId: node.data?.catalogId }),
     ...(kind === "code" && node.data.signature ? { signature: node.data.signature } : {}),
+    ...(kind === "code" && node.data.summary ? { summary: node.data.summary } : {}),
+    ...(kind === "code" && node.data.pseudocode ? { pseudocode: node.data.pseudocode } : {}),
     ...(kind === "code" && node.data.rows ? { rows: node.data.rows } : {}),
     ...(kind === "code" && node.data.source ? { source: node.data.source } : {}),
     ...(node.parentId ? { parentId: node.parentId } : {}),
@@ -456,6 +462,8 @@ export function canvasFingerprint(snapshot: CanvasSnapshot): string {
       node.data?.catalogId ?? "",
       node.data?.noteColor ?? "",
       node.data?.signature ?? "",
+      node.data?.summary ?? "",
+      node.data?.pseudocode ?? [],
       node.data?.rows ?? [],
       node.data?.source ?? null,
     ]);

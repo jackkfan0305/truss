@@ -162,6 +162,9 @@ assert.ok(issuePaths(withNode(0, { source: { path: "x".repeat(201) } })).include
 assert.ok(issuePaths(withNode(0, { source: { path: "a\nb.ts" } })).includes("nodes.0.source.path"), "multi-line path");
 assert.ok(issuePaths(withNode(0, { signature: "x".repeat(121) })).includes("nodes.0.signature"));
 assert.ok(issuePaths(withNode(0, { signature: "a(\nb)" })).includes("nodes.0.signature"), "multi-line signature");
+assert.ok(agentGraphV2Schema.safeParse(withNode(0, { summary: "Starts checkout.", pseudocode: ["for each item:", "  reserve it"] })).success, "indented pseudocode");
+assert.ok(issuePaths(withNode(0, { pseudocode: ["trailing "] })).includes("nodes.0.pseudocode.0"), "trailing space");
+assert.ok(issuePaths(withNode(0, { pseudocode: Array.from({ length: 17 }, () => "x") })).includes("nodes.0.pseudocode"), "too many lines");
 assert.ok(issuePaths(withNode(3, { rows: Array.from({ length: 13 }, (_, i) => `f${i}`) })).includes("nodes.3.rows"));
 assert.ok(issuePaths(withNode(3, { rows: ["x".repeat(61)] })).includes("nodes.3.rows.0"));
 assert.ok(issuePaths(withNode(3, { rows: ["padded "] })).includes("nodes.3.rows.0"));

@@ -2,7 +2,7 @@
 
 ## Theme
 
-Dark only. No light mode. The visual language is monotone graphite with one accent. The neutrals are a single OKLCH ramp (hue 264, chroma 0.004) defined in `app/globals.css`, evenly spaced in lightness from page to primary text. Electric lime `--accent-primary` (#b1ef4a, `oklch(0.88 0.2 128)`) is the only accent, with `--bg-base` text on it: focus rings, primary actions, selection and every AI state (`--accent-ai` points at it). Node colours, AWS icons and status colours are content, not accents.
+Dark only. No light mode. The visual language is monotone graphite with one accent. The neutrals are a single OKLCH ramp (hue 264, chroma 0.004) defined in `app/globals.css`, evenly spaced in lightness from page to primary text. Periwinkle `--accent-primary` (#7b8ff5, `oklch(0.69 0.14 275)`) is the only accent, with `--bg-base` text on it: focus rings, primary actions, selection and every AI state (`--accent-ai` points at it). Node colours, AWS icons and status colours are content, not accents.
 
 Signed-out storyboard builders show a `Sign in to save` action in the top-right
 of the page. The user can keep building without signing in. If sign-in is

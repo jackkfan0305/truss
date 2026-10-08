@@ -23,6 +23,7 @@ export const MAX_CODE_PSEUDOCODE_LINE_LENGTH = 80;
 export const MAX_CODE_ROWS = 12;
 export const MAX_CODE_ROW_LENGTH = 60;
 export const MAX_CODE_SOURCE_PATH_LENGTH = 200;
+export const MAX_CODE_SOURCE_URL_LENGTH = 500;
 export const CODE_EDGE_KINDS = ["calls", "uses"] as const;
 
 const AGENT_GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -209,7 +210,7 @@ function codeLine(maximumLength: number) {
 export const codeSourceSchema = z.strictObject({
   path: codeLine(MAX_CODE_SOURCE_PATH_LENGTH),
   line: z.number().int().positive().optional(),
-  url: z.string().max(500).refine(isGithubSourceUrl, { message: "Source URL must start with https://github.com/." }).optional(),
+  url: z.string().max(MAX_CODE_SOURCE_URL_LENGTH).refine(isGithubSourceUrl, { message: "Source URL must start with https://github.com/." }).optional(),
 });
 
 const codeV2Fields = {

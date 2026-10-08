@@ -6,9 +6,9 @@ import { Handle, Position, useStore, useStoreApi, ViewportPortal, type NodeProps
 import { CanvasLabel } from "@/components/canvas/canvas-label";
 import { CodeIcon } from "@/components/canvas/code-icon";
 import {
-  activeCodeBlock, arrowCardSide, isInsideModule, quietCardSide, setHoveredCodeBlock, setPinnedCodeBlock,
-  useHoveredCodeModule, usePinnedCodeBlock, type CardSide,
+  activeCodeBlock, setHoveredCodeBlock, setPinnedCodeBlock, unpinCodeBlock, useHoveredCodeModule, usePinnedCodeBlock,
 } from "@/components/canvas/code-hover";
+import { arrowCardSide, isInsideModule, quietCardSide, type CardSide } from "@/lib/code-card";
 import { PreviewCard } from "@base-ui/react/preview-card";
 import { Pin, PinOff } from "lucide-react";
 import { useIsAgentEditing } from "@/components/canvas/agent-presence";
@@ -22,7 +22,7 @@ const COPIED_MS = 1500;
 
 /**
  * Name, then summary, then rows in monospace, then `path:line` when the agent sent a source.
- * The signature lives in the hover card, leaving the block's room to the summary.
+ * With pseudocode the signature lives in the hover card; without it, the block shows it.
  * Hovering a block with pseudocode opens it in a card beside the block.
  */
 export function CodeBlockRenderer({ id, data, selected }: NodeProps<CanvasNode>) {
@@ -40,7 +40,7 @@ export function CodeBlockRenderer({ id, data, selected }: NodeProps<CanvasNode>)
   const isShown = isOpen || isPinned;
   useEffect(() => () => {
     setHoveredCodeBlock(id, false);
-    setPinnedCodeBlock(null);
+    unpinCodeBlock(id);
   }, [id]);
 
   // While the card shows: P pins or unpins it, Esc unpins, and the arrows move
@@ -87,6 +87,9 @@ export function CodeBlockRenderer({ id, data, selected }: NodeProps<CanvasNode>)
         <CanvasLabel id={id} label={data.label} ariaLabel="Node label" className="min-w-0 font-medium leading-5" />
       </div>
       {data.summary ? <p className="line-clamp-3 text-xs text-copy-secondary">{data.summary}</p> : null}
+      {data.signature && !data.pseudocode?.length ? (
+        <p className="truncate font-mono text-xs text-copy-secondary">{data.signature}</p>
+      ) : null}
       {data.rows?.length ? (
         <ul className="min-h-0 overflow-hidden font-mono text-xs text-copy-secondary">
           {data.rows.map((row, index) => <li key={index} className="truncate">{row}</li>)}
@@ -105,7 +108,7 @@ export function CodeBlockRenderer({ id, data, selected }: NodeProps<CanvasNode>)
       title={isPinned ? "Unpin (P)" : "Pin (P)"}
       onClick={() => setPinnedCodeBlock(isPinned ? null : id)}
       className={cn(
-        "absolute top-2 right-2 rounded-md p-1.5 transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-brand",
+        "absolute top-2 right-2 rounded-xl p-1.5 transition-colors hover:bg-subtle focus-visible:outline-2 focus-visible:outline-brand",
         isPinned ? "text-brand" : "text-copy-muted hover:text-copy-primary",
       )}
     >
@@ -262,8 +265,14 @@ function SourceLine({ source }: { source: CodeSource }) {
       type="button"
       className={className}
       onClick={async () => {
-        await navigator.clipboard?.writeText(text);
-        setCopied(true);
+        // No clipboard (insecure context) or a refused write: leave the path showing, never claim a copy.
+        try {
+          if (!navigator.clipboard) return;
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+        } catch {
+          setCopied(false);
+        }
       }}
     >
       <span aria-live="polite">{copied ? "Copied" : text}</span>

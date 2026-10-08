@@ -12,7 +12,8 @@ import {
 } from "@xyflow/react";
 
 import { useIsAgentEditing } from "@/components/canvas/agent-presence";
-import { isInsideModule, useHoveredCodeBlock, useHoveredCodeModule } from "@/components/canvas/code-hover";
+import { useHoveredCodeBlock, useHoveredCodeModule } from "@/components/canvas/code-hover";
+import { isInsideModule } from "@/lib/code-card";
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import {
   useEdgeLabelOffset,

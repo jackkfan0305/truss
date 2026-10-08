@@ -74,6 +74,8 @@ Radius increases with surface depth — smaller for inner elements, larger for o
 | Cards / panels    | `rounded-2xl` |
 | Modal / overlay   | `rounded-3xl` |
 
+Diagram blocks on the canvas (generic, AWS and code) use `rounded-md`, so a block reads as a diagram shape rather than a UI card. Notes use 4px. The code block source line and other tiny canvas labels use `text-[11px]`.
+
 ## Canvas
 
 ### Node Color Palette
@@ -114,7 +116,7 @@ AWS service blocks are a rectangular elevated surface with the local catalog ico
 
 ### Code Blocks and Boundaries
 
-A code block is an elevated rectangle with the catalog icon and an editable name, then the signature (or the field rows of a type or enum) in monospace `text-xs`, then a muted `path:line` line at the bottom. With a pinned GitHub URL the source line is a link that opens a new tab; without one it is a button that copies `path:line` and shows "Copied" for 1.5 seconds. An entry point has a lime left border and a `data-code-entry` marker. A code boundary (`code-class`, `code-module`) is a thin solid outline with a monospace header strip holding the icon and title, instead of the dashed AWS look. A `uses` edge is dashed (`6 4`); `calls` and unkinded edges stay solid. The dock's Code tab lists the seven code catalog entries with search and no category chips. The tab places blocks by click or drag; signature, rows and source are written only by the terminal agent.
+A code block is an elevated rectangle with the catalog icon and an editable name, then the summary, then the field rows of a type or enum in monospace `text-xs` (the signature shows here too when the block has no pseudocode; otherwise it sits in the hover card), then a muted `path:line` line at the bottom. With a pinned GitHub URL the source line is a link that opens a new tab; without one it is a button that copies `path:line` and shows "Copied" for 1.5 seconds. With no clipboard or a refused write it keeps showing the path. An entry point has a lime left border and a `data-code-entry` marker. A code boundary (`code-class`, `code-module`) is a thin solid outline with a monospace header strip holding the icon and title, instead of the dashed AWS look. A `uses` edge is dashed (`6 4`); `calls` and unkinded edges stay solid. The dock's Code tab lists the seven code catalog entries with search and no category chips. The tab places blocks by click or drag; signature, rows and source are written only by the terminal agent.
 
 ### Sticky Notes
 

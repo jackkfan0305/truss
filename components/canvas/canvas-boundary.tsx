@@ -6,7 +6,8 @@ import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlow
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
 import { CodeIcon } from "@/components/canvas/code-icon";
-import { isInsideModule, setHoveredCodeModule, useHoveredCodeModule } from "@/components/canvas/code-hover";
+import { setHoveredCodeModule, useHoveredCodeModule } from "@/components/canvas/code-hover";
+import { isInsideModule } from "@/lib/code-card";
 import { BoundaryResizeContext } from "@/lib/canvas-boundary-context";
 import { getBoundaryMinimumSize } from "@/lib/canvas-interaction";
 import type { CanvasNode } from "@/types/canvas";

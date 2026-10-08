@@ -283,6 +283,12 @@ export interface AgentGraphViewV2 {
   opaqueEdgeIds: string[];
 }
 
+/** The code-only fields a code node carries, each left out when unset. */
+function codeFieldsOf(data: CanvasNode["data"]) {
+  const { signature, summary, pseudocode, rows, source } = data;
+  return Object.fromEntries(Object.entries({ signature, summary, pseudocode, rows, source }).filter(([, value]) => value));
+}
+
 function projectNodeV2(node: CanvasNode): unknown {
   const kind = node.data?.kind ?? "generic";
   if (kind === "note") {
@@ -304,11 +310,7 @@ function projectNodeV2(node: CanvasNode): unknown {
     ...(kind === "generic"
       ? { shape: node.data?.shape, color: node.data?.color }
       : { catalogId: node.data?.catalogId }),
-    ...(kind === "code" && node.data.signature ? { signature: node.data.signature } : {}),
-    ...(kind === "code" && node.data.summary ? { summary: node.data.summary } : {}),
-    ...(kind === "code" && node.data.pseudocode ? { pseudocode: node.data.pseudocode } : {}),
-    ...(kind === "code" && node.data.rows ? { rows: node.data.rows } : {}),
-    ...(kind === "code" && node.data.source ? { source: node.data.source } : {}),
+    ...(kind === "code" ? codeFieldsOf(node.data) : {}),
     ...(node.parentId ? { parentId: node.parentId } : {}),
     x: node.position?.x,
     y: node.position?.y,
@@ -385,7 +387,8 @@ export function canvasToAgentGraph(
         const parent = parentId === undefined ? undefined : (readable.get(parentId) as AgentGraphNodeV2 | undefined);
         const orphanedParent = parentId !== undefined && parent?.kind !== "boundary";
         // A method only validates inside a class, so a hand-dropped one stays opaque.
-        const looseMethod = (node as { kind?: string }).kind === "code" && (node as { catalogId?: string }).catalogId === "code-method" &&
+        const v2Node = node as AgentGraphNodeV2;
+        const looseMethod = v2Node.kind === "code" && v2Node.catalogId === "code-method" &&
           (parent?.kind !== "boundary" || parent.catalogId !== "code-class");
         if (orphanedParent || looseMethod) {
           nodes.splice(nodes.indexOf(node), 1);

@@ -42,6 +42,7 @@ import {
   MAX_CODE_PSEUDOCODE_LINES,
   MAX_CODE_PSEUDOCODE_LINE_LENGTH,
   MAX_CODE_SOURCE_PATH_LENGTH,
+  MAX_CODE_SOURCE_URL_LENGTH,
 } from "@/lib/agent-graph-schema";
 import { isGithubSourceUrl } from "@/lib/code-catalog";
 
@@ -76,17 +77,21 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function parseSignature(value: unknown, maximumLength = MAX_CODE_SIGNATURE_LENGTH): string | undefined {
+/** The first line of `value`, capped at `maximumLength`. */
+function firstLine(value: string, maximumLength: number): string {
+  return value.split(/[\r\n]/)[0].slice(0, maximumLength);
+}
+
+function parseLine(value: unknown, maximumLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
-  const line = value.split(/[\r\n]/)[0].trim().slice(0, maximumLength);
-  return line || undefined;
+  return firstLine(value.trim(), maximumLength).trim() || undefined;
 }
 
 function parseRows(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const rows = value
     .filter((row): row is string => typeof row === "string")
-    .map((row) => row.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_ROW_LENGTH))
+    .map((row) => firstLine(row.trim(), MAX_CODE_ROW_LENGTH).trim())
     .filter(Boolean)
     .slice(0, MAX_CODE_ROWS);
   return rows.length ? rows : undefined;
@@ -95,12 +100,12 @@ function parseRows(value: unknown): string[] | undefined {
 /** A stored URL is re-checked: data written before the rule, or by hand, must not become a link. */
 function parseSource(value: unknown): CodeSource | undefined {
   if (!isRecord(value) || typeof value.path !== "string") return undefined;
-  const path = value.path.split(/[\r\n]/)[0].trim().slice(0, MAX_CODE_SOURCE_PATH_LENGTH);
+  const path = parseLine(value.path, MAX_CODE_SOURCE_PATH_LENGTH);
   if (!path) return undefined;
   return {
     path,
     ...(Number.isInteger(value.line) && (value.line as number) > 0 ? { line: value.line as number } : {}),
-    ...(isGithubSourceUrl(value.url) && value.url.length <= 500 ? { url: value.url } : {}),
+    ...(isGithubSourceUrl(value.url) && value.url.length <= MAX_CODE_SOURCE_URL_LENGTH ? { url: value.url } : {}),
   };
 }
 
@@ -109,15 +114,15 @@ function parsePseudocode(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const lines = value
     .filter((line): line is string => typeof line === "string")
-    .map((line) => line.split(/[\r\n]/)[0].trimEnd().slice(0, MAX_CODE_PSEUDOCODE_LINE_LENGTH))
+    .map((line) => firstLine(line, MAX_CODE_PSEUDOCODE_LINE_LENGTH).trimEnd())
     .filter((line) => line.trim())
     .slice(0, MAX_CODE_PSEUDOCODE_LINES);
   return lines.length ? lines : undefined;
 }
 
 function codeFields(data: Record<string, unknown>) {
-  const signature = parseSignature(data.signature);
-  const summary = parseSignature(data.summary, MAX_CODE_SUMMARY_LENGTH);
+  const signature = parseLine(data.signature, MAX_CODE_SIGNATURE_LENGTH);
+  const summary = parseLine(data.summary, MAX_CODE_SUMMARY_LENGTH);
   const pseudocode = parsePseudocode(data.pseudocode);
   const rows = parseRows(data.rows);
   const source = parseSource(data.source);

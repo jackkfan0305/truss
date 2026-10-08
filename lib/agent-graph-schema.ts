@@ -371,7 +371,7 @@ function buildAgentGraphV2Schema(minimumNodes: 0 | 1) {
       }
 
       // Validate edges (shared with v1)
-      const noteIds = new Set(graph.nodes.filter((node) => node.kind === "note").map((node) => node.id));
+      const noteIds = new Set(graph.nodes.flatMap((node) => (node.kind === "note" ? [node.id] : [])));
       const edgeIds = new Set<string>();
       const endpointPairs = new Set<string>();
 

@@ -92,6 +92,7 @@ export function CodeBlockRenderer({ id, data, selected }: NodeProps<CanvasNode>)
       ) : null}
       {data.rows?.length ? (
         <ul className="min-h-0 overflow-hidden font-mono text-xs text-copy-secondary">
+          {/* react-doctor-disable-next-line no-array-index-as-key -- rows are fixed by position, never reorder, and may repeat */}
           {data.rows.map((row, index) => <li key={index} className="truncate">{row}</li>)}
         </ul>
       ) : null}

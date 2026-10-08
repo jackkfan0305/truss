@@ -90,9 +90,10 @@ function parseLine(value: unknown, maximumLength: number): string | undefined {
 function parseRows(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const rows = value
-    .filter((row): row is string => typeof row === "string")
-    .map((row) => firstLine(row.trim(), MAX_CODE_ROW_LENGTH).trim())
-    .filter(Boolean)
+    .flatMap((row) => {
+      const line = typeof row === "string" ? firstLine(row.trim(), MAX_CODE_ROW_LENGTH).trim() : "";
+      return line ? [line] : [];
+    })
     .slice(0, MAX_CODE_ROWS);
   return rows.length ? rows : undefined;
 }
@@ -113,9 +114,10 @@ function parseSource(value: unknown): CodeSource | undefined {
 function parsePseudocode(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const lines = value
-    .filter((line): line is string => typeof line === "string")
-    .map((line) => firstLine(line, MAX_CODE_PSEUDOCODE_LINE_LENGTH).trimEnd())
-    .filter((line) => line.trim())
+    .flatMap((line) => {
+      const kept = typeof line === "string" ? firstLine(line, MAX_CODE_PSEUDOCODE_LINE_LENGTH).trimEnd() : "";
+      return kept.trim() ? [kept] : [];
+    })
     .slice(0, MAX_CODE_PSEUDOCODE_LINES);
   return lines.length ? lines : undefined;
 }
@@ -269,7 +271,7 @@ export function parseCanvasSnapshot(value: unknown): CanvasSnapshot | null {
   }
 
   // Notes cannot be connected, so an edge touching one drops like a dangling edge.
-  const connectableIds = new Set(nodes.filter((node) => node.type !== CANVAS_NOTE_TYPE).map((node) => node.id));
+  const connectableIds = new Set(nodes.flatMap((node) => (node.type === CANVAS_NOTE_TYPE ? [] : [node.id])));
   const edges: CanvasEdge[] = [];
   const seenEdgeIds = new Set<string>();
 

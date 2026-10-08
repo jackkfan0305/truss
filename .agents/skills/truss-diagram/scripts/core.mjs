@@ -16,6 +16,10 @@ export const MAX_GRAPH_EDGES = 60;
 export const MAX_GRAPH_V2_NODES = 80;
 export const MAX_GRAPH_V2_EDGES = 120;
 const MAX_SIGNATURE_LENGTH = 120;
+const MAX_SUMMARY_LENGTH = 100;
+const MAX_PSEUDOCODE_LINES = 16;
+const DESCRIBED_CODE_BLOCKS = new Set(["code-entry", "code-function", "code-method"]);
+const MAX_PSEUDOCODE_LINE_LENGTH = 80;
 const MAX_ROWS = 12;
 const MAX_ROW_LENGTH = 60;
 const MAX_SOURCE_PATH_LENGTH = 200;
@@ -100,7 +104,7 @@ const NODE_KEYS_V2 = {
   generic: new Set([...COMMON_V2_KEYS, "shape", "color"]),
   "aws-service": new Set([...COMMON_V2_KEYS, "catalogId"]),
   boundary: new Set([...COMMON_V2_KEYS, "catalogId"]),
-  code: new Set([...COMMON_V2_KEYS, "catalogId", "signature", "rows", "source"]),
+  code: new Set([...COMMON_V2_KEYS, "catalogId", "signature", "summary", "pseudocode", "rows", "source"]),
   note: new Set(["id", "kind", "label", "color", "x", "y", "width", "height"]),
 };
 const NOTE_COLORS = new Set(["yellow", "pink", "blue", "green"]);
@@ -119,6 +123,11 @@ function isSingleLine(value, maximumLength) {
 
 function validateCodeFields(node) {
   if ("signature" in node && !isSingleLine(node.signature, MAX_SIGNATURE_LENGTH)) return false;
+  if ("summary" in node && !isSingleLine(node.summary, MAX_SUMMARY_LENGTH)) return false;
+  // Pseudocode keeps leading spaces for indentation.
+  if ("pseudocode" in node && (!Array.isArray(node.pseudocode) || node.pseudocode.length > MAX_PSEUDOCODE_LINES
+    || !node.pseudocode.every((line) => typeof line === "string" && line.length <= MAX_PSEUDOCODE_LINE_LENGTH
+      && line.trim() && line === line.trimEnd() && !/[\r\n]/.test(line)))) return false;
   if ("rows" in node && (!Array.isArray(node.rows) || node.rows.length > MAX_ROWS || !node.rows.every((row) => isSingleLine(row, MAX_ROW_LENGTH)))) return false;
   if ("source" in node) {
     const source = node.source;
@@ -211,6 +220,11 @@ function validateNodeV2(node, nodeIds) {
   if (node.kind === "code" && !validateCodeFields(node)) {
     throw new Error("The graph contains an invalid code field.");
   }
+  // The canvas shows the summary on the block and the pseudocode on hover;
+  // a block without them is a bare name, so the skill refuses to send one.
+  if (node.kind === "code" && DESCRIBED_CODE_BLOCKS.has(node.catalogId) && (!node.summary || !node.pseudocode?.length)) {
+    throw new Error(`Code block ${node.id} needs a summary and pseudocode.`);
+  }
   return { ...node };
 }
 
@@ -297,7 +311,66 @@ export function validateGraph(rawGraph) {
     };
   });
 
+  if (version === 2) validateCodeTypes(nodes, edges);
   return { version, nodes, edges };
+}
+
+const TYPE_BLOCKS = new Set(["code-type", "code-enum"]);
+// Capitalised names that are language built-ins, not types to draw.
+// ponytail: a fixed list; extend it when a language's standard types trip the check.
+const BUILTIN_TYPES = new Set([
+  "Array", "ReadonlyArray", "Map", "ReadonlyMap", "Set", "ReadonlySet", "WeakMap", "WeakSet", "Record", "Promise",
+  "Partial", "Required", "Readonly", "Pick", "Omit", "Exclude", "Extract", "NonNullable", "ReturnType", "Parameters",
+  "Awaited", "Date", "Error", "RegExp", "Function", "Object", "String", "Number", "Boolean", "BigInt", "Symbol",
+  "Uint8Array", "ArrayBuffer", "URL", "Request", "Response", "Headers", "Blob", "File",
+  "List", "Dict", "Tuple", "Optional", "Union", "Any", "Callable", "Iterable", "Iterator", "Sequence", "Mapping",
+  "Vec", "Option", "Result", "Box", "Rc", "Arc", "HashMap", "HashSet", "BTreeMap",
+  "Integer", "Long", "Double", "Float", "Byte", "Short", "Character", "Void", "Collection", "Stream",
+]);
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A type or enum is drawn only when a function's signature or pseudocode names
+ * it, or a drawn type's field uses it. Every function or type that names it
+ * points at it with a `uses` edge, field types are followed down to built-ins,
+ * and types sit together in boundaries that hold nothing else.
+ */
+function validateCodeTypes(nodes, edges) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const blocks = nodes.filter((node) => node.kind === "code" && DESCRIBED_CODE_BLOCKS.has(node.catalogId));
+  const uses = new Set(edges.filter((edge) => edge.kind === "uses").map((edge) => `${edge.source} ${edge.target}`));
+  for (const type of nodes.filter((node) => node.kind === "code" && TYPE_BLOCKS.has(node.catalogId))) {
+    const word = new RegExp(`(^|[^A-Za-z0-9_$])${escapeRegExp(type.label)}($|[^A-Za-z0-9_$])`);
+    const mentioning = blocks.filter((block) => word.test([block.signature ?? "", ...(block.pseudocode ?? [])].join("\n")));
+    const referencedByType = edges.some((edge) => edge.kind === "uses" && edge.target === type.id
+      && TYPE_BLOCKS.has(byId.get(edge.source)?.catalogId));
+    if (!mentioning.length && !referencedByType) {
+      throw new Error(`Type ${type.id} is not named in any signature or pseudocode. Leave it out, or name it where it is used.`);
+    }
+    for (const block of mentioning) {
+      if (!uses.has(`${block.id} ${type.id}`)) {
+        throw new Error(`${block.id} names ${type.label}, so it needs a uses edge to ${type.id}.`);
+      }
+    }
+    // A field typed with another of the codebase's types needs that type
+    // drawn too, all the way down to built-ins.
+    if (type.catalogId === "code-type") {
+      for (const row of type.rows ?? []) {
+        const fieldType = row.includes(":") ? row.slice(row.indexOf(":") + 1) : "";
+        for (const name of new Set(fieldType.match(/\b[A-Z][A-Za-z0-9_]*\b/g) ?? [])) {
+          if (BUILTIN_TYPES.has(name)) continue;
+          const drawn = nodes.find((node) => node.kind === "code" && TYPE_BLOCKS.has(node.catalogId) && node.label === name);
+          if (!drawn) throw new Error(`${type.label} has a field of type ${name}. Draw ${name} as a code-type or code-enum in the types boundary.`);
+          if (!uses.has(`${type.id} ${drawn.id}`)) throw new Error(`${type.label} has a field of type ${name}, so it needs a uses edge to ${drawn.id}.`);
+        }
+      }
+    }
+    const parent = byId.get(type.parentId);
+    const siblings = nodes.filter((node) => node.parentId === type.parentId);
+    if (!parent || siblings.some((node) => !(node.kind === "code" && TYPE_BLOCKS.has(node.catalogId)))) {
+      throw new Error(`Type ${type.id} must sit in a boundary that holds only types and enums.`);
+    }
+  }
 }
 
 export function validateCreateInput(rawTitle, rawGraph) {

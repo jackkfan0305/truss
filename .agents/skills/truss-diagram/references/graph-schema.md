@@ -94,6 +94,8 @@ A `code` node draws one piece of code. It takes the common optional fields plus 
 
 - `catalogId`: `code-entry`, `code-function`, `code-method`, `code-type` or `code-enum`.
 - `signature`: one line, at most 120 characters.
+- `summary`: one plain sentence on what the code does, at most 100 characters.
+- `pseudocode`: at most 16 lines of plain-language steps, each at most 80 characters, indented two spaces per level. Shown on hover.
 - `rows`: at most 12 strings of at most 60 characters, trimmed and single-line. Use them for the fields of a type or the values of an enum.
 - `source`: `{ "path": "...", "line": 12, "url": "https://github.com/..." }`. `path` is repository-relative and at most 200 characters. `line` is a positive integer. `url` must start with `https://github.com/`; leave it out otherwise.
 

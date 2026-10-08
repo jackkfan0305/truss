@@ -26,16 +26,32 @@ Call `truss_get_catalog` for the ids. Entries tagged `family: "code"` are:
 | Id | Use for |
 | --- | --- |
 | `code-entry` | Where a call path starts: a route handler, CLI command, job or listener. |
-| `code-function` | A standalone function. Put the one-line signature in `signature`. |
+| `code-function` | A standalone function. Put the one-line signature, with its return type, in `signature`. |
 | `code-method` | A method. Its `parentId` must be a `code-class` boundary. |
 | `code-type` | An interface, struct or record. One field per row in `rows`. |
 | `code-enum` | An enum or union. One value per row in `rows`. |
 | `code-class` | A boundary holding a class's constructor and methods. |
 | `code-module` | A boundary holding a file or package. Use it for the groups in an overview. |
 
+Every `code-entry`, `code-function` and `code-method` must have a `summary` and `pseudocode`; the tools refuse a graph without them. The `summary` is one plain sentence on what it does, such as `Checks the caller owns the diagram`. Describe the purpose, not the parameters.
+
+The `pseudocode` is 3 to 16 lines of plain-language steps, indented two spaces per level. The canvas shows it when the block is hovered. Name the decisions and calls that matter and skip the bookkeeping. When a step calls a block this one has an edge to, write `calls` and the callee's label exactly as it appears on its block, with its arguments. If the call returns something the function uses, add `, gets <name>` with a short name for the result, and use that name in later steps. The canvas colors callee names so the reader can match each step to an edge:
+
+```json
+["calls authorizeDiagram(request, id)", "calls parseEditRequest(body), gets edit", "for each node in edit:", "  calls collidesWithOpaque(live, node), gets overlaps", "  reject the edit if overlaps", "save under the diagram lock"]
+```
+
+## Types and enums
+
+Draw a `code-type` or `code-enum` only when a function's `signature` or `pseudocode` names it, even once. When one does, you must draw it. Each function that names it gets a `uses` edge to it, and the tools refuse a graph that breaks either rule. Leave out types the code only touches in passing.
+
+Follow field types down to built-ins. When a drawn type has a field whose type is another of the codebase's types, such as `side: EdgeSide`, draw that type too with a `uses` edge from the first type, and keep going until every field is a primitive (`string`, `number`) or a standard type (`Array`, `Map`, `Promise`). Library types are leaves: draw them without rows.
+
+Keep types apart from functions. Put every type and enum in a `code-module` boundary labelled `Types`, or one per area when there are many, such as `Diagram types`. These boundaries hold only types and enums; functions stay in their file boundaries.
+
 ## Edges
 
-Edges run from caller to callee. Use `kind: "calls"` for a call (the default) and `kind: "uses"` for a reference to a type. Label an edge only when the call is not obvious, such as `on retry`.
+Edges run from caller to callee. Use `kind: "calls"` for a call (the default) and `kind: "uses"` for a reference to a type. Label an edge only when the call is not obvious, such as `on retry`. Keep labels to two or three words and leave out step numbers; most calls need no label.
 
 ## Source links
 
@@ -51,7 +67,9 @@ If the remote is on GitHub and the last command prints a branch, set `source.url
 
 ## Limits
 
-- `signature`: one line, at most 120 characters.
+- `signature`: one line, at most 120 characters. End it with the return type in the source language's own syntax, such as `parseEditRequest(value): EditRequest` or `def load(path) -> Config`. Leave the return type off only when the function returns nothing.
+- `summary`: one line, at most 100 characters.
+- `pseudocode`: at most 16 lines of at most 80 characters, no trailing spaces. Leading spaces are kept.
 - `rows`: at most 12 strings, each at most 60 characters, trimmed, one line.
 - `source.path`: repository-relative, at most 200 characters. `source.line`: a positive integer. `source.url`: starts with `https://github.com/`.
 - A version 2 graph holds at most 80 nodes and 120 edges.
@@ -64,10 +82,11 @@ Prompt: "what happens when `main()` runs".
 {
   "version": 2,
   "nodes": [
-    { "id": "main", "kind": "code", "catalogId": "code-entry", "label": "main", "signature": "main()", "source": { "path": "src/main.ts", "line": 1, "url": "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
+    { "id": "main", "kind": "code", "catalogId": "code-entry", "label": "main", "signature": "main(): Promise<void>", "summary": "Loads config and starts the service.", "pseudocode": ["load config", "calls run()"], "source": { "path": "src/main.ts", "line": 1, "url": "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
     { "id": "svc", "kind": "boundary", "catalogId": "code-class", "label": "Service" },
-    { "id": "run", "kind": "code", "catalogId": "code-method", "label": "run", "parentId": "svc" },
-    { "id": "cfg", "kind": "code", "catalogId": "code-type", "label": "Config", "rows": ["port: number"] }
+    { "id": "run", "kind": "code", "catalogId": "code-method", "label": "run", "summary": "Serves requests until stopped.", "signature": "run(): void", "pseudocode": ["read the port from Config", "loop until stopped:", "  handle the next request"], "parentId": "svc" },
+    { "id": "cfg", "kind": "code", "catalogId": "code-type", "label": "Config", "rows": ["port: number"], "parentId": "types" },
+    { "id": "types", "kind": "boundary", "catalogId": "code-module", "label": "Types" }
   ],
   "edges": [
     { "id": "e1", "source": "main", "target": "run", "label": "", "kind": "calls" },

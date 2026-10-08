@@ -252,10 +252,11 @@ try {
   const codeGraph = {
     version: 2,
     nodes: [
-      { id: "main", kind: "code", catalogId: "code-entry", label: "main", signature: "main()", source: { path: "src/main.ts", line: 1, url: "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
+      { id: "main", kind: "code", catalogId: "code-entry", label: "main", signature: "main()", summary: "Starts the app.", pseudocode: ["start the app"], source: { path: "src/main.ts", line: 1, url: "https://github.com/o/r/blob/abc/src/main.ts#L1" } },
       { id: "svc", kind: "boundary", catalogId: "code-class", label: "Service" },
-      { id: "run", kind: "code", catalogId: "code-method", label: "run", parentId: "svc" },
-      { id: "cfg", kind: "code", catalogId: "code-type", label: "Config", rows: ["port: number"] },
+      { id: "run", kind: "code", catalogId: "code-method", label: "run", summary: "Runs it.", pseudocode: ["read Config", "do the work"], parentId: "svc" },
+      { id: "cfg", kind: "code", catalogId: "code-type", label: "Config", rows: ["port: number"], parentId: "types" },
+    { id: "types", kind: "boundary", catalogId: "code-module", label: "Types" },
     ],
     edges: [
       { id: "e1", source: "main", target: "run", label: "", kind: "calls" },

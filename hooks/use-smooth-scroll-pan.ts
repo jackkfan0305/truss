@@ -33,7 +33,7 @@ export function useSmoothScrollPan(ref: RefObject<HTMLElement | null>) {
 
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey) return;
-      if ((event.target as Element).closest(".nowheel")) return;
+      if ((event.target as Element).closest(".nowheel") || scrollsInside(event.target as Element, el, event)) return;
       event.preventDefault();
       const scale = event.deltaMode === 1 ? 20 : 1;
       // Shift+wheel on a mouse scrolls sideways.
@@ -49,4 +49,16 @@ export function useSmoothScrollPan(ref: RefObject<HTMLElement | null>) {
       cancelAnimationFrame(frame);
     };
   }, [ref, getViewport, setViewport]);
+}
+
+/** Whether a panel between `target` and the canvas wrapper can still scroll in the wheel's direction. */
+function scrollsInside(target: Element, wrapper: Element, event: WheelEvent): boolean {
+  for (let at: Element | null = target; at && at !== wrapper; at = at.parentElement) {
+    const { overflowY, overflowX } = getComputedStyle(at);
+    const canY = /auto|scroll/.test(overflowY) && at.scrollHeight > at.clientHeight;
+    const canX = /auto|scroll/.test(overflowX) && at.scrollWidth > at.clientWidth;
+    if (canY && event.deltaY && (event.deltaY < 0 ? at.scrollTop > 0 : at.scrollTop + at.clientHeight < at.scrollHeight)) return true;
+    if (canX && event.deltaX && (event.deltaX < 0 ? at.scrollLeft > 0 : at.scrollLeft + at.clientWidth < at.scrollWidth)) return true;
+  }
+  return false;
 }

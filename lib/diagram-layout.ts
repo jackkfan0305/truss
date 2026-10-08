@@ -67,7 +67,7 @@ function overlapsAlong(a1: DiagramPoint, a2: DiagramPoint, b1: DiagramPoint, b2:
 /** Spacing between the vertical lanes tried when ELK's own channel is taken. */
 const LANE_STEP = 12;
 
-interface RoutedEdge { id: string; source: string; target: string; points: DiagramPoint[] }
+interface RoutedEdge { id: string; source: string; target: string; points: DiagramPoint[]; labeled?: boolean }
 
 /**
  * ELK detours an edge that leaves a boundary through a shared channel, so a
@@ -91,7 +91,8 @@ export function straightenRoutes(edges: readonly RoutedEdge[], nodes: readonly C
 
   for (const edge of edges) {
     const points = edge.points;
-    if (bendCount(points) < 2) continue;
+    // ELK placed the label on the original route; moving the route would leave it behind.
+    if (edge.labeled || bendCount(points) < 2) continue;
     const [start, second] = points;
     const end = points[points.length - 1];
     const beforeEnd = points[points.length - 2];
@@ -197,7 +198,7 @@ export async function layoutDiagram(
     const routed = flat.edges.get(edge.id);
     if (!routed) throw new Error("Diagram layout did not route every connection");
     return {
-      id: edge.id, source: edge.source, target: edge.target,
+      id: edge.id, source: edge.source, target: edge.target, labeled: Boolean(routed.edge.labels?.length),
       points: simplify(assembleDiagramElkRoute(routed.edge, routed.origin).map((point) => ({ x: Math.round(point.x), y: Math.round(point.y) }))),
     };
   }), nodes);

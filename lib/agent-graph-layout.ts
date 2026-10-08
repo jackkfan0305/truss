@@ -63,7 +63,7 @@ export async function resolveAgentGraphLayout(
     return { ...result, nodes: [...laid, ...placeNotes(laid, notes, addedIds)] };
   };
 
-  const opaqueIds = new Set(canvasToAgentGraph(liveDiagram).opaqueNodeIds);
+  const opaqueIds = new Set(canvasToAgentGraph(liveDiagram, graph.version === 2 ? 2 : 1).opaqueNodeIds);
   const desiredIds = new Set(diagram.nodes.map((node) => node.id));
   const obstacles = liveDiagram.nodes.filter((node) => opaqueIds.has(node.id) && !desiredIds.has(node.id));
 

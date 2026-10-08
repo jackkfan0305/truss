@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext } from "react";
+import { useContext, useEffect } from "react";
 import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlowState } from "@xyflow/react";
 
 import { AwsIcon } from "@/components/canvas/aws-icon";
@@ -31,6 +31,8 @@ export function CanvasBoundaryRenderer({ id, data, selected }: NodeProps<CanvasN
   const minHeight = useStore(minimumOf("height"));
 
   const isCode = data.catalogId?.startsWith("code-") === true;
+  // A boundary removed under the pointer never gets pointerleave, so drop its hover on unmount.
+  useEffect(() => () => setHoveredCodeModule(id, false), [id]);
   // Another module is hovered and this one neither holds it nor sits in it.
   const hoveredModule = useHoveredCodeModule();
   const isDimmed = useStore((state) => {

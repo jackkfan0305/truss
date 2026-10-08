@@ -181,8 +181,9 @@ export function materializeAgentGraph(
         ...(node.catalogId ? { catalogId: node.catalogId } : {}),
         ...(node.signature ? { signature: node.signature } : {}),
         ...(node.summary ? { summary: node.summary } : {}),
-        ...(node.pseudocode ? { pseudocode: node.pseudocode } : {}),
-        ...(node.rows ? { rows: node.rows } : {}),
+        // Empty arrays are dropped, matching what a snapshot read returns, so an exact replay still compares equal.
+        ...(node.pseudocode?.length ? { pseudocode: node.pseudocode } : {}),
+        ...(node.rows?.length ? { rows: node.rows } : {}),
         ...(node.source ? { source: node.source } : {}),
       },
       ...(isV2 && node.parentId ? { parentId: node.parentId } : {}),

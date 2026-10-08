@@ -6,6 +6,7 @@ import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlow
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
 import { CodeIcon } from "@/components/canvas/code-icon";
+import { isInsideModule, setHoveredCodeModule, useHoveredCodeModule } from "@/components/canvas/code-hover";
 import { BoundaryResizeContext } from "@/lib/canvas-boundary-context";
 import { getBoundaryMinimumSize } from "@/lib/canvas-interaction";
 import type { CanvasNode } from "@/types/canvas";
@@ -29,12 +30,24 @@ export function CanvasBoundaryRenderer({ id, data, selected }: NodeProps<CanvasN
   const minHeight = useStore(minimumOf("height"));
 
   const isCode = data.catalogId?.startsWith("code-") === true;
+  // Another module is hovered and this one neither holds it nor sits in it.
+  const hoveredModule = useHoveredCodeModule();
+  const isDimmed = useStore((state) => {
+    if (!isCode || hoveredModule === null) return false;
+    const parentOf = (nodeId: string) => state.nodeLookup.get(nodeId)?.parentId;
+    return !isInsideModule(id, hoveredModule, parentOf) && !isInsideModule(hoveredModule, id, parentOf);
+  });
 
   return (
     <>
       {isCode ? (
-        <div data-code-boundary="" className="flex h-full w-full flex-col rounded-md border border-surface-border bg-transparent">
-          <div className="flex h-8 items-center gap-2 border-b border-surface-border bg-elevated px-3 font-mono text-sm">
+        <div
+          data-code-boundary=""
+          onPointerEnter={() => setHoveredCodeModule(id, true)}
+          onPointerLeave={() => setHoveredCodeModule(id, false)}
+          className={`code-module${isDimmed ? " code-dimmed" : ""} flex h-full w-full flex-col overflow-hidden rounded-lg border border-surface-border-subtle`}
+        >
+          <div className="flex h-8 items-center gap-2 border-b border-surface-border-subtle bg-subtle px-3 font-mono text-sm">
             <CodeIcon catalogId={data.catalogId!} className="text-copy-muted" />
             <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
           </div>

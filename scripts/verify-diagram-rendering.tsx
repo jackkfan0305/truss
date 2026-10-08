@@ -11,6 +11,7 @@ import { getAwsCatalogEntry } from "../lib/aws-catalog";
 import { awsNode } from "./testing/aws-diagram-fixtures";
 import { useEffect } from "react";
 import { CanvasEdgeRenderer, USES_EDGE_DASH } from "../components/canvas/canvas-edge";
+import { activeCodeBlock, arrowCardSide, isInsideModule, quietCardSide, setHoveredCodeBlock, setPinnedCodeBlock } from "../components/canvas/code-hover";
 import { CanvasEdgeRouteProvider } from "../components/canvas/canvas-edge-routes";
 import { parseCanvasSnapshot, serializeCanvasSnapshot } from "../lib/canvas-snapshot";
 import { diagramGeometryKey } from "../lib/diagram-route";
@@ -110,11 +111,12 @@ async function checkCodeRendering() {
 
   // Signature, rows and a GitHub source link.
   await show([codeNode("reserve", {
-    signature: "reserve(sku, qty)", rows: ["items: OrderItem[]"],
+    signature: "reserve(sku, qty)", summary: "Holds stock for an order.", rows: ["items: OrderItem[]"],
     source: { path: "lib/inventory.ts", line: 42, url: "https://github.com/o/r/blob/abc/lib/inventory.ts#L42" },
   })]);
   const linked = rendered("reserve").innerHTML;
-  assert.match(linked, /reserve\(sku, qty\)/);
+  assert.match(linked, /Holds stock for an order\./);
+  assert.doesNotMatch(linked, /reserve\(sku, qty\)/, "the signature shows on hover, not on the block");
   assert.match(linked, /items: OrderItem\[\]/);
   assert.match(linked, /href="https:\/\/github.com\/o\/r\/blob\/abc\/lib\/inventory.ts#L42"/);
   assert.match(linked, /target="_blank"/);
@@ -184,3 +186,35 @@ async function main() {
   console.log("Diagram rendering verification passed.");
 }
 void main();
+
+// The pseudocode card opens away from the blocks its lit edges lead to.
+{
+  const block = { x: 0, y: 0, width: 100, height: 50 };
+  const at = (x: number, y: number) => ({ x, y, width: 100, height: 50 });
+  assert.equal(quietCardSide(block, []), "right");
+  assert.equal(quietCardSide(block, [at(300, 0), at(300, 200)]), "left", "callees on the right");
+  assert.equal(quietCardSide(block, [at(-300, 0)]), "right", "a caller on the left");
+  assert.equal(quietCardSide(block, [at(300, 0), at(-300, 0), at(0, 200)]), "top", "both sides and below");
+}
+
+// Module hover keeps blocks nested at any depth lit, and nothing outside.
+{
+  const parents: Record<string, string | undefined> = { method: "class", class: "module", other: undefined };
+  const parentOf = (id: string) => parents[id];
+  assert.ok(isInsideModule("method", "module", parentOf), "nested two deep");
+  assert.ok(!isInsideModule("other", "module", parentOf), "outside");
+  assert.ok(!isInsideModule("module", "class", parentOf), "a parent is not inside its child");
+}
+
+// Pinning: keys act on the hovered card first, then the pinned one; arrows map to sides.
+{
+  setPinnedCodeBlock("a");
+  assert.equal(activeCodeBlock(), "a", "the pinned card is active with nothing hovered");
+  setHoveredCodeBlock("b", true);
+  assert.equal(activeCodeBlock(), "b", "a hovered card takes the keys");
+  setHoveredCodeBlock("b", false);
+  assert.equal(activeCodeBlock(), "a");
+  setPinnedCodeBlock(null);
+  assert.equal(activeCodeBlock(), null);
+  assert.deepEqual(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "x"].map(arrowCardSide), ["left", "right", "top", "bottom", null]);
+}

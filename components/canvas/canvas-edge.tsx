@@ -3,6 +3,7 @@
 import { useCallback, useState, type KeyboardEvent } from "react";
 import {
   BaseEdge,
+  useStore,
   EdgeLabelRenderer,
   getSmoothStepPath,
   Position,
@@ -11,6 +12,7 @@ import {
 } from "@xyflow/react";
 
 import { useIsAgentEditing } from "@/components/canvas/agent-presence";
+import { isInsideModule, useHoveredCodeBlock, useHoveredCodeModule } from "@/components/canvas/code-hover";
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import {
   useEdgeLabelOffset,
@@ -63,8 +65,13 @@ const SIDE_POSITIONS: Record<EdgeSide, Position> = {
 const LABEL_BASE_CLASS =
   "nodrag nopan nokey rounded-xl border px-2 py-0.5 text-xs leading-tight";
 
+/** How far edges fade while a code block's card is open and they are not its own. */
+const UNRELATED_OPACITY = 0.2;
+
 export function CanvasEdgeRenderer({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   sourcePosition,
@@ -106,6 +113,19 @@ export function CanvasEdgeRenderer({
     : fallbackPath;
   const label = data?.label ?? "";
   const isActive = isHovered || selected === true || isEditing || isAgentEditing;
+  // While a code block's pseudocode is open, its own edges light up in the
+  // accent and every other edge steps back.
+  const hoveredBlock = useHoveredCodeBlock();
+  // A hovered module lights every edge with an end inside it.
+  const hoveredModule = useHoveredCodeModule();
+  const touchesModule = useStore((state) => {
+    if (hoveredModule === null) return false;
+    const parentOf = (nodeId: string) => state.nodeLookup.get(nodeId)?.parentId;
+    return isInsideModule(source, hoveredModule, parentOf) || isInsideModule(target, hoveredModule, parentOf);
+  });
+  const focus = hoveredBlock ?? hoveredModule;
+  const isLinked = hoveredBlock !== null ? source === hoveredBlock || target === hoveredBlock : touchesModule;
+  const opacity = focus === null ? (isActive ? 1 : REST_OPACITY) : isLinked ? 1 : UNRELATED_OPACITY;
   const positionedLabel = savedRoute?.label
     ? { x: savedRoute.label.x, y: savedRoute.label.y }
     : positionParallelEdgeLabel({
@@ -152,8 +172,8 @@ export function CanvasEdgeRenderer({
        * together instead of leaving a full-strength arrow on a faded edge.
        */}
       <g
-        className={isAgentEditing ? "canvas-edge canvas-agent-editing" : "canvas-edge"}
-        style={{ opacity: isActive ? 1 : REST_OPACITY }}
+        className={`canvas-edge${isAgentEditing ? " canvas-agent-editing" : ""}${isLinked ? " canvas-edge-linked" : ""}`}
+        style={{ opacity, transition: "opacity 200ms" }}
         onMouseEnter={show}
         onMouseLeave={hide}
         onDoubleClick={startEditing}

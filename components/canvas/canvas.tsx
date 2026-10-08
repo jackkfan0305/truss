@@ -49,6 +49,7 @@ import { createNoteNode } from "@/lib/canvas-note";
 import { useCanvasSave } from "@/components/canvas/canvas-save-context";
 import { useCanvasAutosave } from "@/hooks/use-canvas-autosave";
 import { useCanvasHistory } from "@/hooks/use-canvas-history";
+import { useSmoothScrollPan } from "@/hooks/use-smooth-scroll-pan";
 import { useCanvasRemoteSync } from "@/hooks/use-canvas-remote-sync";
 import { isCanvasHistoryCommit } from "@/lib/canvas-history";
 import { canonicalCanvasPayload, type CanvasSnapshot } from "@/lib/canvas-snapshot";
@@ -168,6 +169,7 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
   const [edges, setEdges, applyEdgeChanges] = useEdgesState<CanvasEdge>(initial.snapshot.edges);
   const { screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  useSmoothScrollPan(wrapperRef);
   const replaying = useRef(false);
   const [isReplaying, setIsReplaying] = useState(false);
 
@@ -540,6 +542,9 @@ function CanvasFlow({ diagramId, initial }: CanvasProps) {
           // tabIndex the wrapper cannot take it and the browser drops focus on
           // <body> instead. Nodes are still individually tab-reachable.
           tabIndex={-1}
+          // Figma-style trackpad: two-finger scroll pans (useSmoothScrollPan),
+          // pinch zooms (zoomOnPinch, on by default).
+          zoomOnScroll={false}
           fitView
           minZoom={MIN_ZOOM}
           proOptions={{ hideAttribution: true }}

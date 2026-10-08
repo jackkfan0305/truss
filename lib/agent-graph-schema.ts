@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { MAX_NOTE_TEXT_LENGTH, NODE_COLORS, NODE_SHAPES, NOTE_COLORS, type NodeColor, type NoteColor } from "@/types/canvas";
 import { getAwsCatalogEntry } from "@/lib/aws-catalog";
+import { isBoundaryCatalogId } from "@/lib/catalog";
+import { getCodeCatalogEntry, isGithubSourceUrl } from "@/lib/code-catalog";
 
 /**
  * The compact agent-graph contract. Kept apart from lib/agent-graph.ts, which
@@ -11,6 +13,18 @@ import { getAwsCatalogEntry } from "@/lib/aws-catalog";
 
 export const MAX_AGENT_GRAPH_NODES = 40;
 export const MAX_AGENT_GRAPH_EDGES = 60;
+/** Detail views of real code overflow 40 nodes; v1 keeps its original limits. */
+export const MAX_AGENT_GRAPH_V2_NODES = 80;
+export const MAX_AGENT_GRAPH_V2_EDGES = 120;
+export const MAX_CODE_SIGNATURE_LENGTH = 120;
+export const MAX_CODE_SUMMARY_LENGTH = 100;
+export const MAX_CODE_PSEUDOCODE_LINES = 16;
+export const MAX_CODE_PSEUDOCODE_LINE_LENGTH = 80;
+export const MAX_CODE_ROWS = 12;
+export const MAX_CODE_ROW_LENGTH = 60;
+export const MAX_CODE_SOURCE_PATH_LENGTH = 200;
+export const MAX_CODE_SOURCE_URL_LENGTH = 500;
+export const CODE_EDGE_KINDS = ["calls", "uses"] as const;
 
 const AGENT_GRAPH_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_AGENT_GRAPH_ID_LENGTH = 48;
@@ -187,6 +201,32 @@ const boundaryV2Fields = {
   catalogId: z.string(),
 };
 
+function codeLine(maximumLength: number) {
+  return canonicalTrimmedString(1, maximumLength).refine((value) => !/[\r\n]/.test(value), {
+    message: "Value must be a single line.",
+  });
+}
+
+export const codeSourceSchema = z.strictObject({
+  path: codeLine(MAX_CODE_SOURCE_PATH_LENGTH),
+  line: z.number().int().positive().optional(),
+  url: z.string().max(MAX_CODE_SOURCE_URL_LENGTH).refine(isGithubSourceUrl, { message: "Source URL must start with https://github.com/." }).optional(),
+});
+
+const codeV2Fields = {
+  kind: z.literal("code"),
+  catalogId: z.string(),
+  signature: codeLine(MAX_CODE_SIGNATURE_LENGTH).optional(),
+  summary: codeLine(MAX_CODE_SUMMARY_LENGTH).optional(),
+  // Leading spaces carry the indentation, so lines are not trimmed at the start.
+  pseudocode: z.array(z.string().min(1).max(MAX_CODE_PSEUDOCODE_LINE_LENGTH)
+    .refine((line) => !/[\r\n]/.test(line) && line.trim().length > 0 && line === line.trimEnd(), {
+      message: "Each pseudocode line must be one non-blank line with no trailing spaces.",
+    })).max(MAX_CODE_PSEUDOCODE_LINES).optional(),
+  rows: z.array(codeLine(MAX_CODE_ROW_LENGTH)).max(MAX_CODE_ROWS).optional(),
+  source: codeSourceSchema.optional(),
+};
+
 const baseV2 = {
   id: agentGraphIdSchema,
   label: canonicalTrimmedString(1, MAX_AGENT_GRAPH_NODE_LABEL_LENGTH),
@@ -202,6 +242,7 @@ export const agentGraphNodeV2Schema = z
     z.strictObject({ ...baseV2, ...genericV2Fields }),
     z.strictObject({ ...baseV2, ...serviceV2Fields }),
     z.strictObject({ ...baseV2, ...boundaryV2Fields }),
+    z.strictObject({ ...baseV2, ...codeV2Fields }),
     // No parentId: notes float free of every boundary.
     z.strictObject({
       kind: z.literal("note"),
@@ -230,17 +271,21 @@ export const agentGraphNodeV2Schema = z
         message: "Supply both dimensions or omit both.",
       });
     }
-    if (node.kind === "aws-service" || node.kind === "boundary") {
-      const expected = node.kind === "boundary" ? "boundary" : "service";
-      if (getAwsCatalogEntry(node.catalogId)?.kind !== expected) {
-        context.addIssue({
-          code: "custom",
-          path: ["catalogId"],
-          message: "Catalog ID must match the node kind.",
-        });
-      }
+    if (node.kind === "aws-service" && getAwsCatalogEntry(node.catalogId)?.kind !== "service") {
+      context.addIssue({ code: "custom", path: ["catalogId"], message: "Catalog ID must match the node kind." });
+    }
+    if (node.kind === "boundary" && !isBoundaryCatalogId(node.catalogId)) {
+      context.addIssue({ code: "custom", path: ["catalogId"], message: "Catalog ID must match the node kind." });
+    }
+    if (node.kind === "code" && getCodeCatalogEntry(node.catalogId)?.kind !== "block") {
+      context.addIssue({ code: "custom", path: ["catalogId"], message: "Catalog ID must name a code block." });
     }
   });
+
+/** v2 edges may say what the relationship is; v1 edges stay exactly as they were. */
+export const agentGraphEdgeV2Schema = agentGraphEdgeSchema.extend({
+  kind: z.enum(CODE_EDGE_KINDS).optional(),
+});
 
 /**
  * Build version 2 graph schema with hierarchy and topology validation.
@@ -251,14 +296,15 @@ interface HierarchyNode {
   id: string;
   parentId?: string;
   kind?: string;
+  catalogId?: string;
 }
 
 function buildAgentGraphV2Schema(minimumNodes: 0 | 1) {
   return z
     .strictObject({
       version: z.literal(2),
-      nodes: z.array(agentGraphNodeV2Schema).min(minimumNodes).max(MAX_AGENT_GRAPH_NODES),
-      edges: z.array(agentGraphEdgeSchema).max(MAX_AGENT_GRAPH_EDGES),
+      nodes: z.array(agentGraphNodeV2Schema).min(minimumNodes).max(MAX_AGENT_GRAPH_V2_NODES),
+      edges: z.array(agentGraphEdgeV2Schema).max(MAX_AGENT_GRAPH_V2_EDGES),
     })
     .superRefine((graph, context) => {
       const nodeIds = new Set<string>();
@@ -315,8 +361,17 @@ function buildAgentGraphV2Schema(minimumNodes: 0 | 1) {
         }
       }
 
+      // A method only makes sense inside its class.
+      for (const [index, node] of graph.nodes.entries()) {
+        if (node.kind !== "code" || node.catalogId !== "code-method") continue;
+        const parent = node.parentId ? byId.get(node.parentId) : undefined;
+        if (parent?.catalogId !== "code-class") {
+          context.addIssue({ code: "custom", path: ["nodes", index, "parentId"], message: "A method must sit inside a code-class boundary." });
+        }
+      }
+
       // Validate edges (shared with v1)
-      const noteIds = new Set(graph.nodes.filter((node) => node.kind === "note").map((node) => node.id));
+      const noteIds = new Set(graph.nodes.flatMap((node) => (node.kind === "note" ? [node.id] : [])));
       const edgeIds = new Set<string>();
       const endpointPairs = new Set<string>();
 
@@ -407,9 +462,14 @@ export const agentGraphModelSchema = z.union([
     nodes: z.array(
       z.looseObject({
         id: z.string().describe("Unique lowercase kebab-case id, at most 48 characters."),
-        kind: z.enum(["generic", "aws-service", "boundary", "note"]),
+        kind: z.enum(["generic", "aws-service", "boundary", "note", "code"]),
         label: z.string().describe("Short label, at most 80 characters, no surrounding spaces. A note's text may run to 1000 characters."),
-        catalogId: z.string().optional().describe("Required for aws-service and boundary nodes; an id from get_aws_catalog. Never send it for generic nodes."),
+        catalogId: z.string().optional().describe("Required for aws-service, boundary and code nodes; an id from get_catalog. Never send it for generic nodes."),
+        signature: z.string().optional().describe("Code nodes only. Keep the value you read."),
+        summary: z.string().optional().describe("Code nodes only. Keep the value you read."),
+        pseudocode: z.array(z.string()).optional().describe("Code nodes only. Keep the value you read."),
+        rows: z.array(z.string()).optional().describe("Code nodes only. Keep the values you read."),
+        source: z.looseObject({ path: z.string(), line: z.number().optional(), url: z.string().optional() }).optional().describe("Code nodes only. Keep the value you read."),
         shape: z.enum(NODE_SHAPES).optional().describe("Generic nodes only."),
         color: z.enum([...nodeColorValues, "yellow"]).optional().describe("Generic nodes: the node palette. Notes only: yellow, pink, blue or green."),
         parentId: z.string().optional().describe("The id of the boundary that visually holds this node. Never on a note."),
@@ -419,12 +479,13 @@ export const agentGraphModelSchema = z.union([
         height: z.number().optional().describe("Supply only together with width."),
       }),
     ),
-    edges: z.array(agentGraphEdgeModelSchema()),
+    edges: z.array(agentGraphEdgeModelSchema(true)),
   }),
 ]);
 
-function agentGraphEdgeModelSchema() {
+function agentGraphEdgeModelSchema(withKind = false) {
   return z.looseObject({
+    ...(withKind ? { kind: z.enum(CODE_EDGE_KINDS).optional().describe("Code diagrams: calls (default, solid) or uses (dashed). Keep the value you read.") } : {}),
     id: z.string().describe("Unique lowercase kebab-case id."),
     source: z.string(),
     target: z.string(),

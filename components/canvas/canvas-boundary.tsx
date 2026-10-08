@@ -1,10 +1,13 @@
 "use client";
 
-import { useContext } from "react";
+import { useContext, useEffect } from "react";
 import { Handle, NodeResizer, Position, useStore, type NodeProps, type ReactFlowState } from "@xyflow/react";
 
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
+import { CodeIcon } from "@/components/canvas/code-icon";
+import { setHoveredCodeModule, useHoveredCodeModule } from "@/components/canvas/code-hover";
+import { isInsideModule } from "@/lib/code-card";
 import { BoundaryResizeContext } from "@/lib/canvas-boundary-context";
 import { getBoundaryMinimumSize } from "@/lib/canvas-interaction";
 import type { CanvasNode } from "@/types/canvas";
@@ -27,13 +30,40 @@ export function CanvasBoundaryRenderer({ id, data, selected }: NodeProps<CanvasN
   const minWidth = useStore(minimumOf("width"));
   const minHeight = useStore(minimumOf("height"));
 
+  const isCode = data.catalogId?.startsWith("code-") === true;
+  // A boundary removed under the pointer never gets pointerleave, so drop its hover on unmount.
+  useEffect(() => () => setHoveredCodeModule(id, false), [id]);
+  // Another module is hovered and this one neither holds it nor sits in it.
+  const hoveredModule = useHoveredCodeModule();
+  const isDimmed = useStore((state) => {
+    if (!isCode || hoveredModule === null) return false;
+    const parentOf = (nodeId: string) => state.nodeLookup.get(nodeId)?.parentId;
+    return !isInsideModule(id, hoveredModule, parentOf) && !isInsideModule(hoveredModule, id, parentOf);
+  });
+
   return (
     <>
-      <div className="h-full w-full border border-dashed border-copy-muted bg-transparent" />
-      <div className="absolute left-4 top-0 flex max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-2 bg-page px-2 text-sm">
-        {data.catalogId ? <AwsIcon catalogId={data.catalogId} className="h-5 w-5" /> : null}
-        <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
-      </div>
+      {isCode ? (
+        <div
+          data-code-boundary=""
+          onPointerEnter={() => setHoveredCodeModule(id, true)}
+          onPointerLeave={() => setHoveredCodeModule(id, false)}
+          className={`code-module${isDimmed ? " code-dimmed" : ""} flex h-full w-full flex-col overflow-hidden rounded-lg border border-surface-border-subtle`}
+        >
+          <div className="flex h-8 items-center gap-2 border-b border-surface-border-subtle bg-subtle px-3 font-mono text-sm">
+            <CodeIcon catalogId={data.catalogId!} className="text-copy-muted" />
+            <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="h-full w-full border border-dashed border-copy-muted bg-transparent" />
+          <div className="absolute left-4 top-0 flex max-w-[calc(100%-2rem)] -translate-y-1/2 items-center gap-2 bg-page px-2 text-sm">
+            {data.catalogId ? <AwsIcon catalogId={data.catalogId} className="h-5 w-5" /> : null}
+            <CanvasLabel id={id} label={data.label} ariaLabel="Boundary title" className="min-w-0" />
+          </div>
+        </>
+      )}
       {HANDLE_POSITIONS.map((position) => (
         <Handle key={position} id={position} type="source" position={position} />
       ))}

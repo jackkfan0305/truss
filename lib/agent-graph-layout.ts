@@ -47,10 +47,11 @@ export async function resolveAgentGraphLayout(
     }),
     edges: materialized.edges.map((edge) => {
       const previous = existingEdges.get(edge.id);
-      return previous ? {
-        ...previous, source: edge.source, target: edge.target,
-        data: { ...previous.data, ...edge.data! },
-      } : edge;
+      if (!previous) return edge;
+      // The graph states an edge's kind, so a missing one clears the stored kind.
+      const previousData = { ...(previous.data ?? { label: "" }) };
+      delete previousData.kind;
+      return { ...previous, source: edge.source, target: edge.target, data: { ...previousData, ...edge.data! } };
     }),
   };
   // Notes never enter ELK: lay out the diagram without them, then place them beside it.
@@ -62,7 +63,7 @@ export async function resolveAgentGraphLayout(
     return { ...result, nodes: [...laid, ...placeNotes(laid, notes, addedIds)] };
   };
 
-  const opaqueIds = new Set(canvasToAgentGraph(liveDiagram).opaqueNodeIds);
+  const opaqueIds = new Set(canvasToAgentGraph(liveDiagram, graph.version === 2 ? 2 : 1).opaqueNodeIds);
   const desiredIds = new Set(diagram.nodes.map((node) => node.id));
   const obstacles = liveDiagram.nodes.filter((node) => opaqueIds.has(node.id) && !desiredIds.has(node.id));
 

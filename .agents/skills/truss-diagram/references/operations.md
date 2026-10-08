@@ -39,7 +39,7 @@ Once you have a `diagramId` from the list, use it in the calls below. Never assi
 }
 ```
 
-`graph` is the compact projection of the live canvas — the version 2 contract in [graph-schema.md](graph-schema.md). `opaqueNodeIds` lists canvas items the compact contract cannot express; never assign one of these ids to a node in your edit, and treat their `spatial` bounds as obstacles. `spatial` is read-only: node `position` is parent-relative top-left, while `bounds` and edge route points are absolute canvas coordinates. Do not echo any of it into `desiredGraph`. Call `truss_get_aws_catalog` for catalog ids and descriptions when adding AWS services.
+`graph` is the compact projection of the live canvas — the version 2 contract in [graph-schema.md](graph-schema.md). `opaqueNodeIds` lists canvas items the compact contract cannot express; never assign one of these ids to a node in your edit, and treat their `spatial` bounds as obstacles. `spatial` is read-only: node `position` is parent-relative top-left, while `bounds` and edge route points are absolute canvas coordinates. Do not echo any of it into `desiredGraph`. Call `truss_get_catalog` for catalog ids and descriptions when adding AWS or code blocks.
 
 Apply the user's requested change **in place**, against `graph`:
 

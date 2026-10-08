@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { layoutDiagram } from "../lib/diagram-layout";
+import { layoutDiagram, straightenRoutes } from "../lib/diagram-layout";
 import { getDiagramEdgeLayout, parseDiagramEdgeLayout } from "../lib/diagram-route";
 import type { CanvasSnapshot } from "../lib/canvas-snapshot";
 import { CANVAS_NODE_TYPE, CANVAS_EDGE_TYPE, type CanvasNode, type CanvasEdge } from "../types/canvas";
@@ -129,3 +129,24 @@ async function main() {
   console.log("Diagram layout verification passed");
 }
 void main().catch((error) => { console.error(error); process.exitCode = 1; });
+
+// Straightening: a detour through a channel collapses to one vertical run when
+// nothing is in the way, and keeps ELK's route when a block sits on the short cut.
+{
+  const block = (id: string, x: number, y: number) => ({
+    id, type: "canvasNode", position: { x, y }, width: 100, height: 40, data: { label: id, color: "neutral", shape: "rectangle" },
+  }) as CanvasNode;
+  const detour = [{ x: 100, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 80 }, { x: 300, y: 80 }, { x: 300, y: 220 }, { x: 400, y: 220 }];
+  const open = straightenRoutes([{ id: "e", source: "a", target: "b", points: detour }], [block("a", 0, 0), block("b", 400, 200)]);
+  assert.deepEqual(open.get("e"), [{ x: 100, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 220 }, { x: 400, y: 220 }], "detour straightened");
+  const walled = straightenRoutes([{ id: "e", source: "a", target: "b", points: detour }], [block("a", 0, 0), block("b", 400, 200), block("wall", 120, 0), block("floor", 200, 200)]);
+  assert.deepEqual(walled.get("e"), detour, "a block on every short cut keeps the detour");
+}
+
+// Blocks of different widths in one column share a left edge.
+void (async () => {
+  const fan = graph(["hub", "short", "a much longer block name here", "mid length name"], [["hub", "short"], ["hub", "a much longer block name here"], ["hub", "mid length name"]]);
+  const laid = await layoutDiagram(fan);
+  const lefts = new Set(laid.nodes.filter((node) => node.id !== "hub").map((node) => node.position.x));
+  assert.equal(lefts.size, 1, `callees in one column share a left edge, got ${[...lefts]}`);
+})();

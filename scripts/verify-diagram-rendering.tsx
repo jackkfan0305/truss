@@ -10,7 +10,9 @@ import { CanvasNodeRenderer } from "../components/canvas/canvas-node";
 import { getAwsCatalogEntry } from "../lib/aws-catalog";
 import { awsNode } from "./testing/aws-diagram-fixtures";
 import { useEffect } from "react";
-import { CanvasEdgeRenderer } from "../components/canvas/canvas-edge";
+import { CanvasEdgeRenderer, USES_EDGE_DASH } from "../components/canvas/canvas-edge";
+import { activeCodeBlock, setHoveredCodeBlock, setPinnedCodeBlock, unpinCodeBlock } from "../components/canvas/code-hover";
+import { arrowCardSide, isInsideModule, quietCardSide } from "../lib/code-card";
 import { CanvasEdgeRouteProvider } from "../components/canvas/canvas-edge-routes";
 import { parseCanvasSnapshot, serializeCanvasSnapshot } from "../lib/canvas-snapshot";
 import { diagramGeometryKey } from "../lib/diagram-route";
@@ -92,6 +94,76 @@ async function checkAwsRendering() {
   await act(async () => { flowRoot.unmount(); });
 }
 
+async function checkCodeRendering() {
+  const codeNode = (id: string, data: Partial<CanvasNode["data"]>, size = { width: 220, height: 150 }): CanvasNode => ({
+    id, type: CANVAS_NODE_TYPE, position: { x: 0, y: 0 }, ...size,
+    data: { label: id, color: "neutral", shape: "rectangle", kind: "code", catalogId: "code-function", ...data },
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const flowRoot = createRoot(host);
+  const nodeTypes = { [CANVAS_NODE_TYPE]: CanvasNodeRenderer, [CANVAS_BOUNDARY_TYPE]: CanvasBoundaryRenderer };
+  const show = async (flowNodes: CanvasNode[]) => {
+    await act(async () => {
+      flowRoot.render(<div style={{ width: 1200, height: 800 }}><ReactFlow nodes={flowNodes} edges={[]} nodeTypes={nodeTypes} /></div>);
+    });
+  };
+  const rendered = (id: string) => host.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
+
+  // Signature, rows and a GitHub source link.
+  await show([codeNode("reserve", {
+    signature: "reserve(sku, qty)", summary: "Holds stock for an order.", rows: ["items: OrderItem[]"],
+    source: { path: "lib/inventory.ts", line: 42, url: "https://github.com/o/r/blob/abc/lib/inventory.ts#L42" },
+  })]);
+  const linked = rendered("reserve").innerHTML;
+  assert.match(linked, /Holds stock for an order\./);
+  assert.match(linked, /reserve\(sku, qty\)/, "with no pseudocode card, the signature shows on the block");
+  assert.match(linked, /items: OrderItem\[\]/);
+  assert.match(linked, /href="https:\/\/github.com\/o\/r\/blob\/abc\/lib\/inventory.ts#L42"/);
+  assert.match(linked, /target="_blank"/);
+  assert.match(linked, /rel="noopener noreferrer"/);
+  assert.match(linked, /lib\/inventory.ts:42/);
+
+  // A URL that slipped past every other check still never becomes an anchor.
+  await show([codeNode("x", { source: { path: "a.ts", url: "javascript:alert(1)" } })]);
+  const hostileLink = rendered("x").innerHTML;
+  assert.doesNotMatch(hostileLink, /<a /);
+  assert.doesNotMatch(hostileLink, /javascript:/);
+  assert.ok([...rendered("x").querySelectorAll("button")].some((b) => b.textContent === "a.ts"));
+
+  // Copy fallback.
+  const copied: string[] = [];
+  Object.defineProperty(dom.window.navigator, "clipboard", { value: { writeText: async (text: string) => { copied.push(text); } }, configurable: true });
+  Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
+  await show([codeNode("y", { source: { path: "lib/a.ts", line: 3 } })]);
+  const copyButton = [...rendered("y").querySelectorAll("button")].find((b) => b.textContent === "lib/a.ts:3")!;
+  await act(async () => { copyButton.click(); });
+  assert.deepEqual(copied, ["lib/a.ts:3"]);
+  assert.ok(rendered("y").textContent?.includes("Copied"));
+
+  // Entry marker and code boundary.
+  await show([codeNode("main", { catalogId: "code-entry" }, { width: 220, height: 72 })]);
+  assert.ok(rendered("main").querySelector("[data-code-entry]"));
+  const classBoundary: CanvasNode = { id: "inv", type: CANVAS_BOUNDARY_TYPE, position: { x: 0, y: 0 }, width: 380, height: 240,
+    data: { label: "Inventory", color: "neutral", shape: "rectangle", kind: "boundary", catalogId: "code-class" } };
+  await show([classBoundary]);
+  assert.ok(rendered("inv").querySelector("[data-code-boundary]"));
+  assert.equal(rendered("inv").querySelector(".border-dashed"), null);
+  assert.equal(rendered("inv").textContent, "Inventory");
+  await show([awsNode("vpc", "boundary-vpc")]);
+  assert.ok(rendered("vpc").querySelector(".border-dashed"), "AWS boundaries unchanged");
+  await act(async () => { flowRoot.unmount(); });
+
+  // Edge kinds: only `uses` is dashed.
+  const dash = async (kind?: "calls" | "uses") => {
+    await act(async () => { root.render(<Diagram currentNodes={nodes} currentEdge={{ ...edge, data: { label: "", ...(kind ? { kind } : {}) } }} />); });
+    return rootElement.querySelector<SVGPathElement>(".react-flow__edge-path")!.style.strokeDasharray;
+  };
+  assert.equal(await dash("uses"), USES_EDGE_DASH);
+  assert.equal(await dash("calls"), "");
+  assert.equal(await dash(), "");
+}
+
 async function main() {
   await act(async () => { root.render(<Diagram currentNodes={nodes} />); });
   assert.equal(rootElement.querySelector(".react-flow__edge-path")?.getAttribute("d"), "M 180 40 L 300 40 L 300 100 L 480 100");
@@ -109,8 +181,43 @@ async function main() {
   await act(async () => { root.render(<Diagram currentNodes={nodes} currentEdge={{ ...edge, data: { ...edge.data, label: "Changed" } }} />); });
   assert.notEqual(rootElement.querySelector(".react-flow__edge-path")?.getAttribute("d"), "M 180 40 L 300 40 L 300 100 L 480 100");
   await checkAwsRendering();
+  await checkCodeRendering();
   await act(async () => { root.unmount(); });
   dom.window.close();
   console.log("Diagram rendering verification passed.");
 }
 void main();
+
+// The pseudocode card opens away from the blocks its lit edges lead to.
+{
+  const block = { x: 0, y: 0, width: 100, height: 50 };
+  const at = (x: number, y: number) => ({ x, y, width: 100, height: 50 });
+  assert.equal(quietCardSide(block, []), "right");
+  assert.equal(quietCardSide(block, [at(300, 0), at(300, 200)]), "left", "callees on the right");
+  assert.equal(quietCardSide(block, [at(-300, 0)]), "right", "a caller on the left");
+  assert.equal(quietCardSide(block, [at(300, 0), at(-300, 0), at(0, 200)]), "top", "both sides and below");
+}
+
+// Module hover keeps blocks nested at any depth lit, and nothing outside.
+{
+  const parents: Record<string, string | undefined> = { method: "class", class: "module", other: undefined };
+  const parentOf = (id: string) => parents[id];
+  assert.ok(isInsideModule("method", "module", parentOf), "nested two deep");
+  assert.ok(!isInsideModule("other", "module", parentOf), "outside");
+  assert.ok(!isInsideModule("module", "class", parentOf), "a parent is not inside its child");
+}
+
+// Pinning: keys act on the hovered card first, then the pinned one; arrows map to sides.
+{
+  setPinnedCodeBlock("a");
+  assert.equal(activeCodeBlock(), "a", "the pinned card is active with nothing hovered");
+  setHoveredCodeBlock("b", true);
+  assert.equal(activeCodeBlock(), "b", "a hovered card takes the keys");
+  setHoveredCodeBlock("b", false);
+  assert.equal(activeCodeBlock(), "a");
+  unpinCodeBlock("b");
+  assert.equal(activeCodeBlock(), "a", "another block unmounting keeps the pin");
+  unpinCodeBlock("a");
+  assert.equal(activeCodeBlock(), null);
+  assert.deepEqual(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "x"].map(arrowCardSide), ["left", "right", "top", "bottom", null]);
+}

@@ -1980,3 +1980,36 @@ result is observed.
   missing generated Prisma client errors remain) and eslint on touched files
   pass. Not run: `npm test` as a whole, build, `verify:integration`, and the
   plan's browser checks (no signed-in session).
+
+## Code diagrams
+
+Shipped on the `code-diagrams` branch. The terminal agent can draw a codebase as entry points, functions, classes with methods, and types, joined in call order.
+
+- `lib/code-catalog.ts` holds the seven code entries and `isGithubSourceUrl`. `lib/catalog.ts` combines it with `AWS_CATALOG`. `GET /api/agent/catalog` returns both, tagged by `family`. `truss_get_catalog` (MCP) and `get_catalog` (browser) replace the AWS-only tools.
+- The v2 graph gained the `code` node kind, `signature`, `rows`, `source` and edge `kind`. Version 2 limits are 80 nodes and 120 edges. Fields round-trip through snapshot parse, projection, fingerprint and diff. A method outside a class reads as opaque.
+- Canvas: `CodeBlockRenderer`, the code boundary look, dashed `uses` edges, and a Code tab in the dock (`code-panel.tsx`, `buildCatalogNode` in `lib/canvas-drag.ts`).
+- Skill: `references/code-diagrams.md` covers zoom level, reading depth, source links and limits. The browser assistant names the skill instead of generating code diagrams.
+- Tests: `verify-catalog.ts`, `verify-section-dock.tsx` (renamed from the AWS-only scripts), plus code cases in the v2, rendering, layout, assistant and skill verifiers. An 80-node detail layout takes about 50ms.
+- Deferred: hand editing of signature, rows and source; re-sync when the code changes; non-GitHub hosts.
+- Not run in this session: the live check with the MCP server and browser.
+
+### Code diagram readability — 2026-10-07
+
+- Code nodes take an optional `summary` (one line, at most 100 characters) on what the code does. It renders under the name, clamped to two lines, and the skill asks for it on entries, functions and methods.
+- Layout for graphs with code nodes (`CODE_LAYOUT_OPTIONS` in `lib/diagram-elk-graph.ts`): edge labels sit at the head beside the callee instead of inline in the trunk, and each incoming edge gets its own port on the handle point so two callers of one callee no longer share a trunk. Direction stays RIGHT; DOWN routed edges through module title bars.
+- Code nodes are sized from summary, signature, rows and source (`codeNodeSize`), not the label alone.
+- The skill now asks for short edge labels without step numbers.
+- Code nodes also take `pseudocode` (at most 16 lines of 80 characters, leading spaces kept for indentation). Hovering the block opens it in a card to the right (`HoverCard` in `code-block.tsx`). The MCP tool descriptions now ask for `summary` and `pseudocode` on every entry, function and method, since agents skipped the optional `summary` when only the skill docs asked for it.
+- Long code block names wrap; `codeNodeSize` counts their lines.
+- Hovering a code block with pseudocode opens the card after 250ms, matching the approved artifact: the block lifts with an accent border, the card unblurs in with its lines staggered 25ms, and the full signature sits above the pseudocode. Edges into and out of that block turn the accent colour while every other edge fades to 0.2 (`code-hover.ts`, read by `canvas-edge.tsx`).
+- The accent changed from electric lime to periwinkle `#7b8ff5` (6.8:1 against `--bg-base`).
+- The signature moved off the block into the hover card, and the summary may run to three lines. The skill asks for signatures that end in the return type, and for pseudocode that writes `calls x(args), gets <name>` and then refers to `<name>` in later steps.
+- Code types and enums: the skill draws one only when a function's signature or pseudocode names it, gives every naming function a `uses` edge to it, and keeps types in boundaries (such as `Types`) that hold nothing else. `validateCodeTypes` in the skill's `core.mjs` refuses graphs that break any of the three rules.
+- Field types are followed down to built-ins: a drawn type whose field uses another codebase type (`side: EdgeSide`) needs that type drawn with a `uses` edge from it. `BUILTIN_TYPES` in `core.mjs` lists the standard names (TypeScript, Python, Rust, Java) that end the chain.
+- `straightenRoutes` in `lib/diagram-layout.ts` runs after ELK on every layout: an edge whose ends leave and arrive horizontally collapses to a straight line or one vertical run when that misses every block, boundary title and other caller's line. On the layoutDiagram detail diagrams it cut bends from 68 to 58 and from 138 to 110. ELK's own placement options (Brandes-Köpf, favour-straight-edges, linear segments, thoroughness) changed bends by under 10%, so they stay as they were.
+- Code module boundaries read as recessed trays (`.code-module` in `app/globals.css`): a translucent tint, an inner shadow, a bright 1.5px rim, a drop shadow and a `bg-subtle` title bar. AWS and generic boundaries are unchanged.
+- Blocks and boundaries carry `elk.alignment: LEFT`, so a column of different-width blocks shares one left edge. On the layoutDiagram detail diagram this took ragged columns from 6 to 0 with no change in bends; CENTER and RIGHT left 4 and 3.
+- Hovering a code module (when no block in it is hovered) keeps everything inside it lit, lights every edge with an end inside it, and fades other code blocks and modules to 0.3 and other edges to 0.2. A hovered block takes precedence over its module.
+- While a pseudocode card shows, P pins it open (it and its edges stay lit after the pointer leaves), Esc or P unpins, and the arrow keys move it to that side of the block. Keys go to the hovered card first, then the pinned one, and are captured before React Flow's arrow-key nudging.
+- A pinned card moves out of the screen-space popup into React Flow's `ViewportPortal`, placed beside its block in canvas coordinates, so it pans and zooms with the diagram instead of sliding after the block. It can be resized from its bottom-right corner (CSS `resize: both`, min 220×96, lines wrap to fit).
+- Review fixes: a code block unmounting clears the pin only when it holds it (`unpinCodeBlock`). The copy button says "Copied" only after a successful clipboard write. A block without pseudocode shows its signature again. The hover card geometry (`quietCardSide`, `isInsideModule`, `arrowCardSide`) moved to `lib/code-card.ts`. The source URL limit is `MAX_CODE_SOURCE_URL_LENGTH`.

@@ -6,8 +6,8 @@ import {
   createAssistantTools,
   type AssistantFetch,
 } from "../lib/assistant-tools";
-import { canvasFingerprint, canvasToAgentGraph } from "../lib/agent-graph";
-import { AWS_CATALOG } from "../lib/aws-catalog";
+import { canvasFingerprint, canvasToAgentGraph, materializeAgentGraph } from "../lib/agent-graph";
+import { CATALOG_ENTRIES } from "../lib/catalog";
 import { buildDiagramSpatialContext } from "../lib/diagram-spatial-context";
 import { nestedSnapshot } from "./testing/aws-diagram-fixtures";
 
@@ -169,9 +169,9 @@ async function main() {
 
   // catalog
   {
-    const response = { catalogVersion: 1, entries: AWS_CATALOG };
+    const response = { catalogVersion: 1, entries: CATALOG_ENTRIES };
     const { fetch, calls } = stubFetch([[200, response]]);
-    assert.deepEqual(await createAssistantActions({ fetch }).getAwsCatalog(), response);
+    assert.deepEqual(await createAssistantActions({ fetch }).getCatalog(), response);
     assert.equal(calls[0].input, "/api/agent/catalog");
     assert.equal(calls[0].method, "GET");
   }
@@ -292,6 +292,41 @@ async function checkNested() {
     assert.equal(calls.length, 0);
   }
 
+  // a read code graph goes back through an edit with only a label changed, keeping every code field
+  {
+    const codeGraph = {
+      version: 2 as const,
+      nodes: [
+        { id: "checkout", kind: "code" as const, catalogId: "code-entry", label: "checkout", signature: "checkout(req)",
+          source: { path: "app/route.ts", line: 12, url: "https://github.com/o/r/blob/abc/app/route.ts#L12" } },
+        { id: "inventory", kind: "boundary" as const, catalogId: "code-class", label: "Inventory" },
+        { id: "reserve", kind: "code" as const, catalogId: "code-method", label: "reserve", parentId: "inventory" },
+        { id: "order", kind: "code" as const, catalogId: "code-type", label: "Order", rows: ["id: string"] },
+      ],
+      edges: [
+        { id: "a", source: "checkout", target: "reserve", label: "", kind: "calls" as const },
+        { id: "b", source: "reserve", target: "order", label: "", kind: "uses" as const },
+      ],
+    };
+    const read = canvasToAgentGraph(materializeAgentGraph(codeGraph), 2).graph;
+    const renamed = { ...read, nodes: read.nodes.map((n) => (n.id === "order" ? { ...n, label: "Purchase" } : n)) };
+    const { fetch, calls } = stubFetch([[200, { applied: true }]]);
+    const result = await createAssistantActions({ fetch }).applyDiagramEdit({ diagramId: "c-1", fingerprint: "a".repeat(64), graph: renamed });
+    assert.ok("applied" in result, JSON.stringify(result));
+    const posted = (calls[0].body as { graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } }).graph;
+    assert.equal(posted.nodes.find((n) => n.id === "checkout")!.signature, "checkout(req)");
+    assert.deepEqual(posted.nodes.find((n) => n.id === "checkout")!.source, codeGraph.nodes[0].source);
+    assert.deepEqual(posted.nodes.find((n) => n.id === "order")!.rows, ["id: string"]);
+    assert.equal(posted.edges.find((e) => e.id === "b")!.kind, "uses");
+
+    // a hostile source URL never reaches the network
+    const none = stubFetch([]);
+    const hostile = { ...codeGraph, nodes: [{ ...codeGraph.nodes[0], source: { path: "a.ts", url: "javascript:x" } }, ...codeGraph.nodes.slice(1)] };
+    const refused = await createAssistantActions({ fetch: none.fetch }).applyDiagramEdit({ diagramId: "c-1", fingerprint: "a".repeat(64), graph: hostile });
+    assert.ok("error" in refused && refused.error.includes("source.url"), JSON.stringify(refused));
+    assert.equal(none.calls.length, 0);
+  }
+
   // the model-visible schema accepts nested input and lets unknown keys through to strict validation
   {
     const tools = createAssistantTools(createAssistantActions({ fetch: stubFetch([]).fetch }));
@@ -304,6 +339,7 @@ async function checkNested() {
       graph: { ...nestedGraph, nodes: [{ ...nestedGraph.nodes[0], iconUrl: "x" }] },
     });
     assert.ok(loose.success && "iconUrl" in loose.data!.graph.nodes[0]);
-    assert.ok("get_aws_catalog" in tools);
+    assert.ok("get_catalog" in tools);
+    assert.equal("get_aws_catalog" in tools, false);
   }
 }

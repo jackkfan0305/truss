@@ -17,12 +17,6 @@ export interface AwsCatalogEntry {
   readonly defaultSize: { readonly width: number; readonly height: number };
 }
 
-/** Body of `GET /api/agent/catalog`, the public metadata both agent clients read. */
-export interface AwsCatalogResponse {
-  readonly catalogVersion: 1;
-  readonly entries: readonly AwsCatalogEntry[];
-}
-
 const serviceSize = { width: 180, height: 100 };
 const boundarySize = { width: 400, height: 240 };
 

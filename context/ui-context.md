@@ -2,7 +2,7 @@
 
 ## Theme
 
-Dark only. No light mode. The visual language is monotone graphite with one accent. The neutrals are a single OKLCH ramp (hue 264, chroma 0.004) defined in `app/globals.css`, evenly spaced in lightness from page to primary text. Electric lime `--accent-primary` (#b1ef4a, `oklch(0.88 0.2 128)`) is the only accent, with `--bg-base` text on it: focus rings, primary actions, selection and every AI state (`--accent-ai` points at it). Node colours, AWS icons and status colours are content, not accents.
+Dark only. No light mode. The visual language is monotone graphite with one accent. The neutrals are a single OKLCH ramp (hue 264, chroma 0.004) defined in `app/globals.css`, evenly spaced in lightness from page to primary text. Periwinkle `--accent-primary` (#7b8ff5, `oklch(0.69 0.14 275)`) is the only accent, with `--bg-base` text on it: focus rings, primary actions, selection and every AI state (`--accent-ai` points at it). Node colours, AWS icons and status colours are content, not accents.
 
 Signed-out storyboard builders show a `Sign in to save` action in the top-right
 of the page. The user can keep building without signing in. If sign-in is
@@ -74,6 +74,8 @@ Radius increases with surface depth — smaller for inner elements, larger for o
 | Cards / panels    | `rounded-2xl` |
 | Modal / overlay   | `rounded-3xl` |
 
+Diagram blocks on the canvas (generic, AWS and code) use `rounded-md`, so a block reads as a diagram shape rather than a UI card. Notes use 4px. The code block source line and other tiny canvas labels use `text-[11px]`.
+
 ## Canvas
 
 ### Node Color Palette
@@ -111,6 +113,10 @@ Smooth-step path with an arrow marker. Default edge color: `--canvas-edge`, whic
 ### AWS Blocks and Boundaries
 
 AWS service blocks are a rectangular elevated surface with the local catalog icon in its official colours above an editable name. They get no colour toolbar, since icon colours are fixed. Boundaries are a dashed `copy-muted` outline with a transparent interior; the icon and title sit in a patch of the page background (`bg-page`) straddling the top edge. Both use the standard four connection handles. A failed icon load shows the catalog name as text. Workspace controls (the bottom dock's AWS section) keep the monochrome palette styling.
+
+### Code Blocks and Boundaries
+
+A code block is an elevated rectangle with the catalog icon and an editable name, then the summary, then the field rows of a type or enum in monospace `text-xs` (the signature shows here too when the block has no pseudocode; otherwise it sits in the hover card), then a muted `path:line` line at the bottom. With a pinned GitHub URL the source line is a link that opens a new tab; without one it is a button that copies `path:line` and shows "Copied" for 1.5 seconds. With no clipboard or a refused write it keeps showing the path. An entry point has a lime left border and a `data-code-entry` marker. A code boundary (`code-class`, `code-module`) is a thin solid outline with a monospace header strip holding the icon and title, instead of the dashed AWS look. A `uses` edge is dashed (`6 4`); `calls` and unkinded edges stay solid. The dock's Code tab lists the seven code catalog entries with search and no category chips. The tab places blocks by click or drag; signature, rows and source are written only by the terminal agent.
 
 ### Sticky Notes
 

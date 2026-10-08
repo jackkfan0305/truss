@@ -47,6 +47,7 @@ const isBoundary = (node: CanvasNode): boolean => node.type === "canvasBoundary"
  * grown by this.
  */
 export function nodeSize(node: CanvasNode): DiagramLayoutSize {
+  if (node.data.kind === "code") return codeNodeSize(node);
   const fallback = NODE_DEFAULT_SIZES[node.data.shape];
   const textWidth = Math.max(...node.data.label.split("\n").map((line) => line.length * NODE_TEXT_CHARACTER_WIDTH), 0);
   const shapePadding = node.data.shape === "diamond" || node.data.shape === "circle" ? 2 : 1;
@@ -56,6 +57,30 @@ export function nodeSize(node: CanvasNode): DiagramLayoutSize {
   const lines = node.data.label.split("\n").reduce((count, line) => count + Math.max(1, Math.ceil(line.length * NODE_TEXT_CHARACTER_WIDTH / usableWidth)), 0);
   const height = Math.ceil(Math.max(fallback.height, node.height ?? 0, lines * NODE_LINE_HEIGHT * shapePadding + 32));
   return node.data.shape === "circle" ? { width: Math.max(width, height), height: Math.max(width, height) } : { width, height };
+}
+
+const CODE_MONO_CHARACTER_WIDTH = 7;
+const CODE_SMALL_CHARACTER_WIDTH = 6.5;
+const CODE_MAX_WIDTH = 340;
+
+/** Code blocks stack name, summary, rows and source; size for all of them. The signature shows only on hover. */
+function codeNodeSize(node: CanvasNode): DiagramLayoutSize {
+  const fallback = NODE_DEFAULT_SIZES[node.data.shape];
+  const { label, summary, rows = [], source } = node.data;
+  const sourceText = source ? `${source.path}:${source.line ?? ""}` : "";
+  const textWidth = Math.max(
+    label.length * NODE_TEXT_CHARACTER_WIDTH + 24,
+    ...rows.map((line) => line.length * CODE_MONO_CHARACTER_WIDTH),
+    sourceText.length * CODE_SMALL_CHARACTER_WIDTH,
+    summary ? Math.min(summary.length, 40) * CODE_SMALL_CHARACTER_WIDTH : 0,
+  );
+  const width = Math.ceil(Math.min(CODE_MAX_WIDTH, Math.max(fallback.width, node.width ?? 0, textWidth + 24)));
+  // The summary wraps to at most three lines; the renderer clamps it the same way.
+  const summaryLines = summary ? Math.min(3, Math.ceil(summary.length * CODE_SMALL_CHARACTER_WIDTH / (width - 24))) : 0;
+  // Long names wrap instead of clipping, so count their lines too.
+  const labelLines = Math.ceil(label.length * NODE_TEXT_CHARACTER_WIDTH / (width - 48));
+  const lines = labelLines + summaryLines + rows.length + (source ? 1 : 0);
+  return { width, height: Math.ceil(Math.max(fallback.height, node.height ?? 0, lines * 18 + 24)) };
 }
 
 /**
@@ -76,7 +101,7 @@ export function diagramLayoutSizes(snapshot: CanvasSnapshot): Map<string, Diagra
     isBoundary(node) ? boundaryMinimumSize(node, parents.has(node.id)) : nodeSize(node)]));
 }
 
-export function edgeLabels(edge: CanvasEdge): ElkLabel[] {
+export function edgeLabels(edge: CanvasEdge, placement: "CENTER" | "HEAD" = "CENTER"): ElkLabel[] {
   const text = edge.data?.label ?? "";
   if (!text) return [];
   const capacity = Math.floor((DIAGRAM_LABEL_WIDTH - DIAGRAM_LABEL_PADDING * 2) / EDGE_TEXT_CHARACTER_WIDTH);
@@ -93,7 +118,7 @@ export function edgeLabels(edge: CanvasEdge): ElkLabel[] {
   const width = Math.min(DIAGRAM_LABEL_WIDTH, text.length * EDGE_TEXT_CHARACTER_WIDTH + DIAGRAM_LABEL_PADDING * 2);
   return [{ id: `label:${edge.id}`, text, width,
     height: lines * DIAGRAM_LABEL_LINE_HEIGHT + DIAGRAM_LABEL_PADDING,
-    layoutOptions: { "elk.edgeLabels.placement": "CENTER" } }];
+    layoutOptions: { "elk.edgeLabels.placement": placement } }];
 }
 
 const LAYOUT_OPTIONS: Record<string, string> = {
@@ -111,6 +136,23 @@ const LAYOUT_OPTIONS: Record<string, string> = {
   "elk.layered.edgeLabels.inline": "true",
   "elk.spacing.componentComponent": "80",
 };
+
+/**
+ * Call graphs fan out from a few hubs. Head labels sit beside the callee they
+ * describe instead of stacking as dummy nodes in the hub's trunk. Direction
+ * stays RIGHT: top-down routes edges into a module through its title bar.
+ */
+const CODE_LAYOUT_OPTIONS: Record<string, string> = {
+  "elk.layered.edgeLabels.inline": "false",
+  "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+};
+
+/**
+ * Every block and boundary hugs the left edge of its layer, so blocks in one
+ * column share a left edge instead of drifting with their widths. Edges enter
+ * on the left, so this costs no extra bends (measured on a 39-block diagram).
+ */
+const NODE_ALIGNMENT = { "elk.alignment": "LEFT" };
 
 const PORT_SIDES: Record<EdgeSide, string> = { top: "NORTH", right: "EAST", bottom: "SOUTH", left: "WEST" };
 
@@ -142,13 +184,22 @@ export function buildDiagramElkGraph(
   sides: ReadonlyMap<string, DiagramEdgeSides> | null,
   rootPadding: DiagramRootPadding = DEFAULT_ROOT_PADDING,
 ): ElkNode {
-  const used = new Map<string, Set<EdgeSide>>();
+  // ELK routes every edge on one port as a single hyperedge, so two callers of
+  // one callee would merge into one trunk and hide who calls what. Code diagrams
+  // give each incoming edge its own port on the same handle point; a caller's
+  // outgoing edges still share a trunk, which reads as one tree.
+  const code = snapshot.nodes.some((node) => node.data.kind === "code");
+  const portId = (nodeId: string, side: EdgeSide, edgeId: string | null): string =>
+    code && edgeId ? `${diagramPortId(nodeId, side)}\u0000${edgeId}` : diagramPortId(nodeId, side);
+  const used = new Map<string, Map<string, EdgeSide>>();
+  const addPort = (nodeId: string, side: EdgeSide, edgeId: string | null) =>
+    (used.get(nodeId) ?? used.set(nodeId, new Map()).get(nodeId)!).set(portId(nodeId, side, edgeId), side);
   if (sides) {
     for (const edge of snapshot.edges) {
       const chosen = sides.get(edge.id);
       if (!chosen) continue;
-      (used.get(edge.source) ?? used.set(edge.source, new Set()).get(edge.source)!).add(chosen.source);
-      (used.get(edge.target) ?? used.set(edge.target, new Set()).get(edge.target)!).add(chosen.target);
+      addPort(edge.source, chosen.source, null);
+      addPort(edge.target, chosen.target, edge.id);
     }
   }
 
@@ -168,6 +219,7 @@ export function buildDiagramElkGraph(
       return {
         id: node.id, ...size,
         layoutOptions: {
+          ...NODE_ALIGNMENT,
           "elk.padding": pad(BOUNDARY_PADDING_BOX),
           "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
           "elk.nodeSize.minimum": `(${size.width},${size.height})`,
@@ -175,13 +227,13 @@ export function buildDiagramElkGraph(
         children: [...(childrenOf.get(node.id) ?? [])].sort(compareIds).map((child) => build(child, depth + 1)),
       };
     }
-    const ports = [...(used.get(node.id) ?? [])].sort();
-    if (!ports.length) return { id: node.id, ...size };
+    const ports = [...(used.get(node.id) ?? [])].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (!ports.length) return { id: node.id, ...size, layoutOptions: NODE_ALIGNMENT };
     return {
       id: node.id, ...size,
-      layoutOptions: { "elk.portConstraints": "FIXED_POS" },
-      ports: ports.map((side) => ({
-        id: diagramPortId(node.id, side), width: 0, height: 0,
+      layoutOptions: { ...NODE_ALIGNMENT, "elk.portConstraints": "FIXED_POS" },
+      ports: ports.map(([id, side]) => ({
+        id, width: 0, height: 0,
         layoutOptions: { "elk.port.side": PORT_SIDES[side] },
         ...portOffset(size, side),
       })),
@@ -193,6 +245,7 @@ export function buildDiagramElkGraph(
     id: rootId,
     layoutOptions: {
       ...LAYOUT_OPTIONS,
+      ...(code ? CODE_LAYOUT_OPTIONS : {}),
       "elk.padding": pad(rootPadding),
       "elk.separateConnectedComponents": nested ? "false" : "true",
       ...(nested ? { "elk.hierarchyHandling": "INCLUDE_CHILDREN" } : {}),
@@ -203,9 +256,9 @@ export function buildDiagramElkGraph(
       const portable = (id: string) => !compound.has(id) && !(byId.get(id) && isBoundary(byId.get(id)!));
       return {
         id: edge.id,
-        sources: [chosen && portable(edge.source) ? diagramPortId(edge.source, chosen.source) : edge.source],
-        targets: [chosen && portable(edge.target) ? diagramPortId(edge.target, chosen.target) : edge.target],
-        labels: edgeLabels(edge),
+        sources: [chosen && portable(edge.source) ? portId(edge.source, chosen.source, null) : edge.source],
+        targets: [chosen && portable(edge.target) ? portId(edge.target, chosen.target, edge.id) : edge.target],
+        labels: edgeLabels(edge, code ? "HEAD" : "CENTER"),
       };
     }),
   };

@@ -10,6 +10,7 @@ import {
 
 import { AwsIcon } from "@/components/canvas/aws-icon";
 import { CanvasLabel } from "@/components/canvas/canvas-label";
+import { CodeBlockRenderer } from "@/components/canvas/code-block";
 import { useIsAgentEditing } from "@/components/canvas/agent-presence";
 import { useIsFreshArrival } from "@/components/canvas/canvas-motion-context";
 import { NodeColorToolbar } from "@/components/canvas/node-color-toolbar";
@@ -89,6 +90,7 @@ function NodeResizeFrame({ accent }: { accent: string }) {
  * every change lands in the stored snapshot via `onNodesChange`.
  */
 export function CanvasNodeRenderer(props: NodeProps<CanvasNode>) {
+  if (props.data.kind === "code" && props.data.catalogId) return <CodeBlockRenderer {...props} />;
   return props.data.kind === "aws-service" && props.data.catalogId ? (
     <AwsServiceRenderer {...props} />
   ) : (

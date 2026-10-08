@@ -6,7 +6,7 @@ import {
   agentGraphInputUnionSchema,
   agentGraphModelSchema,
 } from "@/lib/agent-graph-schema";
-import type { AwsCatalogResponse } from "@/lib/aws-catalog";
+import type { CatalogResponse } from "@/lib/catalog";
 import { buildRoomId, createRoomIdSuffix } from "@/lib/room-id";
 
 const NOTE_GUIDELINE =
@@ -51,7 +51,7 @@ export interface AssistantGraphView {
 
 export interface AssistantActions {
   listDiagrams(): Promise<{ diagrams: { id: string; name: string }[] } | ErrorResult>;
-  getAwsCatalog(): Promise<AwsCatalogResponse | ErrorResult>;
+  getCatalog(): Promise<CatalogResponse | ErrorResult>;
   getDiagram(input: {
     diagramId: string;
     signal?: AbortSignal;
@@ -162,10 +162,10 @@ export function createAssistantActions(
       };
     },
 
-    async getAwsCatalog() {
+    async getCatalog() {
       const result = await call("/api/agent/catalog", { method: "GET" });
       if (result.status !== 200 || !result.body) return failure(result.body);
-      return result.body as unknown as AwsCatalogResponse;
+      return result.body as unknown as CatalogResponse;
     },
 
     async getDiagram({ diagramId, signal }) {
@@ -236,11 +236,11 @@ export function createAssistantTools(actions: AssistantActions) {
       inputSchema: z.object({}),
       execute: () => actions.listDiagrams(),
     }),
-    get_aws_catalog: tool({
+    get_catalog: tool({
       description:
-        "Read the AWS catalog: every service and boundary id with its description, aliases and category. Use it to pick catalogId values for graph version 2.",
+        "Read the block catalog: every AWS service and boundary and every code block and boundary, tagged by family, with descriptions and aliases. Use it to pick catalogId values for graph version 2.",
       inputSchema: z.object({}),
-      execute: () => actions.getAwsCatalog(),
+      execute: () => actions.getCatalog(),
     }),
     get_diagram: tool({
       description:

@@ -9,6 +9,9 @@ Truss runs no model of its own for drawing. The agent in your terminal does the 
 
 **Live:** <https://truss-jet.vercel.app>
 
+<img width="1284" height="864" alt="image" src="https://github.com/user-attachments/assets/ca2c8a11-38fe-4952-94fe-78b39e7c9a9b" />
+
+
 ## What agents can draw
 
 - **System designs:** services, stores and queues, with AWS icons and nested boundaries (VPCs, subnets, accounts).
